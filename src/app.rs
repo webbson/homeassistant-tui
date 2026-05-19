@@ -8,8 +8,9 @@ use crossterm::event::{
     MouseEventKind,
 };
 use futures::StreamExt;
+use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Rect;
-use ratatui::DefaultTerminal;
+use ratatui::Terminal;
 use tokio::sync::mpsc;
 use tracing::{error, info};
 
@@ -1647,13 +1648,11 @@ fn mouse_to_cell(area: Rect, dash: &Dashboard, mx: u16, my: u16) -> Option<(u16,
 }
 
 pub async fn run(
-    mut terminal: DefaultTerminal,
+    mut terminal: Terminal<CrosstermBackend<std::io::Stdout>>,
     config_path: Option<PathBuf>,
     dashboards_path: Option<PathBuf>,
 ) -> Result<()> {
     info!("starting ha-tui");
-    // Enable mouse capture (crossterm)
-    crossterm::execute!(std::io::stdout(), crossterm::event::EnableMouseCapture)?;
 
     let (tx, mut rx) = mpsc::unbounded_channel::<AppEvent>();
     let mut app = App::new(tx.clone());
@@ -1706,7 +1705,6 @@ pub async fn run(
     }
     .await;
 
-    let _ = crossterm::execute!(std::io::stdout(), crossterm::event::DisableMouseCapture);
     info!("ha-tui exiting cleanly");
     result
 }
