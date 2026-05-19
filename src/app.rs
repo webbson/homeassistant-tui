@@ -692,63 +692,6 @@ impl App {
             KeyCode::Char('m') | KeyCode::Char('M') => {
                 self.open_menu();
             }
-            KeyCode::Char('R') => {
-                editor.mode = EditorMode::Renaming {
-                    buffer: dash.name.clone(),
-                };
-            }
-            KeyCode::Char('G') => {
-                editor.mode = EditorMode::ResizingGrid {
-                    cols_buffer: dash.grid.cols.to_string(),
-                    rows_buffer: dash.grid.rows.to_string(),
-                    focus_rows: false,
-                };
-            }
-            KeyCode::Char('W') => {
-                if let Some(idx) = editor.selected_card {
-                    if let Some(card) = dash.cards.get(idx) {
-                        if let crate::dashboard::CardKind::Sparkline { window, .. } = &card.kind {
-                            editor.mode = EditorMode::EditingWindow {
-                                card_idx: idx,
-                                buffer: window.clone(),
-                            };
-                        } else {
-                            self.last_error = Some("W only works on sparkline cards".into());
-                        }
-                    }
-                } else {
-                    self.last_error = Some("no card selected — press Enter on a card first".into());
-                }
-            }
-            KeyCode::Char('T') => {
-                if let Some(idx) = editor.selected_card {
-                    let current = dash
-                        .cards
-                        .get(idx)
-                        .and_then(|c| match &c.kind {
-                            crate::dashboard::CardKind::Entity { title, .. }
-                            | crate::dashboard::CardKind::Toggle { title, .. }
-                            | crate::dashboard::CardKind::Gauge { title, .. }
-                            | crate::dashboard::CardKind::Sparkline { title, .. }
-                            | crate::dashboard::CardKind::Text { title, .. }
-                            | crate::dashboard::CardKind::EntityList { title, .. } => title.clone(),
-                        })
-                        .unwrap_or_default();
-                    editor.mode = EditorMode::RenamingCard {
-                        card_idx: idx,
-                        buffer: current,
-                    };
-                } else {
-                    self.last_error = Some("no card selected — press Enter on a card first".into());
-                }
-            }
-            KeyCode::Char('C') => {
-                if let Some(idx) = editor.selected_card {
-                    self.change_card_entity(idx);
-                } else {
-                    self.last_error = Some("no card selected — press Enter on a card first".into());
-                }
-            }
             KeyCode::Char('d') => {
                 if editor.selected_card.is_some() {
                     editor.mode = EditorMode::ConfirmDelete;
