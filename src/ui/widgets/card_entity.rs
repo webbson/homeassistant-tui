@@ -26,13 +26,10 @@ pub fn render(
     let body = match state {
         None => Line::from(Span::styled("(unknown)", Style::new().fg(Color::DarkGray))),
         Some(s) => {
-            let unit = s
-                .attributes
-                .get("unit_of_measurement")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
+            let unit = crate::ui::format::unit_of(s);
+            let value = crate::ui::format::format_state(s, 1);
             Line::from(vec![
-                Span::styled(s.state.clone(), Style::new().bold()),
+                Span::styled(value, Style::new().bold()),
                 Span::raw(" "),
                 Span::styled(unit.to_string(), Style::new().dim()),
             ])

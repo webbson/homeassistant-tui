@@ -24,10 +24,13 @@ pub fn render(
         Some(v) if max > min => ((v - min) / (max - min)).clamp(0.0, 1.0),
         _ => 0.0,
     };
-    let label = match (value, unit) {
-        (Some(v), Some(u)) => format!("{v:.1} {u}"),
-        (Some(v), None) => format!("{v:.1}"),
-        (None, _) => "—".into(),
+    let formatted = state.map(|s| crate::ui::format::format_state(s, 1));
+    let entity_unit = state.map(crate::ui::format::unit_of).unwrap_or("");
+    let unit_str = unit.unwrap_or(entity_unit);
+    let label = match formatted {
+        Some(v) if !unit_str.is_empty() => format!("{v} {unit_str}"),
+        Some(v) => v,
+        None => "—".into(),
     };
     let mut block = Block::bordered()
         .title(format!(" {title} "))
