@@ -532,6 +532,37 @@ impl App {
                 }
                 return;
             }
+            EditorMode::Menu {
+                items, selected, ..
+            } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        if *selected > 0 {
+                            *selected -= 1;
+                        }
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        if *selected + 1 < items.len() {
+                            *selected += 1;
+                        }
+                    }
+                    KeyCode::Enter => {
+                        let Some(item) = items.get(*selected).cloned() else {
+                            return;
+                        };
+                        let ctx = match &editor.mode {
+                            EditorMode::Menu { context, .. } => *context,
+                            _ => return,
+                        };
+                        // Drop the &mut editor borrow before dispatching.
+                        editor.mode = EditorMode::Browse;
+                        self.dispatch_menu_action(item.action, ctx);
+                    }
+                    _ => {}
+                }
+                return;
+            }
             EditorMode::EditingWindow { card_idx, buffer } => {
                 match k.code {
                     KeyCode::Esc => editor.mode = EditorMode::Browse,
@@ -658,6 +689,9 @@ impl App {
             }
             KeyCode::Char(' ') => editor.select_at_cursor(dash),
             KeyCode::Char('a') => editor.mode = EditorMode::PickingType,
+            KeyCode::Char('m') | KeyCode::Char('M') => {
+                self.open_menu();
+            }
             KeyCode::Char('R') => {
                 editor.mode = EditorMode::Renaming {
                     buffer: dash.name.clone(),
@@ -764,6 +798,129 @@ impl App {
             .or_else(crate::dashboard::persist::default_path);
         self.editor = Some(EditorState::new(idx, path));
         self.screen = Screen::Editor;
+    }
+
+    fn open_menu(&mut self) {
+        let Some(editor) = self.editor.as_mut() else {
+            return;
+        };
+        let dash_idx = editor.dash_idx;
+        let selected = editor.selected_card;
+        let Some(dash) = self.dashboards.get(dash_idx) else {
+            return;
+        };
+        let (context, items) = match selected.and_then(|i| dash.cards.get(i).map(|c| (i, c))) {
+            Some((idx, card)) => (
+                crate::dashboard::editor::MenuContext::Card(idx),
+                crate::dashboard::editor::card_menu_items(card),
+            ),
+            None => (
+                crate::dashboard::editor::MenuContext::Dashboard,
+                crate::dashboard::editor::dashboard_menu_items(),
+            ),
+        };
+        if let Some(ed) = self.editor.as_mut() {
+            ed.mode = EditorMode::Menu {
+                context,
+                items,
+                selected: 0,
+            };
+        }
+    }
+
+    fn dispatch_menu_action(
+        &mut self,
+        action: crate::dashboard::editor::MenuAction,
+        context: crate::dashboard::editor::MenuContext,
+    ) {
+        use crate::dashboard::editor::{MenuAction as A, MenuContext as C};
+        let editor_dash_idx = self.editor.as_ref().map(|e| e.dash_idx);
+        let Some(dash_idx) = editor_dash_idx else {
+            return;
+        };
+        match (action, context) {
+            (A::RenameCard, C::Card(idx)) => {
+                let current = self
+                    .dashboards
+                    .get(dash_idx)
+                    .and_then(|d| d.cards.get(idx))
+                    .and_then(|c| match &c.kind {
+                        crate::dashboard::CardKind::Entity { title, .. }
+                        | crate::dashboard::CardKind::Toggle { title, .. }
+                        | crate::dashboard::CardKind::Gauge { title, .. }
+                        | crate::dashboard::CardKind::Sparkline { title, .. }
+                        | crate::dashboard::CardKind::Text { title, .. }
+                        | crate::dashboard::CardKind::EntityList { title, .. } => title.clone(),
+                    })
+                    .unwrap_or_default();
+                if let Some(ed) = self.editor.as_mut() {
+                    ed.selected_card = Some(idx);
+                    ed.mode = EditorMode::RenamingCard {
+                        card_idx: idx,
+                        buffer: current,
+                    };
+                }
+            }
+            (A::ChangeEntity, C::Card(idx)) => {
+                if let Some(ed) = self.editor.as_mut() {
+                    ed.selected_card = Some(idx);
+                }
+                self.change_card_entity(idx);
+            }
+            (A::EditWindow, C::Card(idx)) => {
+                let current = self
+                    .dashboards
+                    .get(dash_idx)
+                    .and_then(|d| d.cards.get(idx))
+                    .and_then(|c| match &c.kind {
+                        crate::dashboard::CardKind::Sparkline { window, .. } => {
+                            Some(window.clone())
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| "1h".to_string());
+                if let Some(ed) = self.editor.as_mut() {
+                    ed.selected_card = Some(idx);
+                    ed.mode = EditorMode::EditingWindow {
+                        card_idx: idx,
+                        buffer: current,
+                    };
+                }
+            }
+            (A::DeleteCard, C::Card(idx)) => {
+                if let Some(ed) = self.editor.as_mut() {
+                    ed.selected_card = Some(idx);
+                    ed.mode = EditorMode::ConfirmDelete;
+                }
+            }
+            (A::RenameDashboard, C::Dashboard) => {
+                let name = self
+                    .dashboards
+                    .get(dash_idx)
+                    .map(|d| d.name.clone())
+                    .unwrap_or_default();
+                if let Some(ed) = self.editor.as_mut() {
+                    ed.mode = EditorMode::Renaming { buffer: name };
+                }
+            }
+            (A::ResizeGrid, C::Dashboard) => {
+                let (cols, rows) = self
+                    .dashboards
+                    .get(dash_idx)
+                    .map(|d| (d.grid.cols.to_string(), d.grid.rows.to_string()))
+                    .unwrap_or_else(|| ("12".into(), "24".into()));
+                if let Some(ed) = self.editor.as_mut() {
+                    ed.mode = EditorMode::ResizingGrid {
+                        cols_buffer: cols,
+                        rows_buffer: rows,
+                        focus_rows: false,
+                    };
+                }
+            }
+            _ => {
+                self.last_error = Some("menu action not valid in this context".into());
+            }
+        }
     }
 
     fn change_card_entity(&mut self, idx: usize) {

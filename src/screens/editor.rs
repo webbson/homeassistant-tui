@@ -119,6 +119,11 @@ pub fn draw(f: &mut Frame, area: Rect, app: &App) {
         EditorMode::Renaming { buffer } => draw_rename(f, area, buffer),
         EditorMode::RenamingCard { buffer, .. } => draw_card_rename(f, area, buffer),
         EditorMode::EditingWindow { buffer, .. } => draw_window_edit(f, area, buffer),
+        EditorMode::Menu {
+            context,
+            items,
+            selected,
+        } => draw_menu(f, area, *context, items, *selected),
         EditorMode::ResizingGrid {
             cols_buffer,
             rows_buffer,
@@ -358,6 +363,40 @@ fn draw_text_body(f: &mut Frame, area: Rect, title: &str, body: &str, focus_body
     f.render_widget(
         Paragraph::new(lines).block(Block::bordered().title(" New text card ")),
         r,
+    );
+}
+
+fn draw_menu(
+    f: &mut Frame,
+    area: Rect,
+    context: crate::dashboard::editor::MenuContext,
+    items: &[crate::dashboard::editor::MenuItem],
+    selected: usize,
+) {
+    let title = match context {
+        crate::dashboard::editor::MenuContext::Card(idx) => {
+            format!(" Card #{} settings ", idx + 1)
+        }
+        crate::dashboard::editor::MenuContext::Dashboard => " Dashboard settings ".to_string(),
+    };
+    let h = (items.len() as u16 + 4).min(area.height.saturating_sub(4));
+    let r = modal_rect(area, 44, h.max(6));
+    f.render_widget(Clear, r);
+    let list_items: Vec<ListItem<'_>> = items
+        .iter()
+        .map(|m| ListItem::new(Line::raw(m.label.to_string())))
+        .collect();
+    let mut state = ListState::default();
+    if !list_items.is_empty() {
+        state.select(Some(selected.min(list_items.len() - 1)));
+    }
+    f.render_stateful_widget(
+        List::new(list_items)
+            .block(Block::bordered().title(title))
+            .highlight_style(Style::new().reversed())
+            .highlight_symbol("▶ "),
+        r,
+        &mut state,
     );
 }
 

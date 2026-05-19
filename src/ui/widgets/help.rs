@@ -37,9 +37,9 @@ pub fn render(f: &mut Frame, area: Rect) {
         ("HJKL", "resize selected"),
         ("Enter", "select / place"),
         ("a / d / u / s", "add / delete / undo / save"),
-        ("T / C", "rename / change entity of selected card"),
-        ("W", "sparkline window (1h, 24h, 7d, …)"),
-        ("R / G", "rename dash / set grid size"),
+        ("m", "menu (card or dashboard settings)"),
+        ("T / C / W", "shortcuts: retitle / change entity / window"),
+        ("R / G", "shortcuts: rename dash / grid size"),
     ];
     let lines: Vec<Line<'_>> = entries
         .into_iter()

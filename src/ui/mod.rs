@@ -96,7 +96,7 @@ fn draw_footer(f: &mut Frame, area: ratatui::layout::Rect, app: &App) {
                 format!("dashboard: {name} · 1..9 switch · h/l cards · j/k rows in list card · ⏎ activate · e edit · E entities · q quit")
             }
             Screen::Editor => {
-                "editor · hjkl move · HJKL resize card · a add · d del · T retitle · C change entity · R rename dash · G grid size · u undo · s save · Esc exit".to_string()
+                "editor · hjkl move · HJKL resize · a add · m menu · ⏎ select/place · u undo · s save · Esc exit".to_string()
             }
         };
         (s, Style::new().dim())

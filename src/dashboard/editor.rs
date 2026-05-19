@@ -85,6 +85,77 @@ pub enum EditorMode {
         card_idx: usize,
         buffer: String,
     },
+    /// Contextual settings menu (card- or dashboard-scoped).
+    Menu {
+        context: MenuContext,
+        items: Vec<MenuItem>,
+        selected: usize,
+    },
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum MenuContext {
+    Dashboard,
+    Card(usize),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MenuAction {
+    RenameCard,
+    ChangeEntity,
+    EditWindow,
+    DeleteCard,
+    RenameDashboard,
+    ResizeGrid,
+}
+
+#[derive(Debug, Clone)]
+pub struct MenuItem {
+    pub action: MenuAction,
+    pub label: &'static str,
+}
+
+pub fn card_menu_items(card: &Card) -> Vec<MenuItem> {
+    let mut items: Vec<MenuItem> = Vec::new();
+    items.push(MenuItem {
+        action: MenuAction::RenameCard,
+        label: "Rename card",
+    });
+    let entity_change_label = match &card.kind {
+        CardKind::EntityList { .. } => Some("Change entities"),
+        CardKind::Text { .. } => None,
+        _ => Some("Change entity"),
+    };
+    if let Some(label) = entity_change_label {
+        items.push(MenuItem {
+            action: MenuAction::ChangeEntity,
+            label,
+        });
+    }
+    if matches!(card.kind, CardKind::Sparkline { .. }) {
+        items.push(MenuItem {
+            action: MenuAction::EditWindow,
+            label: "Set history window",
+        });
+    }
+    items.push(MenuItem {
+        action: MenuAction::DeleteCard,
+        label: "Delete card",
+    });
+    items
+}
+
+pub fn dashboard_menu_items() -> Vec<MenuItem> {
+    vec![
+        MenuItem {
+            action: MenuAction::RenameDashboard,
+            label: "Rename dashboard",
+        },
+        MenuItem {
+            action: MenuAction::ResizeGrid,
+            label: "Grid size (cols × rows)",
+        },
+    ]
 }
 
 #[derive(Debug, Clone, Copy)]
