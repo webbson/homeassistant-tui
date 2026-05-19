@@ -36,6 +36,9 @@ fn main() -> Result<()> {
     let args = Args::parse();
     let _guard = util::logging::init()?;
 
+    // rustls 0.23 needs an explicit CryptoProvider. Install ring once.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     // Restore the terminal on panic so a crash doesn't leave it broken.
     let panic_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
