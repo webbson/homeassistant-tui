@@ -23,6 +23,18 @@ impl RingBuf {
         self.buf.push_back((t, v));
     }
 
+    /// Replace contents with a backfilled, time-ordered series.
+    pub fn fill_from(&mut self, values: impl IntoIterator<Item = f64>) {
+        self.buf.clear();
+        let now = Instant::now();
+        for v in values {
+            if self.buf.len() == self.cap {
+                self.buf.pop_front();
+            }
+            self.buf.push_back((now, v));
+        }
+    }
+
     pub fn values(&self) -> impl Iterator<Item = f64> + '_ {
         self.buf.iter().map(|(_, v)| *v)
     }

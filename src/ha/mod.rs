@@ -61,4 +61,6 @@ pub enum HaCommand {
         service_data: Value,
         target: Value,
     },
+    /// Backfill history for one entity over the past `hours` hours.
+    FetchHistory { entity_id: EntityId, hours: u32 },
 }

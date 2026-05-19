@@ -943,6 +943,7 @@ impl App {
                     self.record_history(&instance, &s.entity_id, &s.state);
                 }
                 self.last_error = None;
+                self.fetch_sparkline_history(&instance);
             }
             AppEvent::HaEntityUpdated { instance, state } => {
                 if let Some(rt) = self.instances.get_mut(&instance) {
@@ -954,6 +955,48 @@ impl App {
             AppEvent::HaServiceError { instance, error } => {
                 self.last_error = Some(format!("{instance}: {error}"));
             }
+            AppEvent::HaHistory {
+                instance,
+                entity_id,
+                samples,
+            } => {
+                let key = (instance.clone(), entity_id);
+                let buf = self
+                    .history
+                    .entry(key)
+                    .or_insert_with(|| RingBuf::new(HISTORY_CAP));
+                buf.fill_from(samples.into_iter().map(|(_, v)| v));
+            }
+        }
+    }
+
+    fn fetch_sparkline_history(&mut self, instance: &Alias) {
+        // For each sparkline card on every dashboard matching this instance, request backfill.
+        let mut requests: Vec<(String, u32)> = Vec::new();
+        for dash in &self.dashboards {
+            for card in &dash.cards {
+                if let crate::dashboard::CardKind::Sparkline {
+                    instance: card_inst,
+                    entity,
+                    window,
+                    ..
+                } = &card.kind
+                {
+                    if card_inst == instance {
+                        let hours = parse_window_hours(window);
+                        requests.push((entity.clone(), hours));
+                    }
+                }
+            }
+        }
+        for (eid, hours) in requests {
+            let _ = self.instances.send(
+                instance,
+                crate::ha::HaCommand::FetchHistory {
+                    entity_id: eid,
+                    hours,
+                },
+            );
         }
     }
 }
@@ -995,6 +1038,22 @@ pub fn entity_search(instances: &InstanceRegistry, instance: &str, query: &str) 
         .collect();
     out.sort_by(|a, b| a.entity_id.cmp(&b.entity_id));
     out
+}
+
+/// Convert a card `window` spec like "1h", "30m", "24h", "1d", "7d" to hours.
+fn parse_window_hours(s: &str) -> u32 {
+    let s = s.trim();
+    if let Some(num) = s.strip_suffix('h') {
+        return num.parse().unwrap_or(1);
+    }
+    if let Some(num) = s.strip_suffix('d') {
+        return num.parse::<u32>().unwrap_or(1) * 24;
+    }
+    if let Some(num) = s.strip_suffix('m') {
+        let mins: u32 = num.parse().unwrap_or(60);
+        return (mins / 60).max(1);
+    }
+    1
 }
 
 fn picker_mode_for(kind: CardTypeStub, instance: String) -> EditorMode {

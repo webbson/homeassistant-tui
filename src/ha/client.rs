@@ -1,9 +1,11 @@
+use std::collections::HashMap;
 use std::time::Duration;
 
+use chrono::{Duration as ChronoDuration, Utc};
 use color_eyre::eyre::eyre;
 use color_eyre::Result;
 use futures::{SinkExt, StreamExt};
-use serde_json::{json, Value};
+use serde_json::Value;
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{debug, info, warn};
@@ -11,7 +13,7 @@ use tracing::{debug, info, warn};
 use crate::config::{Alias, InstanceConfig};
 use crate::event::AppEvent;
 use crate::ha::protocol::{ClientMsg, RawState, ServerMsg, StateChangedData};
-use crate::ha::{ConnStatus, EntityState, HaCommand};
+use crate::ha::{ConnStatus, EntityId, EntityState, HaCommand};
 
 pub fn spawn(
     inst: InstanceConfig,
@@ -62,13 +64,11 @@ async fn connect_once(
     let (mut sink, mut stream) = ws_stream.split();
     emit_status(tx_app, &inst.alias, ConnStatus::Authenticating, None);
 
-    // 1. Expect auth_required
     let first = read_msg(&mut stream).await?;
     if !matches!(first, ServerMsg::AuthRequired { .. }) {
         return Err(eyre!("expected auth_required, got {:?}", first));
     }
 
-    // 2. Send auth
     let token = inst
         .token
         .as_deref()
@@ -81,7 +81,6 @@ async fn connect_once(
     )
     .await?;
 
-    // 3. Expect auth_ok / auth_invalid
     match read_msg(&mut stream).await? {
         ServerMsg::AuthOk { ha_version } => {
             info!(alias = %inst.alias, ?ha_version, "authenticated");
@@ -97,7 +96,6 @@ async fn connect_once(
 
     emit_status(tx_app, &inst.alias, ConnStatus::Connected, None);
 
-    // 4. Initial get_states + subscribe
     let mut id_counter: u64 = 1;
     let get_id = next_id(&mut id_counter);
     send(&mut sink, &ClientMsg::GetStates { id: get_id }).await?;
@@ -111,16 +109,18 @@ async fn connect_once(
     )
     .await?;
 
-    // 5. Main loop: forward events + handle cmds
+    // Track id -> entity_id for pending history requests
+    let mut pending_history: HashMap<u64, EntityId> = HashMap::new();
+
     loop {
         tokio::select! {
             msg = read_msg(&mut stream) => {
                 let msg = msg?;
-                handle_server_msg(msg, get_id, &inst.alias, tx_app);
+                handle_server_msg(msg, get_id, &inst.alias, tx_app, &mut pending_history);
             }
             cmd = rx_cmd.recv() => {
                 let Some(cmd) = cmd else { return Ok(()); };
-                handle_cmd(cmd, &mut id_counter, &mut sink).await?;
+                handle_cmd(cmd, &mut id_counter, &mut sink, &mut pending_history).await?;
             }
         }
     }
@@ -131,6 +131,7 @@ fn handle_server_msg(
     initial_get_id: u64,
     alias: &Alias,
     tx_app: &mpsc::UnboundedSender<AppEvent>,
+    pending_history: &mut HashMap<u64, EntityId>,
 ) {
     match msg {
         ServerMsg::Result {
@@ -139,7 +140,6 @@ fn handle_server_msg(
             result,
             ..
         } if id == initial_get_id && success => {
-            // result is an array of RawState
             if let Some(arr) = result.as_array() {
                 let mut states = Vec::with_capacity(arr.len());
                 for v in arr {
@@ -152,6 +152,20 @@ fn handle_server_msg(
                     states,
                 });
             }
+        }
+        ServerMsg::Result {
+            id,
+            success: true,
+            result,
+            ..
+        } if pending_history.contains_key(&id) => {
+            let entity_id = pending_history.remove(&id).unwrap();
+            let samples = parse_history(&result, &entity_id);
+            let _ = tx_app.send(AppEvent::HaHistory {
+                instance: alias.clone(),
+                entity_id,
+                samples,
+            });
         }
         ServerMsg::Event { event, .. } if event.event_type == "state_changed" => {
             if let Ok(data) = serde_json::from_value::<StateChangedData>(event.data) {
@@ -169,6 +183,7 @@ fn handle_server_msg(
             id,
             ..
         } => {
+            pending_history.remove(&id);
             warn!(alias = %alias, id, ?error, "ha service/result error");
             let _ = tx_app.send(AppEvent::HaServiceError {
                 instance: alias.clone(),
@@ -179,10 +194,32 @@ fn handle_server_msg(
     }
 }
 
+/// Parse HA history/history_during_period result for a single entity.
+/// Result shape: { "<entity_id>": [ { "s": "<state>", "lu": <ts_seconds_f64> }, ... ] }
+fn parse_history(result: &Value, entity_id: &str) -> Vec<(chrono::DateTime<Utc>, f64)> {
+    let arr = match result.get(entity_id).and_then(|v| v.as_array()) {
+        Some(a) => a,
+        None => return Vec::new(),
+    };
+    arr.iter()
+        .filter_map(|v| {
+            let state = v.get("s")?.as_str()?;
+            let val: f64 = state.parse().ok()?;
+            let ts_secs = v.get("lu")?.as_f64()?;
+            let dt = chrono::DateTime::<Utc>::from_timestamp(
+                ts_secs as i64,
+                ((ts_secs.fract()) * 1e9) as u32,
+            )?;
+            Some((dt, val))
+        })
+        .collect()
+}
+
 async fn handle_cmd(
     cmd: HaCommand,
     id_counter: &mut u64,
     sink: &mut (impl SinkExt<Message, Error = tokio_tungstenite::tungstenite::Error> + Unpin),
+    pending_history: &mut HashMap<u64, EntityId>,
 ) -> Result<()> {
     match cmd {
         HaCommand::CallService {
@@ -200,6 +237,24 @@ async fn handle_cmd(
                     service: &service,
                     service_data,
                     target,
+                },
+            )
+            .await?;
+        }
+        HaCommand::FetchHistory { entity_id, hours } => {
+            let id = next_id(id_counter);
+            let end = Utc::now();
+            let start = end - ChronoDuration::hours(i64::from(hours));
+            pending_history.insert(id, entity_id.clone());
+            send(
+                sink,
+                &ClientMsg::HistoryDuringPeriod {
+                    id,
+                    start_time: start.to_rfc3339(),
+                    end_time: end.to_rfc3339(),
+                    entity_ids: vec![entity_id],
+                    minimal_response: true,
+                    no_attributes: true,
                 },
             )
             .await?;
@@ -228,7 +283,6 @@ where
                 return Ok(parsed);
             }
             Message::Ping(p) => {
-                // tokio-tungstenite auto-replies; ignore
                 debug!(?p, "ping");
             }
             Message::Pong(_) | Message::Frame(_) => {}
@@ -263,9 +317,3 @@ fn emit_status(
         error: err,
     });
 }
-
-// Suppress unused warnings on json! during dev
-const _: fn() = || {
-    let _ = json!({});
-    let _: Value = Value::Null;
-};

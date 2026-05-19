@@ -25,6 +25,16 @@ pub enum ClientMsg<'a> {
         #[serde(skip_serializing_if = "Value::is_null")]
         target: Value,
     },
+    /// history/history_during_period — backfill state samples for one or more entities.
+    #[serde(rename = "history/history_during_period")]
+    HistoryDuringPeriod {
+        id: u64,
+        start_time: String,
+        end_time: String,
+        entity_ids: Vec<String>,
+        minimal_response: bool,
+        no_attributes: bool,
+    },
 }
 
 /// Inbound server messages — discriminated by `type`.

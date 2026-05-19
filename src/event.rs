@@ -1,5 +1,7 @@
+use chrono::{DateTime, Utc};
+
 use crate::config::Alias;
-use crate::ha::{ConnStatus, EntityState};
+use crate::ha::{ConnStatus, EntityId, EntityState};
 
 #[derive(Debug, Clone)]
 pub enum AppEvent {
@@ -22,5 +24,10 @@ pub enum AppEvent {
     HaServiceError {
         instance: Alias,
         error: String,
+    },
+    HaHistory {
+        instance: Alias,
+        entity_id: EntityId,
+        samples: Vec<(DateTime<Utc>, f64)>,
     },
 }
