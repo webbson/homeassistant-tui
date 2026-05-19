@@ -43,7 +43,7 @@ pub fn draw(f: &mut Frame, area: Rect, app: &App) {
         height: area.height.saturating_sub(1),
     };
 
-    crate::screens::dashboard::draw(f, body_rect, app, editor.dash_idx, usize::MAX);
+    crate::screens::dashboard::draw(f, body_rect, app, editor.dash_idx, usize::MAX, None);
 
     let cur_rect = cell_to_rect(
         body_rect,

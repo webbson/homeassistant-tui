@@ -8,7 +8,14 @@ use crate::dashboard::layout::cell_to_rect;
 use crate::dashboard::{CardKind, Dashboard};
 use crate::ui::widgets;
 
-pub fn draw(f: &mut Frame, area: Rect, app: &App, idx: usize, selected_card: usize) {
+pub fn draw(
+    f: &mut Frame,
+    area: Rect,
+    app: &App,
+    idx: usize,
+    selected_card: usize,
+    sub_index: Option<usize>,
+) {
     let Some(dash) = app.dashboards.get(idx) else {
         f.render_widget(
             Paragraph::new("no dashboard").block(Block::bordered()),
@@ -29,7 +36,8 @@ pub fn draw(f: &mut Frame, area: Rect, app: &App, idx: usize, selected_card: usi
             continue;
         }
         let sel = i == selected_card;
-        render_card(f, rect, card, app, sel);
+        let sub = if sel { sub_index } else { None };
+        render_card(f, rect, card, app, sel, sub);
     }
 }
 
@@ -52,6 +60,7 @@ fn render_card(
     card: &crate::dashboard::Card,
     app: &App,
     selected: bool,
+    sub_index: Option<usize>,
 ) {
     let title = card.title().to_string();
     match &card.kind {
@@ -116,7 +125,7 @@ fn render_card(
         } => {
             let rt = app.instances.runtimes.get(instance);
             widgets::card_entity_list::render(
-                f, rect, &title, instance, entities, rt, &app.theme, selected,
+                f, rect, &title, instance, entities, rt, &app.theme, selected, sub_index,
             );
         }
     }

@@ -1,7 +1,7 @@
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, List, ListItem};
+use ratatui::widgets::{Block, List, ListItem, ListState};
 use ratatui::Frame;
 
 use crate::ha::InstanceRuntime;
@@ -16,6 +16,7 @@ pub fn render(
     runtime: Option<&InstanceRuntime>,
     theme: &Theme,
     selected: bool,
+    sub_index: Option<usize>,
 ) {
     let color = theme.instance_color(instance);
     let mut block = Block::bordered()
@@ -60,5 +61,15 @@ pub fn render(
             ]))
         })
         .collect();
-    f.render_widget(List::new(items).block(block), area);
+    let list = List::new(items)
+        .block(block)
+        .highlight_style(Style::new().reversed())
+        .highlight_symbol("▶ ");
+    let mut state = ListState::default();
+    if let Some(i) = sub_index {
+        if !entities.is_empty() {
+            state.select(Some(i.min(entities.len() - 1)));
+        }
+    }
+    f.render_stateful_widget(list, area, &mut state);
 }

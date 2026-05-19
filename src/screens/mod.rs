@@ -18,6 +18,7 @@ pub enum Screen {
     Dashboard {
         idx: usize,
         selected_card: usize,
+        sub_index: usize,
     },
     Editor,
 }

@@ -63,8 +63,12 @@ fn draw_body(f: &mut Frame, area: ratatui::layout::Rect, app: &App) {
                 &app.theme,
             );
         }
-        Screen::Dashboard { idx, selected_card } => {
-            crate::screens::dashboard::draw(f, area, app, *idx, *selected_card);
+        Screen::Dashboard {
+            idx,
+            selected_card,
+            sub_index,
+        } => {
+            crate::screens::dashboard::draw(f, area, app, *idx, *selected_card, Some(*sub_index));
         }
         Screen::Editor => {
             crate::screens::editor::draw(f, area, app);
@@ -89,7 +93,7 @@ fn draw_footer(f: &mut Frame, area: ratatui::layout::Rect, app: &App) {
             }
             Screen::Dashboard { idx, .. } => {
                 let name = app.dashboards.get(*idx).map(|d| d.name.as_str()).unwrap_or("?");
-                format!("dashboard: {name} · 1..9 switch · h/l select card · ⏎ activate · e edit · E entities · q quit")
+                format!("dashboard: {name} · 1..9 switch · h/l cards · j/k rows in list card · ⏎ activate · e edit · E entities · q quit")
             }
             Screen::Editor => {
                 "editor · hjkl move · HJKL resize card · a add · d del · T retitle · C change entity · R rename dash · G grid size · u undo · s save · Esc exit".to_string()
