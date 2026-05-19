@@ -38,8 +38,6 @@ pub fn render(f: &mut Frame, area: Rect) {
         ("Enter", "select / place"),
         ("a / d / u / s", "add / delete / undo / save"),
         ("m", "menu (card or dashboard settings)"),
-        ("T / C / W", "shortcuts: retitle / change entity / window"),
-        ("R / G", "shortcuts: rename dash / grid size"),
     ];
     let lines: Vec<Line<'_>> = entries
         .into_iter()
