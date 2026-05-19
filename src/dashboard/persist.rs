@@ -26,6 +26,10 @@ pub fn load(explicit: Option<&Path>) -> Result<DashboardFile> {
 }
 
 pub fn save(file: &DashboardFile, path: &Path) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("mkdir -p {}", parent.display()))?;
+    }
     let raw = serde_yaml::to_string(file)?;
     std::fs::write(path, raw).with_context(|| format!("write {}", path.display()))?;
     Ok(())

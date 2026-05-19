@@ -77,11 +77,11 @@ fn draw_footer(f: &mut Frame, area: ratatui::layout::Rect, app: &App) {
     } else {
         match &app.screen {
             Screen::Entities { .. } => format!(
-                "{} entities · q quit · j/k navigate · f cycle instance filter · i instances · E entities",
+                "{} entities · q quit · j/k navigate · f filter · n new dashboard · i instances",
                 app.instances.total_entities()
             ),
             Screen::Instances { .. } => {
-                "q quit · j/k navigate · E entities".to_string()
+                "q quit · j/k navigate · n new dashboard · E entities".to_string()
             }
             Screen::Dashboard { idx, .. } => {
                 let name = app.dashboards.get(*idx).map(|d| d.name.as_str()).unwrap_or("?");

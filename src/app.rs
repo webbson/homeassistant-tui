@@ -111,6 +111,7 @@ impl App {
             }
             KeyCode::Char('f') => self.cycle_instance_filter(),
             KeyCode::Char('e') => self.enter_editor(),
+            KeyCode::Char('n') => self.create_new_dashboard(),
             KeyCode::Char(c) if ('1'..='9').contains(&c) => {
                 let idx = (c as u8 - b'1') as usize;
                 if idx < self.dashboards.len() {
@@ -312,6 +313,26 @@ impl App {
             .or_else(crate::dashboard::persist::default_path);
         self.editor = Some(EditorState::new(idx, path));
         self.screen = Screen::Editor;
+    }
+
+    fn create_new_dashboard(&mut self) {
+        let n = self.dashboards.len() + 1;
+        let dash = crate::dashboard::Dashboard {
+            name: format!("Dashboard {n}"),
+            grid: crate::dashboard::Grid { cols: 12, rows: 8 },
+            cards: Vec::new(),
+        };
+        self.dashboards.push(dash);
+        let idx = self.dashboards.len() - 1;
+        let path = self
+            .dashboards_path
+            .clone()
+            .or_else(crate::dashboard::persist::default_path);
+        let mut ed = EditorState::new(idx, path);
+        ed.dirty = true;
+        self.editor = Some(ed);
+        self.screen = Screen::Editor;
+        self.last_error = Some(format!("new dashboard #{n} — press 's' to save"));
     }
 
     fn handle_mouse(&mut self, m: MouseEvent) {

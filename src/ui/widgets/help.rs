@@ -23,6 +23,7 @@ pub fn render(f: &mut Frame, area: Rect) {
         ("E", "entity browser"),
         ("i", "instances screen"),
         ("1..9", "jump to dashboard N"),
+        ("n", "new dashboard (opens editor)"),
         ("e", "edit current dashboard"),
         ("", ""),
         ("Entity browser", ""),
