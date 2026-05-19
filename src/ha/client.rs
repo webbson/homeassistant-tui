@@ -296,7 +296,7 @@ where
     S: SinkExt<Message, Error = tokio_tungstenite::tungstenite::Error> + Unpin,
 {
     let json = serde_json::to_string(msg)?;
-    sink.send(Message::Text(json.into())).await?;
+    sink.send(Message::Text(json)).await?;
     Ok(())
 }
 

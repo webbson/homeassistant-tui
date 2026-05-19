@@ -32,6 +32,7 @@ pub struct InstanceConfig {
 }
 
 impl Config {
+    #[allow(dead_code)]
     pub fn instance_colors(&self) -> IndexMap<Alias, Option<String>> {
         self.instances
             .iter()

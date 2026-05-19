@@ -1,4 +1,5 @@
 use ratatui::layout::Rect;
+#[allow(unused_imports)]
 use ratatui::style::{Style, Stylize};
 use ratatui::widgets::{Block, Paragraph};
 use ratatui::Frame;

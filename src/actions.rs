@@ -26,6 +26,7 @@ pub fn default_action(entity_id: &EntityId) -> Option<HaCommand> {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct PendingAction {
     pub instance: Alias,
     pub entity_id: EntityId,

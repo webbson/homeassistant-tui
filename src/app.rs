@@ -46,6 +46,7 @@ pub struct App {
 }
 
 #[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
 pub struct MouseDrag {
     pub origin_col: u16,
     pub origin_row: u16,
@@ -162,15 +163,11 @@ impl App {
                 let aliases: Vec<String> = self.instances.runtimes.keys().cloned().collect();
                 match k.code {
                     KeyCode::Esc => editor.mode = EditorMode::Browse,
-                    KeyCode::Up | KeyCode::Char('k') => {
-                        if *selected > 0 {
-                            *selected -= 1;
-                        }
+                    KeyCode::Up | KeyCode::Char('k') if *selected > 0 => {
+                        *selected -= 1;
                     }
-                    KeyCode::Down | KeyCode::Char('j') => {
-                        if *selected + 1 < aliases.len() {
-                            *selected += 1;
-                        }
+                    KeyCode::Down | KeyCode::Char('j') if *selected + 1 < aliases.len() => {
+                        *selected += 1;
                     }
                     KeyCode::Enter => {
                         if let Some(inst) = aliases.get(*selected) {
@@ -204,15 +201,11 @@ impl App {
                         query.pop();
                         *selected = 0;
                     }
-                    KeyCode::Up => {
-                        if *selected > 0 {
-                            *selected -= 1;
-                        }
+                    KeyCode::Up if *selected > 0 => {
+                        *selected -= 1;
                     }
-                    KeyCode::Down => {
-                        if *selected + 1 < rows.len() {
-                            *selected += 1;
-                        }
+                    KeyCode::Down if *selected + 1 < rows.len() => {
+                        *selected += 1;
                     }
                     KeyCode::PageUp => {
                         *selected = selected.saturating_sub(10);
@@ -297,15 +290,11 @@ impl App {
                         query.pop();
                         *selected = 0;
                     }
-                    KeyCode::Up => {
-                        if *selected > 0 {
-                            *selected -= 1;
-                        }
+                    KeyCode::Up if *selected > 0 => {
+                        *selected -= 1;
                     }
-                    KeyCode::Down => {
-                        if *selected + 1 < rows.len() {
-                            *selected += 1;
-                        }
+                    KeyCode::Down if *selected + 1 < rows.len() => {
+                        *selected += 1;
                     }
                     KeyCode::Char(' ') => {
                         if let Some(pick) = rows.get(*selected) {
@@ -610,15 +599,11 @@ impl App {
             } => {
                 match k.code {
                     KeyCode::Esc => editor.mode = EditorMode::Browse,
-                    KeyCode::Up | KeyCode::Char('k') => {
-                        if *selected > 0 {
-                            *selected -= 1;
-                        }
+                    KeyCode::Up | KeyCode::Char('k') if *selected > 0 => {
+                        *selected -= 1;
                     }
-                    KeyCode::Down | KeyCode::Char('j') => {
-                        if *selected + 1 < items.len() {
-                            *selected += 1;
-                        }
+                    KeyCode::Down | KeyCode::Char('j') if *selected + 1 < items.len() => {
+                        *selected += 1;
                     }
                     KeyCode::Enter => {
                         let Some(item) = items.get(*selected).cloned() else {
@@ -765,10 +750,8 @@ impl App {
             KeyCode::Char('m') | KeyCode::Char('M') => {
                 self.open_menu();
             }
-            KeyCode::Char('d') => {
-                if editor.selected_card.is_some() {
-                    editor.mode = EditorMode::ConfirmDelete;
-                }
+            KeyCode::Char('d') if editor.selected_card.is_some() => {
+                editor.mode = EditorMode::ConfirmDelete;
             }
             KeyCode::Char('u') => {
                 editor.undo(dash);
@@ -1163,11 +1146,9 @@ impl App {
                     origin_row: row,
                 });
             }
-            MouseEventKind::Drag(MouseButton::Left) => {
-                if editor.selected_card.is_some() {
-                    editor.snapshot(dash);
-                    editor.move_selected_to_cursor(dash);
-                }
+            MouseEventKind::Drag(MouseButton::Left) if editor.selected_card.is_some() => {
+                editor.snapshot(dash);
+                editor.move_selected_to_cursor(dash);
             }
             MouseEventKind::Up(MouseButton::Left) => {
                 self.mouse_drag = None;

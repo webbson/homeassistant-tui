@@ -1,4 +1,5 @@
 use ratatui::layout::Rect;
+#[allow(unused_imports)]
 use ratatui::style::{Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, List, ListItem, ListState};
@@ -7,6 +8,7 @@ use ratatui::Frame;
 use crate::ha::InstanceRuntime;
 use crate::ui::theme::Theme;
 
+#[allow(clippy::too_many_arguments)]
 pub fn render(
     f: &mut Frame,
     area: Rect,

@@ -39,10 +39,12 @@ impl RingBuf {
         self.buf.iter().map(|(_, v)| *v)
     }
 
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.buf.len()
     }
 
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.buf.is_empty()
     }

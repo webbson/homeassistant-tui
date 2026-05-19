@@ -1,4 +1,5 @@
 use ratatui::layout::Rect;
+#[allow(unused_imports)]
 use ratatui::style::{Style, Stylize};
 use ratatui::widgets::{Block, Gauge};
 use ratatui::Frame;
@@ -6,6 +7,7 @@ use ratatui::Frame;
 use crate::ha::EntityState;
 use crate::ui::theme::Theme;
 
+#[allow(clippy::too_many_arguments)]
 pub fn render(
     f: &mut Frame,
     area: Rect,

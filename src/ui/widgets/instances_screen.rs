@@ -1,4 +1,5 @@
 use ratatui::layout::Rect;
+#[allow(unused_imports)]
 use ratatui::style::{Color, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, List, ListItem, ListState};

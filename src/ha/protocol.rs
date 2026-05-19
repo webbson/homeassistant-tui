@@ -42,7 +42,10 @@ pub enum ClientMsg<'a> {
 #[serde(tag = "type")]
 pub enum ServerMsg {
     #[serde(rename = "auth_required")]
-    AuthRequired { ha_version: Option<String> },
+    AuthRequired {
+        #[allow(dead_code)]
+        ha_version: Option<String>,
+    },
     #[serde(rename = "auth_ok")]
     AuthOk { ha_version: Option<String> },
     #[serde(rename = "auth_invalid")]
@@ -57,7 +60,11 @@ pub enum ServerMsg {
         error: Value,
     },
     #[serde(rename = "event")]
-    Event { id: u64, event: HaEvent },
+    Event {
+        #[allow(dead_code)]
+        id: u64,
+        event: HaEvent,
+    },
     #[serde(other)]
     Other,
 }
@@ -70,6 +77,7 @@ pub struct HaEvent {
 
 #[derive(Debug, Deserialize)]
 pub struct StateChangedData {
+    #[allow(dead_code)]
     pub entity_id: String,
     pub new_state: Option<RawState>,
     #[allow(dead_code)]

@@ -4,9 +4,9 @@ use crate::config::Alias;
 use crate::ha::{ConnStatus, EntityId, EntityState};
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum AppEvent {
     Tick,
-    #[allow(dead_code)]
     Quit,
     HaInitialStates {
         instance: Alias,

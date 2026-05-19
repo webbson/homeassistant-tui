@@ -33,6 +33,7 @@ pub enum ConnStatus {
 #[derive(Debug, Clone)]
 pub struct InstanceRuntime {
     pub alias: Alias,
+    #[allow(dead_code)]
     pub url: String,
     pub status: ConnStatus,
     pub last_error: Option<String>,

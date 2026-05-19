@@ -1,4 +1,5 @@
 use ratatui::layout::Rect;
+#[allow(unused_imports)]
 use ratatui::style::{Color, Style, Stylize};
 use ratatui::symbols;
 use ratatui::text::Span;
@@ -8,6 +9,7 @@ use ratatui::Frame;
 use crate::ui::theme::Theme;
 use crate::util::history::RingBuf;
 
+#[allow(clippy::too_many_arguments)]
 pub fn render(
     f: &mut Frame,
     area: Rect,
