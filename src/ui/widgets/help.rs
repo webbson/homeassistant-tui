@@ -37,6 +37,7 @@ pub fn render(f: &mut Frame, area: Rect) {
         ("HJKL", "resize selected"),
         ("Enter", "select / place"),
         ("a / d / u / s", "add / delete / undo / save"),
+        ("R / G", "rename dash / set grid size"),
     ];
     let lines: Vec<Line<'_>> = entries
         .into_iter()

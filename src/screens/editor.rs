@@ -105,6 +105,12 @@ pub fn draw(f: &mut Frame, area: Rect, app: &App) {
         } => draw_text_body(f, area, title_buffer, body_buffer, *focus_body),
         EditorMode::ConfirmExit => draw_confirm(f, area, "Unsaved changes. Discard? (y/n)"),
         EditorMode::ConfirmDelete => draw_confirm(f, area, "Delete selected card? (y/n)"),
+        EditorMode::Renaming { buffer } => draw_rename(f, area, buffer),
+        EditorMode::ResizingGrid {
+            cols_buffer,
+            rows_buffer,
+            focus_rows,
+        } => draw_resize_grid(f, area, cols_buffer, rows_buffer, *focus_rows),
         EditorMode::Browse => {}
     }
 }
@@ -338,6 +344,58 @@ fn draw_text_body(f: &mut Frame, area: Rect, title: &str, body: &str, focus_body
     ];
     f.render_widget(
         Paragraph::new(lines).block(Block::bordered().title(" New text card ")),
+        r,
+    );
+}
+
+fn draw_rename(f: &mut Frame, area: Rect, buffer: &str) {
+    let r = modal_rect(area, 56, 5);
+    f.render_widget(Clear, r);
+    let lines = vec![
+        Line::raw("Rename dashboard:"),
+        Line::raw(""),
+        Line::from(vec![
+            Span::raw("> "),
+            Span::styled(buffer.to_string(), Style::new().bold()),
+            Span::styled("_", Style::new().rapid_blink()),
+        ]),
+    ];
+    f.render_widget(
+        Paragraph::new(lines).block(Block::bordered().title(" Rename (Enter=save, Esc=cancel) ")),
+        r,
+    );
+}
+
+fn draw_resize_grid(f: &mut Frame, area: Rect, cols: &str, rows: &str, focus_rows: bool) {
+    let r = modal_rect(area, 56, 7);
+    f.render_widget(Clear, r);
+    let cstyle = if focus_rows {
+        Style::new().dim()
+    } else {
+        Style::new().bold()
+    };
+    let rstyle = if focus_rows {
+        Style::new().bold()
+    } else {
+        Style::new().dim()
+    };
+    let lines = vec![
+        Line::from(vec![
+            Span::styled("cols: ", cstyle),
+            Span::raw(cols.to_string()),
+        ]),
+        Line::from(vec![
+            Span::styled("rows: ", rstyle),
+            Span::raw(rows.to_string()),
+        ]),
+        Line::raw(""),
+        Line::styled(
+            "Tab cycle · Enter accept · Esc cancel".to_string(),
+            Style::new().dim(),
+        ),
+    ];
+    f.render_widget(
+        Paragraph::new(lines).block(Block::bordered().title(" Grid size ")),
         r,
     );
 }

@@ -379,6 +379,71 @@ impl App {
                 }
                 return;
             }
+            EditorMode::Renaming { buffer } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        buffer.pop();
+                    }
+                    KeyCode::Char(c) => buffer.push(c),
+                    KeyCode::Enter => {
+                        let new_name = buffer.trim().to_string();
+                        editor.mode = EditorMode::Browse;
+                        if !new_name.is_empty() {
+                            if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                                if let Some(ed) = self.editor.as_mut() {
+                                    ed.snapshot(dash);
+                                    dash.name = new_name;
+                                    ed.dirty = true;
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::ResizingGrid {
+                cols_buffer,
+                rows_buffer,
+                focus_rows,
+            } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Tab => *focus_rows = !*focus_rows,
+                    KeyCode::Backspace => {
+                        if *focus_rows {
+                            rows_buffer.pop();
+                        } else {
+                            cols_buffer.pop();
+                        }
+                    }
+                    KeyCode::Char(c) if c.is_ascii_digit() => {
+                        if *focus_rows {
+                            rows_buffer.push(c);
+                        } else {
+                            cols_buffer.push(c);
+                        }
+                    }
+                    KeyCode::Enter => {
+                        let cols: u16 = cols_buffer.parse().unwrap_or(0);
+                        let rows: u16 = rows_buffer.parse().unwrap_or(0);
+                        editor.mode = EditorMode::Browse;
+                        if cols > 0 && rows > 0 {
+                            if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                                if let Some(ed) = self.editor.as_mut() {
+                                    ed.snapshot(dash);
+                                    dash.grid.cols = cols;
+                                    dash.grid.rows = rows;
+                                    ed.dirty = true;
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
             EditorMode::Browse => {}
         }
 
@@ -429,6 +494,18 @@ impl App {
             }
             KeyCode::Char(' ') => editor.select_at_cursor(dash),
             KeyCode::Char('a') => editor.mode = EditorMode::PickingType,
+            KeyCode::Char('R') => {
+                editor.mode = EditorMode::Renaming {
+                    buffer: dash.name.clone(),
+                };
+            }
+            KeyCode::Char('G') => {
+                editor.mode = EditorMode::ResizingGrid {
+                    cols_buffer: dash.grid.cols.to_string(),
+                    rows_buffer: dash.grid.rows.to_string(),
+                    focus_rows: false,
+                };
+            }
             KeyCode::Char('d') => {
                 if editor.selected_card.is_some() {
                     editor.mode = EditorMode::ConfirmDelete;
@@ -521,7 +598,7 @@ impl App {
         let n = self.dashboards.len() + 1;
         let dash = crate::dashboard::Dashboard {
             name: format!("Dashboard {n}"),
-            grid: crate::dashboard::Grid { cols: 12, rows: 8 },
+            grid: crate::dashboard::Grid { cols: 12, rows: 24 },
             cards: Vec::new(),
         };
         self.dashboards.push(dash);
@@ -534,7 +611,9 @@ impl App {
         ed.dirty = true;
         self.editor = Some(ed);
         self.screen = Screen::Editor;
-        self.status_msg = Some(format!("new dashboard #{n} — press 'R' to rename, 's' to save"));
+        self.status_msg = Some(format!(
+            "new dashboard #{n} — press 'R' to rename, 's' to save"
+        ));
     }
 
     fn handle_mouse(&mut self, m: MouseEvent) {

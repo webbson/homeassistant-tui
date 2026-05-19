@@ -45,6 +45,16 @@ pub enum EditorMode {
         body_buffer: String,
         focus_body: bool,
     },
+    /// Rename current dashboard.
+    Renaming {
+        buffer: String,
+    },
+    /// Adjust grid dimensions.
+    ResizingGrid {
+        cols_buffer: String,
+        rows_buffer: String,
+        focus_rows: bool,
+    },
     /// Confirm dialog before exiting with unsaved changes.
     ConfirmExit,
     /// Confirm dialog before deleting a card.
