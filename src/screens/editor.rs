@@ -118,6 +118,7 @@ pub fn draw(f: &mut Frame, area: Rect, app: &App) {
         EditorMode::ConfirmDelete => draw_confirm(f, area, "Delete selected card? (y/n)"),
         EditorMode::Renaming { buffer } => draw_rename(f, area, buffer),
         EditorMode::RenamingCard { buffer, .. } => draw_card_rename(f, area, buffer),
+        EditorMode::EditingWindow { buffer, .. } => draw_window_edit(f, area, buffer),
         EditorMode::ResizingGrid {
             cols_buffer,
             rows_buffer,
@@ -356,6 +357,25 @@ fn draw_text_body(f: &mut Frame, area: Rect, title: &str, body: &str, focus_body
     ];
     f.render_widget(
         Paragraph::new(lines).block(Block::bordered().title(" New text card ")),
+        r,
+    );
+}
+
+fn draw_window_edit(f: &mut Frame, area: Rect, buffer: &str) {
+    let r = modal_rect(area, 56, 6);
+    f.render_widget(Clear, r);
+    let lines = vec![
+        Line::raw("Sparkline window — examples: 1h, 6h, 24h, 7d"),
+        Line::raw(""),
+        Line::from(vec![
+            Span::raw("> "),
+            Span::styled(buffer.to_string(), Style::new().bold()),
+            Span::styled("_", Style::new().rapid_blink()),
+        ]),
+    ];
+    f.render_widget(
+        Paragraph::new(lines)
+            .block(Block::bordered().title(" History window (Enter=apply + refetch, Esc=cancel) ")),
         r,
     );
 }

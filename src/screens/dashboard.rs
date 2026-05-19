@@ -111,11 +111,16 @@ fn render_card(
             );
         }
         CardKind::Sparkline {
-            instance, entity, ..
+            instance,
+            entity,
+            window,
+            ..
         } => {
             let key = (instance.clone(), entity.clone());
             let h = app.history.get(&key);
-            widgets::card_sparkline::render(f, rect, &title, instance, h, &app.theme, selected);
+            widgets::card_sparkline::render(
+                f, rect, &title, instance, h, window, &app.theme, selected,
+            );
         }
         CardKind::Text { markdown, .. } => {
             widgets::card_text::render(f, rect, &title, markdown, selected);

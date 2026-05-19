@@ -80,6 +80,11 @@ pub enum EditorMode {
         card_idx: usize,
         buffer: String,
     },
+    /// Edit the sparkline window (e.g. "1h", "24h", "7d") for the selected card.
+    EditingWindow {
+        card_idx: usize,
+        buffer: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy)]

@@ -23,7 +23,7 @@ use crate::ui;
 use crate::ui::theme::Theme;
 use crate::util::history::RingBuf;
 
-const HISTORY_CAP: usize = 512;
+const HISTORY_CAP: usize = 8192;
 
 pub struct App {
     pub should_quit: bool,
@@ -532,6 +532,55 @@ impl App {
                 }
                 return;
             }
+            EditorMode::EditingWindow { card_idx, buffer } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        buffer.pop();
+                    }
+                    KeyCode::Char(c) => buffer.push(c),
+                    KeyCode::Enter => {
+                        let idx = *card_idx;
+                        let new_window = buffer.trim().to_string();
+                        editor.mode = EditorMode::Browse;
+                        if !new_window.is_empty() {
+                            let mut entity_to_refetch: Option<(String, String, u32)> = None;
+                            if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                                if let Some(card) = dash.cards.get_mut(idx) {
+                                    if let crate::dashboard::CardKind::Sparkline {
+                                        instance,
+                                        entity,
+                                        window,
+                                        ..
+                                    } = &mut card.kind
+                                    {
+                                        *window = new_window.clone();
+                                        entity_to_refetch = Some((
+                                            instance.clone(),
+                                            entity.clone(),
+                                            parse_window_hours(&new_window),
+                                        ));
+                                    }
+                                }
+                            }
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.dirty = true;
+                            }
+                            if let Some((inst, eid, hours)) = entity_to_refetch {
+                                let _ = self.instances.send(
+                                    &inst,
+                                    crate::ha::HaCommand::FetchHistory {
+                                        entity_id: eid,
+                                        hours,
+                                    },
+                                );
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
             EditorMode::RenamingCard { card_idx, buffer } => {
                 match k.code {
                     KeyCode::Esc => editor.mode = EditorMode::Browse,
@@ -620,6 +669,22 @@ impl App {
                     rows_buffer: dash.grid.rows.to_string(),
                     focus_rows: false,
                 };
+            }
+            KeyCode::Char('W') => {
+                if let Some(idx) = editor.selected_card {
+                    if let Some(card) = dash.cards.get(idx) {
+                        if let crate::dashboard::CardKind::Sparkline { window, .. } = &card.kind {
+                            editor.mode = EditorMode::EditingWindow {
+                                card_idx: idx,
+                                buffer: window.clone(),
+                            };
+                        } else {
+                            self.last_error = Some("W only works on sparkline cards".into());
+                        }
+                    }
+                } else {
+                    self.last_error = Some("no card selected — press Enter on a card first".into());
+                }
             }
             KeyCode::Char('T') => {
                 if let Some(idx) = editor.selected_card {

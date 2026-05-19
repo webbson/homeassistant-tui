@@ -38,6 +38,7 @@ pub fn render(f: &mut Frame, area: Rect) {
         ("Enter", "select / place"),
         ("a / d / u / s", "add / delete / undo / save"),
         ("T / C", "rename / change entity of selected card"),
+        ("W", "sparkline window (1h, 24h, 7d, …)"),
         ("R / G", "rename dash / set grid size"),
     ];
     let lines: Vec<Line<'_>> = entries
