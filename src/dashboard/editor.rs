@@ -12,6 +12,9 @@ pub struct EditorState {
     pub undo_stack: Vec<Dashboard>,
     pub dirty: bool,
     pub source_path: Option<std::path::PathBuf>,
+    /// When `Some(idx)`, the in-progress picker/title flow replaces card[idx]
+    /// instead of appending a new card.
+    pub edit_target: Option<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -72,6 +75,11 @@ pub enum EditorMode {
     ConfirmExit,
     /// Confirm dialog before deleting a card.
     ConfirmDelete,
+    /// Rename the title of the selected card.
+    RenamingCard {
+        card_idx: usize,
+        buffer: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -116,6 +124,7 @@ impl EditorState {
             undo_stack: Vec::new(),
             dirty: false,
             source_path,
+            edit_target: None,
         }
     }
 
@@ -185,6 +194,14 @@ impl EditorState {
     }
 
     pub fn add_card(&mut self, dash: &mut Dashboard, kind: CardKind) {
+        if let Some(idx) = self.edit_target.take() {
+            if let Some(card) = dash.cards.get_mut(idx) {
+                card.kind = kind;
+                self.dirty = true;
+                self.selected_card = Some(idx);
+                return;
+            }
+        }
         let card = Card {
             pos: Pos {
                 col: self.cursor_col,
@@ -196,6 +213,24 @@ impl EditorState {
         };
         dash.cards.push(card);
         self.selected_card = Some(dash.cards.len() - 1);
+        self.dirty = true;
+    }
+
+    /// Replace just the title of the card at `idx` (keeps everything else).
+    pub fn retitle_card(&mut self, dash: &mut Dashboard, idx: usize, new_title: Option<String>) {
+        let Some(card) = dash.cards.get_mut(idx) else {
+            return;
+        };
+        match &mut card.kind {
+            CardKind::Entity { title, .. }
+            | CardKind::Toggle { title, .. }
+            | CardKind::Gauge { title, .. }
+            | CardKind::Sparkline { title, .. }
+            | CardKind::Text { title, .. }
+            | CardKind::EntityList { title, .. } => {
+                *title = new_title;
+            }
+        }
         self.dirty = true;
     }
 

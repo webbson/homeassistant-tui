@@ -37,6 +37,7 @@ pub fn render(f: &mut Frame, area: Rect) {
         ("HJKL", "resize selected"),
         ("Enter", "select / place"),
         ("a / d / u / s", "add / delete / undo / save"),
+        ("T / C", "rename / change entity of selected card"),
         ("R / G", "rename dash / set grid size"),
     ];
     let lines: Vec<Line<'_>> = entries

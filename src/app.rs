@@ -530,6 +530,32 @@ impl App {
                 }
                 return;
             }
+            EditorMode::RenamingCard { card_idx, buffer } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        buffer.pop();
+                    }
+                    KeyCode::Char(c) => buffer.push(c),
+                    KeyCode::Enter => {
+                        let idx = *card_idx;
+                        let new_title = if buffer.trim().is_empty() {
+                            None
+                        } else {
+                            Some(buffer.trim().to_string())
+                        };
+                        editor.mode = EditorMode::Browse;
+                        if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.snapshot(dash);
+                                ed.retitle_card(dash, idx, new_title);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
             EditorMode::Browse => {}
         }
 
@@ -592,6 +618,35 @@ impl App {
                     focus_rows: false,
                 };
             }
+            KeyCode::Char('T') => {
+                if let Some(idx) = editor.selected_card {
+                    let current = dash
+                        .cards
+                        .get(idx)
+                        .and_then(|c| match &c.kind {
+                            crate::dashboard::CardKind::Entity { title, .. }
+                            | crate::dashboard::CardKind::Toggle { title, .. }
+                            | crate::dashboard::CardKind::Gauge { title, .. }
+                            | crate::dashboard::CardKind::Sparkline { title, .. }
+                            | crate::dashboard::CardKind::Text { title, .. }
+                            | crate::dashboard::CardKind::EntityList { title, .. } => title.clone(),
+                        })
+                        .unwrap_or_default();
+                    editor.mode = EditorMode::RenamingCard {
+                        card_idx: idx,
+                        buffer: current,
+                    };
+                } else {
+                    self.last_error = Some("no card selected — press Enter on a card first".into());
+                }
+            }
+            KeyCode::Char('C') => {
+                if let Some(idx) = editor.selected_card {
+                    self.change_card_entity(idx);
+                } else {
+                    self.last_error = Some("no card selected — press Enter on a card first".into());
+                }
+            }
             KeyCode::Char('d') => {
                 if editor.selected_card.is_some() {
                     editor.mode = EditorMode::ConfirmDelete;
@@ -641,6 +696,68 @@ impl App {
             .or_else(crate::dashboard::persist::default_path);
         self.editor = Some(EditorState::new(idx, path));
         self.screen = Screen::Editor;
+    }
+
+    fn change_card_entity(&mut self, idx: usize) {
+        // Determine entry point from current card kind; prefill picker state.
+        let Some(editor) = self.editor.as_mut() else {
+            return;
+        };
+        let Some(dash) = self.dashboards.get(editor.dash_idx) else {
+            return;
+        };
+        let Some(card) = dash.cards.get(idx) else {
+            return;
+        };
+        use crate::dashboard::CardKind;
+        let (kind, instance, prefill): (CardTypeStub, String, _) = match &card.kind {
+            CardKind::Entity { instance, .. } => (CardTypeStub::Entity, instance.clone(), None),
+            CardKind::Toggle { instance, .. } => (CardTypeStub::Toggle, instance.clone(), None),
+            CardKind::Gauge { instance, .. } => (CardTypeStub::Gauge, instance.clone(), None),
+            CardKind::Sparkline { instance, .. } => {
+                (CardTypeStub::Sparkline, instance.clone(), None)
+            }
+            CardKind::EntityList {
+                instance, entities, ..
+            } => {
+                let picked: Vec<(String, String)> = entities
+                    .iter()
+                    .map(|eid| {
+                        let friendly = self
+                            .instances
+                            .runtimes
+                            .get(instance)
+                            .and_then(|rt| rt.states.get(eid))
+                            .and_then(|s| s.attributes.get("friendly_name"))
+                            .and_then(|v| v.as_str())
+                            .map(str::to_string)
+                            .unwrap_or_default();
+                        (eid.clone(), friendly)
+                    })
+                    .collect();
+                (CardTypeStub::EntityList, instance.clone(), Some(picked))
+            }
+            CardKind::Text { .. } => {
+                self.last_error = Some("text cards have no entity to change".into());
+                return;
+            }
+        };
+        editor.edit_target = Some(idx);
+        editor.mode = if let Some(picked) = prefill {
+            EditorMode::PickingMulti {
+                instance,
+                query: String::new(),
+                selected: 0,
+                picked,
+            }
+        } else {
+            EditorMode::PickingEntity {
+                card_type: kind,
+                instance,
+                query: String::new(),
+                selected: 0,
+            }
+        };
     }
 
     fn start_card_after_type(&mut self, kind: CardTypeStub) {
