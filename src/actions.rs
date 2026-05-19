@@ -41,7 +41,10 @@ mod tests {
         let cmd = default_action(&"light.kitchen".to_string()).unwrap();
         let HaCommand::CallService {
             domain, service, ..
-        } = cmd;
+        } = cmd
+        else {
+            panic!("expected CallService");
+        };
         assert_eq!(domain, "light");
         assert_eq!(service, "toggle");
     }
@@ -49,7 +52,9 @@ mod tests {
     #[test]
     fn script_turns_on() {
         let cmd = default_action(&"script.morning".to_string()).unwrap();
-        let HaCommand::CallService { service, .. } = cmd;
+        let HaCommand::CallService { service, .. } = cmd else {
+            panic!("expected CallService");
+        };
         assert_eq!(service, "turn_on");
     }
 
