@@ -11,3 +11,4 @@ config/dashboards.yaml
 # IDE
 .idea/
 .vscode/
+*.bak
