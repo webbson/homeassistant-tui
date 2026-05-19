@@ -1,7 +1,7 @@
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style, Stylize};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Clear, Paragraph};
+use ratatui::widgets::{Block, Clear, List, ListItem, ListState, Paragraph};
 use ratatui::Frame;
 
 use crate::app::App;
@@ -16,7 +16,6 @@ pub fn draw(f: &mut Frame, area: Rect, app: &App) {
         return;
     };
 
-    // Top title strip
     let bar_rect = Rect {
         x: area.x,
         y: area.y,
@@ -44,10 +43,8 @@ pub fn draw(f: &mut Frame, area: Rect, app: &App) {
         height: area.height.saturating_sub(1),
     };
 
-    // Render existing cards (re-use dashboard render path).
     crate::screens::dashboard::draw(f, body_rect, app, editor.dash_idx, usize::MAX);
 
-    // Cursor cell
     let cur_rect = cell_to_rect(
         body_rect,
         dash.grid,
@@ -65,7 +62,6 @@ pub fn draw(f: &mut Frame, area: Rect, app: &App) {
         );
     }
 
-    // Selection ring
     if let Some(i) = editor.selected_card {
         if let Some(card) = dash.cards.get(i) {
             let r = cell_to_rect(body_rect, dash.grid, card.pos);
@@ -76,12 +72,37 @@ pub fn draw(f: &mut Frame, area: Rect, app: &App) {
         }
     }
 
-    // Modal overlays
     match &editor.mode {
         EditorMode::PickingType => draw_palette(f, area),
-        EditorMode::Entering { card_type, buffer } => {
-            draw_input(f, area, *card_type, buffer);
+        EditorMode::PickingInstance { selected, .. } => {
+            draw_instance_picker(f, area, app, *selected)
         }
+        EditorMode::PickingEntity {
+            card_type,
+            instance,
+            query,
+            selected,
+        } => draw_entity_picker(f, area, app, *card_type, instance, query, *selected),
+        EditorMode::EditingTitle {
+            card_type,
+            instance,
+            entity,
+            friendly_name,
+            title_buffer,
+        } => draw_title_input(
+            f,
+            area,
+            *card_type,
+            instance,
+            entity,
+            friendly_name,
+            title_buffer,
+        ),
+        EditorMode::EditingTextBody {
+            title_buffer,
+            body_buffer,
+            focus_body,
+        } => draw_text_body(f, area, title_buffer, body_buffer, *focus_body),
         EditorMode::ConfirmExit => draw_confirm(f, area, "Unsaved changes. Discard? (y/n)"),
         EditorMode::ConfirmDelete => draw_confirm(f, area, "Delete selected card? (y/n)"),
         EditorMode::Browse => {}
@@ -116,24 +137,207 @@ fn draw_palette(f: &mut Frame, area: Rect) {
         })
         .collect();
     f.render_widget(
-        Paragraph::new(lines).block(Block::bordered().title(" Add card ")),
+        Paragraph::new(lines).block(Block::bordered().title(" Add card — pick type ")),
         r,
     );
 }
 
-fn draw_input(f: &mut Frame, area: Rect, kind: CardTypeStub, buffer: &str) {
-    let r = modal_rect(area, 60, 5);
+fn draw_instance_picker(f: &mut Frame, area: Rect, app: &App, selected: usize) {
+    let r = modal_rect(area, 40, 12);
     f.render_widget(Clear, r);
-    let prompt = match kind {
-        CardTypeStub::Text => "Text body (Enter=accept, Esc=cancel):",
-        _ => {
-            "Entity ID (e.g. light.kitchen) [optionally prefix with instance: home/light.kitchen]:"
-        }
+    let items: Vec<ListItem<'_>> = app
+        .instances
+        .runtimes
+        .keys()
+        .enumerate()
+        .map(|(i, alias)| {
+            let color = app.theme.instance_color(alias);
+            ListItem::new(Line::from(vec![
+                Span::styled(format!(" {} ", i + 1), Style::new().reversed()),
+                Span::raw("  "),
+                Span::styled(alias.clone(), Style::new().fg(color).bold()),
+            ]))
+        })
+        .collect();
+    let mut state = ListState::default();
+    if !items.is_empty() {
+        state.select(Some(selected.min(items.len() - 1)));
+    }
+    f.render_stateful_widget(
+        List::new(items)
+            .block(Block::bordered().title(" Pick instance "))
+            .highlight_style(Style::new().reversed())
+            .highlight_symbol("▶ "),
+        r,
+        &mut state,
+    );
+}
+
+fn draw_entity_picker(
+    f: &mut Frame,
+    area: Rect,
+    app: &App,
+    card_type: CardTypeStub,
+    instance: &str,
+    query: &str,
+    selected: usize,
+) {
+    let w = 80u16.min(area.width.saturating_sub(2));
+    let h = 24u16.min(area.height.saturating_sub(2));
+    let x = area.x + area.width.saturating_sub(w) / 2;
+    let y = area.y + area.height.saturating_sub(h) / 2;
+    let r = Rect {
+        x,
+        y,
+        width: w,
+        height: h,
     };
-    let body = format!("{prompt}\n> {buffer}_");
-    let title = format!(" New {} card ", kind.label());
+    f.render_widget(Clear, r);
+
+    let inner = Rect {
+        x: r.x + 1,
+        y: r.y + 1,
+        width: r.width.saturating_sub(2),
+        height: r.height.saturating_sub(2),
+    };
+    let search_row = Rect {
+        x: inner.x,
+        y: inner.y,
+        width: inner.width,
+        height: 1,
+    };
+    let list_row = Rect {
+        x: inner.x,
+        y: inner.y + 2,
+        width: inner.width,
+        height: inner.height.saturating_sub(3),
+    };
+
+    let color = app.theme.instance_color(instance);
+    let title = format!(
+        " {} → {}  (type to search, ↑/↓ select, ⏎ pick, Esc cancel) ",
+        card_type.label(),
+        instance,
+    );
+    f.render_widget(Block::bordered().title(title), r);
+
     f.render_widget(
-        Paragraph::new(body).block(Block::bordered().title(title)),
+        Paragraph::new(Line::from(vec![
+            Span::styled("search: ", Style::new().dim()),
+            Span::styled(query.to_string(), Style::new().fg(color).bold()),
+            Span::styled("_", Style::new().fg(color).rapid_blink()),
+        ])),
+        search_row,
+    );
+
+    let rows = crate::app::entity_search(&app.instances, instance, query);
+    let items: Vec<ListItem<'_>> = rows
+        .iter()
+        .map(|p| {
+            let primary = if p.friendly_name.is_empty() {
+                p.entity_id.clone()
+            } else {
+                p.friendly_name.clone()
+            };
+            ListItem::new(Line::from(vec![
+                Span::styled(primary, Style::new().fg(color).bold()),
+                Span::raw("  "),
+                Span::styled(p.entity_id.clone(), Style::new().dim()),
+            ]))
+        })
+        .collect();
+    let mut state = ListState::default();
+    if !items.is_empty() {
+        state.select(Some(selected.min(items.len() - 1)));
+    }
+    f.render_stateful_widget(
+        List::new(items)
+            .highlight_style(Style::new().reversed())
+            .highlight_symbol("▶ "),
+        list_row,
+        &mut state,
+    );
+}
+
+fn draw_title_input(
+    f: &mut Frame,
+    area: Rect,
+    card_type: CardTypeStub,
+    instance: &str,
+    entity: &str,
+    friendly: &str,
+    title_buffer: &str,
+) {
+    let r = modal_rect(area, 68, 8);
+    f.render_widget(Clear, r);
+    let default_label = if friendly.is_empty() {
+        entity
+    } else {
+        friendly
+    };
+    let lines = vec![
+        Line::from(vec![
+            Span::styled("type:    ", Style::new().dim()),
+            Span::raw(card_type.label().to_string()),
+        ]),
+        Line::from(vec![
+            Span::styled("instance:", Style::new().dim()),
+            Span::raw(" "),
+            Span::raw(instance.to_string()),
+        ]),
+        Line::from(vec![
+            Span::styled("entity:  ", Style::new().dim()),
+            Span::raw(entity.to_string()),
+        ]),
+        Line::raw(""),
+        Line::from(vec![Span::styled(
+            format!("title (default: \"{default_label}\"):"),
+            Style::new().bold(),
+        )]),
+        Line::from(vec![
+            Span::raw("> "),
+            Span::styled(title_buffer.to_string(), Style::new().bold()),
+            Span::styled("_", Style::new().rapid_blink()),
+        ]),
+    ];
+    f.render_widget(
+        Paragraph::new(lines).block(Block::bordered().title(" Title (Enter=accept, Esc=cancel) ")),
+        r,
+    );
+}
+
+fn draw_text_body(f: &mut Frame, area: Rect, title: &str, body: &str, focus_body: bool) {
+    let r = modal_rect(area, 72, 16);
+    f.render_widget(Clear, r);
+    let title_style = if focus_body {
+        Style::new().dim()
+    } else {
+        Style::new().bold()
+    };
+    let body_style = if focus_body {
+        Style::new().bold()
+    } else {
+        Style::new().dim()
+    };
+    let lines = vec![
+        Line::from(vec![
+            Span::styled("title: ", title_style),
+            Span::raw(title.to_string()),
+        ]),
+        Line::raw(""),
+        Line::from(Span::styled(
+            "body (markdown, Enter=newline, F2=accept):",
+            body_style,
+        )),
+        Line::raw(""),
+        Line::raw(body.to_string()),
+        Line::styled(
+            "[Tab cycles fields · F2 save · Esc cancel]".to_string(),
+            Style::new().dim(),
+        ),
+    ];
+    f.render_widget(
+        Paragraph::new(lines).block(Block::bordered().title(" New text card ")),
         r,
     );
 }

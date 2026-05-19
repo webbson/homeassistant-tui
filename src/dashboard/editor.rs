@@ -19,10 +19,31 @@ pub enum EditorMode {
     Browse,
     /// User pressed `a` — picking a card type.
     PickingType,
-    /// Card type chosen — entering an entity id (or text body for text card).
-    Entering {
+    /// Card type chosen, multi-instance — pick which HA instance.
+    PickingInstance {
         card_type: CardTypeStub,
-        buffer: String,
+        selected: usize,
+    },
+    /// Instance picked — fuzzy-search for entity within that instance.
+    PickingEntity {
+        card_type: CardTypeStub,
+        instance: String,
+        query: String,
+        selected: usize,
+    },
+    /// Entity picked — optional title override (Enter on empty = use friendly_name).
+    EditingTitle {
+        card_type: CardTypeStub,
+        instance: String,
+        entity: String,
+        friendly_name: String,
+        title_buffer: String,
+    },
+    /// Text card body input.
+    EditingTextBody {
+        title_buffer: String,
+        body_buffer: String,
+        focus_body: bool,
     },
     /// Confirm dialog before exiting with unsaved changes.
     ConfirmExit,

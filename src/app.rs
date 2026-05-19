@@ -138,10 +138,7 @@ impl App {
                 if let KeyCode::Char(c) = k.code {
                     if let Some(d) = c.to_digit(10) {
                         if let Some(kind) = CardTypeStub::ALL.get((d as usize).wrapping_sub(1)) {
-                            editor.mode = EditorMode::Entering {
-                                card_type: *kind,
-                                buffer: String::new(),
-                            };
+                            self.start_card_after_type(*kind);
                             return;
                         }
                     }
@@ -151,19 +148,132 @@ impl App {
                 }
                 return;
             }
-            EditorMode::Entering { card_type, buffer } => {
+            EditorMode::PickingInstance {
+                card_type,
+                selected,
+            } => {
+                let aliases: Vec<String> = self.instances.runtimes.keys().cloned().collect();
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        if *selected > 0 {
+                            *selected -= 1;
+                        }
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        if *selected + 1 < aliases.len() {
+                            *selected += 1;
+                        }
+                    }
+                    KeyCode::Enter => {
+                        if let Some(inst) = aliases.get(*selected) {
+                            let ct = *card_type;
+                            let inst = inst.clone();
+                            editor.mode = EditorMode::PickingEntity {
+                                card_type: ct,
+                                instance: inst,
+                                query: String::new(),
+                                selected: 0,
+                            };
+                        }
+                    }
+                    KeyCode::Char(c) if c.is_ascii_digit() => {
+                        let i = c.to_digit(10).unwrap() as usize;
+                        if i >= 1 && i <= aliases.len() {
+                            let ct = *card_type;
+                            let inst = aliases[i - 1].clone();
+                            editor.mode = EditorMode::PickingEntity {
+                                card_type: ct,
+                                instance: inst,
+                                query: String::new(),
+                                selected: 0,
+                            };
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::PickingEntity {
+                card_type,
+                instance,
+                query,
+                selected,
+            } => {
+                let rows = entity_search(&self.instances, instance, query);
                 match k.code {
                     KeyCode::Esc => editor.mode = EditorMode::Browse,
                     KeyCode::Backspace => {
-                        buffer.pop();
+                        query.pop();
+                        *selected = 0;
                     }
-                    KeyCode::Char(c) => buffer.push(c),
+                    KeyCode::Up => {
+                        if *selected > 0 {
+                            *selected -= 1;
+                        }
+                    }
+                    KeyCode::Down => {
+                        if *selected + 1 < rows.len() {
+                            *selected += 1;
+                        }
+                    }
+                    KeyCode::PageUp => {
+                        *selected = selected.saturating_sub(10);
+                    }
+                    KeyCode::PageDown => {
+                        *selected = (*selected + 10).min(rows.len().saturating_sub(1));
+                    }
+                    KeyCode::Char(c) => {
+                        query.push(c);
+                        *selected = 0;
+                    }
                     KeyCode::Enter => {
-                        let kind = *card_type;
-                        let buf = buffer.clone();
+                        if let Some(pick) = rows.get(*selected) {
+                            let ct = *card_type;
+                            let inst = instance.clone();
+                            let eid = pick.entity_id.clone();
+                            let fname = pick.friendly_name.clone();
+                            editor.mode = EditorMode::EditingTitle {
+                                card_type: ct,
+                                instance: inst,
+                                entity: eid,
+                                friendly_name: fname,
+                                title_buffer: String::new(),
+                            };
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::EditingTitle {
+                card_type,
+                instance,
+                entity,
+                friendly_name,
+                title_buffer,
+            } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        title_buffer.pop();
+                    }
+                    KeyCode::Char(c) => title_buffer.push(c),
+                    KeyCode::Enter => {
+                        let ct = *card_type;
+                        let inst = instance.clone();
+                        let ent = entity.clone();
+                        let title = if title_buffer.trim().is_empty() {
+                            if friendly_name.is_empty() {
+                                None
+                            } else {
+                                Some(friendly_name.clone())
+                            }
+                        } else {
+                            Some(title_buffer.trim().to_string())
+                        };
                         editor.mode = EditorMode::Browse;
-                        let default_alias = self.instances.runtimes.keys().next().cloned();
-                        let kind_opt = build_card_kind(kind, &buf, default_alias.as_deref());
+                        let kind = build_typed_card(ct, inst, ent, title);
                         let Some(dash) = self.dashboards.get_mut(dash_idx) else {
                             return;
                         };
@@ -171,11 +281,61 @@ impl App {
                             return;
                         };
                         editor2.snapshot(dash);
-                        if let Some(card_kind) = kind_opt {
-                            editor2.add_card(dash, card_kind);
+                        editor2.add_card(dash, kind);
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::EditingTextBody {
+                title_buffer,
+                body_buffer,
+                focus_body,
+            } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Tab => *focus_body = !*focus_body,
+                    KeyCode::Backspace => {
+                        if *focus_body {
+                            body_buffer.pop();
                         } else {
-                            self.last_error = Some("invalid card spec".into());
+                            title_buffer.pop();
                         }
+                    }
+                    KeyCode::Char(c) => {
+                        if *focus_body {
+                            body_buffer.push(c);
+                        } else {
+                            title_buffer.push(c);
+                        }
+                    }
+                    KeyCode::Enter => {
+                        if *focus_body {
+                            body_buffer.push('\n');
+                        } else {
+                            *focus_body = true;
+                        }
+                    }
+                    KeyCode::F(2) => {
+                        let title = if title_buffer.trim().is_empty() {
+                            None
+                        } else {
+                            Some(title_buffer.trim().to_string())
+                        };
+                        let body = body_buffer.clone();
+                        editor.mode = EditorMode::Browse;
+                        let kind = CardKind::Text {
+                            markdown: body,
+                            title,
+                        };
+                        let Some(dash) = self.dashboards.get_mut(dash_idx) else {
+                            return;
+                        };
+                        let Some(editor2) = self.editor.as_mut() else {
+                            return;
+                        };
+                        editor2.snapshot(dash);
+                        editor2.add_card(dash, kind);
                     }
                     _ => {}
                 }
@@ -313,6 +473,43 @@ impl App {
             .or_else(crate::dashboard::persist::default_path);
         self.editor = Some(EditorState::new(idx, path));
         self.screen = Screen::Editor;
+    }
+
+    fn start_card_after_type(&mut self, kind: CardTypeStub) {
+        let Some(editor) = self.editor.as_mut() else {
+            return;
+        };
+        if matches!(kind, CardTypeStub::Text) {
+            editor.mode = EditorMode::EditingTextBody {
+                title_buffer: String::new(),
+                body_buffer: String::new(),
+                focus_body: false,
+            };
+            return;
+        }
+        let aliases: Vec<String> = self.instances.runtimes.keys().cloned().collect();
+        match aliases.len() {
+            0 => {
+                self.last_error = Some("no instances connected".into());
+                if let Some(e) = self.editor.as_mut() {
+                    e.mode = EditorMode::Browse;
+                }
+            }
+            1 => {
+                editor.mode = EditorMode::PickingEntity {
+                    card_type: kind,
+                    instance: aliases.into_iter().next().unwrap(),
+                    query: String::new(),
+                    selected: 0,
+                };
+            }
+            _ => {
+                editor.mode = EditorMode::PickingInstance {
+                    card_type: kind,
+                    selected: 0,
+                };
+            }
+        }
     }
 
     fn create_new_dashboard(&mut self) {
@@ -579,6 +776,84 @@ impl App {
     }
 }
 
+/// Row returned by entity search modal.
+#[derive(Debug, Clone)]
+pub struct EntityPick {
+    pub entity_id: String,
+    pub friendly_name: String,
+}
+
+pub fn entity_search(instances: &InstanceRegistry, instance: &str, query: &str) -> Vec<EntityPick> {
+    let Some(rt) = instances.runtimes.get(instance) else {
+        return Vec::new();
+    };
+    let q = query.to_ascii_lowercase();
+    let mut out: Vec<EntityPick> = rt
+        .states
+        .values()
+        .map(|s| {
+            let friendly = s
+                .attributes
+                .get("friendly_name")
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+                .unwrap_or_default();
+            EntityPick {
+                entity_id: s.entity_id.clone(),
+                friendly_name: friendly,
+            }
+        })
+        .filter(|p| {
+            if q.is_empty() {
+                return true;
+            }
+            p.entity_id.to_ascii_lowercase().contains(&q)
+                || p.friendly_name.to_ascii_lowercase().contains(&q)
+        })
+        .collect();
+    out.sort_by(|a, b| a.entity_id.cmp(&b.entity_id));
+    out
+}
+
+fn build_typed_card(
+    kind: CardTypeStub,
+    instance: String,
+    entity: String,
+    title: Option<String>,
+) -> CardKind {
+    match kind {
+        CardTypeStub::Entity => CardKind::Entity {
+            instance,
+            entity,
+            title,
+        },
+        CardTypeStub::Toggle => CardKind::Toggle {
+            instance,
+            entity,
+            title,
+        },
+        CardTypeStub::Gauge => CardKind::Gauge {
+            instance,
+            entity,
+            min: 0.0,
+            max: 100.0,
+            unit: None,
+            title,
+        },
+        CardTypeStub::Sparkline => CardKind::Sparkline {
+            instance,
+            entity,
+            window: "1h".into(),
+            title,
+        },
+        CardTypeStub::Text => CardKind::Text {
+            markdown: String::new(),
+            title,
+        },
+    }
+}
+
+#[allow(dead_code)]
 fn build_card_kind(kind: CardTypeStub, buf: &str, default_alias: Option<&str>) -> Option<CardKind> {
     let buf = buf.trim();
     if buf.is_empty() && !matches!(kind, CardTypeStub::Text) {
