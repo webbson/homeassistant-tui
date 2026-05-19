@@ -1,0 +1,13 @@
+/target
+**/*.rs.bk
+*.pdb
+.DS_Store
+
+# Local config with secrets — NEVER commit
+config/config.yaml
+config/dashboards.yaml
+*.token
+
+# IDE
+.idea/
+.vscode/

@@ -1,0 +1,14 @@
+# ha-tui — multi-instance Home Assistant config
+# Copy to ~/.config/ha-tui/config.yaml (or use --config <path>).
+
+instances:
+  - alias: home
+    url: "wss://ha.example.com/api/websocket"
+    token: "${HA_HOME_TOKEN}"   # ${ENV_VAR} expands at load time
+    color: "cyan"               # optional; auto-assigned if omitted
+
+  - alias: cabin
+    url: "ws://192.168.50.10:8123/api/websocket"
+    token_file: "~/.config/ha-tui/cabin.token"  # token in separate file
+
+log_level: "info"

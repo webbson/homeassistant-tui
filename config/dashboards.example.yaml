@@ -1,0 +1,35 @@
+# ha-tui — dashboard definitions
+# Each dashboard is a 12x8 (configurable) grid of cards.
+
+dashboards:
+  - name: "Home"
+    grid: { cols: 12, rows: 8 }
+    cards:
+      - type: entity
+        instance: home
+        entity: light.kitchen
+        title: "Kitchen Light"
+        pos: { col: 0, row: 0, w: 3, h: 2 }
+
+      - type: toggle
+        instance: home
+        entity: switch.coffee
+        pos: { col: 3, row: 0, w: 3, h: 2 }
+
+      - type: gauge
+        instance: cabin
+        entity: sensor.cabin_temp
+        min: -20
+        max: 30
+        unit: "°C"
+        pos: { col: 6, row: 0, w: 3, h: 3 }
+
+      - type: sparkline
+        instance: cabin
+        entity: sensor.power
+        window: "1h"
+        pos: { col: 0, row: 2, w: 6, h: 3 }
+
+      - type: text
+        markdown: "## Notes\nMQTT down? check broker."
+        pos: { col: 9, row: 0, w: 3, h: 4 }

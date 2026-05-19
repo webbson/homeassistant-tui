@@ -1,0 +1,89 @@
+use std::path::{Path, PathBuf};
+
+use color_eyre::eyre::Context;
+use color_eyre::Result;
+use directories::ProjectDirs;
+
+use crate::dashboard::DashboardFile;
+
+pub fn default_path() -> Option<PathBuf> {
+    ProjectDirs::from("", "", "ha-tui").map(|d| d.config_dir().join("dashboards.yaml"))
+}
+
+pub fn load(explicit: Option<&Path>) -> Result<DashboardFile> {
+    let path = match explicit {
+        Some(p) => p.to_path_buf(),
+        None => {
+            default_path().ok_or_else(|| color_eyre::eyre::eyre!("cannot resolve config dir"))?
+        }
+    };
+    if !path.exists() {
+        return Ok(DashboardFile { dashboards: vec![] });
+    }
+    let raw = std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
+    let file: DashboardFile =
+        serde_yaml::from_str(&raw).with_context(|| format!("parse {}", path.display()))?;
+    Ok(file)
+}
+
+pub fn save(file: &DashboardFile, path: &Path) -> Result<()> {
+    let raw = serde_yaml::to_string(file)?;
+    std::fs::write(path, raw).with_context(|| format!("write {}", path.display()))?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dashboard::{Card, CardKind, Dashboard, Grid, Pos};
+
+    #[test]
+    fn round_trip_yaml() {
+        let f = DashboardFile {
+            dashboards: vec![Dashboard {
+                name: "Home".into(),
+                grid: Grid { cols: 12, rows: 8 },
+                cards: vec![Card {
+                    pos: Pos {
+                        col: 0,
+                        row: 0,
+                        w: 3,
+                        h: 2,
+                    },
+                    kind: CardKind::Entity {
+                        instance: "home".into(),
+                        entity: "light.kitchen".into(),
+                        title: Some("Kitchen".into()),
+                    },
+                }],
+            }],
+        };
+        let yaml = serde_yaml::to_string(&f).unwrap();
+        let back: DashboardFile = serde_yaml::from_str(&yaml).unwrap();
+        assert_eq!(back.dashboards.len(), 1);
+        assert_eq!(back.dashboards[0].cards.len(), 1);
+    }
+
+    #[test]
+    fn parses_example_format() {
+        let yaml = r#"
+dashboards:
+  - name: "Home"
+    grid: { cols: 12, rows: 8 }
+    cards:
+      - type: entity
+        instance: home
+        entity: light.kitchen
+        pos: { col: 0, row: 0, w: 3, h: 2 }
+      - type: gauge
+        instance: cabin
+        entity: sensor.temp
+        min: -20
+        max: 30
+        unit: "°C"
+        pos: { col: 3, row: 0, w: 3, h: 3 }
+"#;
+        let f: DashboardFile = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(f.dashboards[0].cards.len(), 2);
+    }
+}
