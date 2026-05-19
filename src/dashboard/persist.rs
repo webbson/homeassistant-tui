@@ -2,12 +2,11 @@ use std::path::{Path, PathBuf};
 
 use color_eyre::eyre::Context;
 use color_eyre::Result;
-use directories::ProjectDirs;
 
 use crate::dashboard::DashboardFile;
 
 pub fn default_path() -> Option<PathBuf> {
-    ProjectDirs::from("", "", "ha-tui").map(|d| d.config_dir().join("dashboards.yaml"))
+    crate::util::paths::config_dir().map(|d| d.join("dashboards.yaml"))
 }
 
 pub fn load(explicit: Option<&Path>) -> Result<DashboardFile> {

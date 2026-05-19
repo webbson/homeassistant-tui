@@ -24,9 +24,9 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 tracing-appender = "0.2"
 color-eyre = "0.6"
-directories = "5"
 clap = { version = "4", features = ["derive"] }
 indexmap = { version = "2", features = ["serde"] }
+# directories dep removed in favor of util::paths (XDG-style on macOS too)
 chrono = { version = "0.4", features = ["serde"] }
 
 [dev-dependencies]

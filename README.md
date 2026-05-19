@@ -25,7 +25,7 @@ cargo install --path .
 
 ## Configure
 
-Copy the example files into your config dir (`~/.config/ha-tui/` on Linux/macOS):
+Copy the example files into your XDG config dir — `~/.config/ha-tui/` on both Linux and macOS:
 
 ```bash
 mkdir -p ~/.config/ha-tui

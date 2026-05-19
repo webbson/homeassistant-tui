@@ -2,12 +2,11 @@ use std::path::{Path, PathBuf};
 
 use color_eyre::eyre::{eyre, Context};
 use color_eyre::Result;
-use directories::ProjectDirs;
 
 use super::{Config, InstanceConfig};
 
 pub fn default_config_path() -> Option<PathBuf> {
-    ProjectDirs::from("", "", "ha-tui").map(|d| d.config_dir().join("config.yaml"))
+    crate::util::paths::config_dir().map(|d| d.join("config.yaml"))
 }
 
 pub fn load(explicit: Option<&Path>) -> Result<Config> {
