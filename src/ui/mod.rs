@@ -72,10 +72,13 @@ fn draw_body(f: &mut Frame, area: ratatui::layout::Rect, app: &App) {
 }
 
 fn draw_footer(f: &mut Frame, area: ratatui::layout::Rect, app: &App) {
-    let info = if let Some(err) = &app.last_error {
-        format!("error: {err}")
+    use ratatui::style::Color;
+    let (text, style) = if let Some(err) = &app.last_error {
+        (format!("error: {err}"), Style::new().fg(Color::Red))
+    } else if let Some(msg) = &app.status_msg {
+        (msg.clone(), Style::new().fg(Color::Green))
     } else {
-        match &app.screen {
+        let s = match &app.screen {
             Screen::Entities { .. } => format!(
                 "{} entities · q quit · j/k navigate · f filter · n new dashboard · i instances",
                 app.instances.total_entities()
@@ -88,9 +91,10 @@ fn draw_footer(f: &mut Frame, area: ratatui::layout::Rect, app: &App) {
                 format!("dashboard: {name} · 1..9 switch · h/l select card · ⏎ activate · e edit · E entities · q quit")
             }
             Screen::Editor => {
-                "editor · hjkl move · HJKL resize · a add · d del · ⏎ select/place · u undo · s save · Esc exit".to_string()
+                "editor · hjkl move · HJKL resize · a add · d del · R rename · ⏎ select/place · u undo · s save · Esc exit".to_string()
             }
-        }
+        };
+        (s, Style::new().dim())
     };
-    f.render_widget(Paragraph::new(info).style(Style::new().dim()), area);
+    f.render_widget(Paragraph::new(text).style(style), area);
 }

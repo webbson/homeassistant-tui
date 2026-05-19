@@ -38,6 +38,7 @@ pub struct App {
     pub last_terminal_size: (u16, u16),
     pub mouse_drag: Option<MouseDrag>,
     pub show_help: bool,
+    pub status_msg: Option<String>,
     pub last_error: Option<String>,
     #[allow(dead_code)]
     pub tx: mpsc::UnboundedSender<AppEvent>,
@@ -64,6 +65,7 @@ impl App {
             last_terminal_size: (0, 0),
             mouse_drag: None,
             show_help: false,
+            status_msg: None,
             last_error: None,
             tx,
         }
@@ -79,6 +81,8 @@ impl App {
     }
 
     fn handle_key(&mut self, k: KeyEvent) {
+        // Clear transient status on next key (so "saved" doesn't linger).
+        self.status_msg = None;
         if self.show_help {
             self.show_help = false;
             return;
@@ -448,7 +452,8 @@ impl App {
                             if let Some(ed) = self.editor.as_mut() {
                                 ed.dirty = false;
                             }
-                            self.last_error = Some(format!("saved {}", p.display()));
+                            self.last_error = None;
+                            self.status_msg = Some(format!("saved {}", p.display()));
                         }
                         Err(e) => self.last_error = Some(format!("save failed: {e}")),
                     }
@@ -529,7 +534,7 @@ impl App {
         ed.dirty = true;
         self.editor = Some(ed);
         self.screen = Screen::Editor;
-        self.last_error = Some(format!("new dashboard #{n} — press 's' to save"));
+        self.status_msg = Some(format!("new dashboard #{n} — press 'R' to rename, 's' to save"));
     }
 
     fn handle_mouse(&mut self, m: MouseEvent) {
