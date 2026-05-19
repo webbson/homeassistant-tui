@@ -173,12 +173,7 @@ impl App {
                         if let Some(inst) = aliases.get(*selected) {
                             let ct = *card_type;
                             let inst = inst.clone();
-                            editor.mode = EditorMode::PickingEntity {
-                                card_type: ct,
-                                instance: inst,
-                                query: String::new(),
-                                selected: 0,
-                            };
+                            editor.mode = picker_mode_for(ct, inst);
                         }
                     }
                     KeyCode::Char(c) if c.is_ascii_digit() => {
@@ -186,12 +181,7 @@ impl App {
                         if i >= 1 && i <= aliases.len() {
                             let ct = *card_type;
                             let inst = aliases[i - 1].clone();
-                            editor.mode = EditorMode::PickingEntity {
-                                card_type: ct,
-                                instance: inst,
-                                query: String::new(),
-                                selected: 0,
-                            };
+                            editor.mode = picker_mode_for(ct, inst);
                         }
                     }
                     _ => {}
@@ -278,6 +268,102 @@ impl App {
                         };
                         editor.mode = EditorMode::Browse;
                         let kind = build_typed_card(ct, inst, ent, title);
+                        let Some(dash) = self.dashboards.get_mut(dash_idx) else {
+                            return;
+                        };
+                        let Some(editor2) = self.editor.as_mut() else {
+                            return;
+                        };
+                        editor2.snapshot(dash);
+                        editor2.add_card(dash, kind);
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::PickingMulti {
+                instance,
+                query,
+                selected,
+                picked,
+            } => {
+                let rows = entity_search(&self.instances, instance, query);
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        query.pop();
+                        *selected = 0;
+                    }
+                    KeyCode::Up => {
+                        if *selected > 0 {
+                            *selected -= 1;
+                        }
+                    }
+                    KeyCode::Down => {
+                        if *selected + 1 < rows.len() {
+                            *selected += 1;
+                        }
+                    }
+                    KeyCode::Char(' ') => {
+                        if let Some(pick) = rows.get(*selected) {
+                            let pair = (pick.entity_id.clone(), pick.friendly_name.clone());
+                            if let Some(pos) = picked.iter().position(|p| p.0 == pair.0) {
+                                picked.remove(pos);
+                            } else {
+                                picked.push(pair);
+                            }
+                        }
+                    }
+                    KeyCode::Char(c) => {
+                        query.push(c);
+                        *selected = 0;
+                    }
+                    KeyCode::Enter => {
+                        if picked.is_empty() {
+                            // Treat Enter as toggle when no picks yet, then continue.
+                            if let Some(pick) = rows.get(*selected) {
+                                picked.push((pick.entity_id.clone(), pick.friendly_name.clone()));
+                            }
+                            return;
+                        }
+                        let inst = instance.clone();
+                        let p = picked.clone();
+                        editor.mode = EditorMode::EditingEntityListTitle {
+                            instance: inst,
+                            picked: p,
+                            title_buffer: String::new(),
+                        };
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::EditingEntityListTitle {
+                instance,
+                picked,
+                title_buffer,
+            } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        title_buffer.pop();
+                    }
+                    KeyCode::Char(c) => title_buffer.push(c),
+                    KeyCode::Enter => {
+                        let title = if title_buffer.trim().is_empty() {
+                            None
+                        } else {
+                            Some(title_buffer.trim().to_string())
+                        };
+                        let inst = instance.clone();
+                        let entities: Vec<String> =
+                            picked.iter().map(|(eid, _)| eid.clone()).collect();
+                        editor.mode = EditorMode::Browse;
+                        let kind = CardKind::EntityList {
+                            instance: inst,
+                            entities,
+                            title,
+                        };
                         let Some(dash) = self.dashboards.get_mut(dash_idx) else {
                             return;
                         };
@@ -570,6 +656,23 @@ impl App {
             return;
         }
         let aliases: Vec<String> = self.instances.runtimes.keys().cloned().collect();
+        let into_picker = |instance: String| -> EditorMode {
+            if matches!(kind, CardTypeStub::EntityList) {
+                EditorMode::PickingMulti {
+                    instance,
+                    query: String::new(),
+                    selected: 0,
+                    picked: Vec::new(),
+                }
+            } else {
+                EditorMode::PickingEntity {
+                    card_type: kind,
+                    instance,
+                    query: String::new(),
+                    selected: 0,
+                }
+            }
+        };
         match aliases.len() {
             0 => {
                 self.last_error = Some("no instances connected".into());
@@ -578,12 +681,7 @@ impl App {
                 }
             }
             1 => {
-                editor.mode = EditorMode::PickingEntity {
-                    card_type: kind,
-                    instance: aliases.into_iter().next().unwrap(),
-                    query: String::new(),
-                    selected: 0,
-                };
+                editor.mode = into_picker(aliases.into_iter().next().unwrap());
             }
             _ => {
                 editor.mode = EditorMode::PickingInstance {
@@ -899,6 +997,24 @@ pub fn entity_search(instances: &InstanceRegistry, instance: &str, query: &str) 
     out
 }
 
+fn picker_mode_for(kind: CardTypeStub, instance: String) -> EditorMode {
+    if matches!(kind, CardTypeStub::EntityList) {
+        EditorMode::PickingMulti {
+            instance,
+            query: String::new(),
+            selected: 0,
+            picked: Vec::new(),
+        }
+    } else {
+        EditorMode::PickingEntity {
+            card_type: kind,
+            instance,
+            query: String::new(),
+            selected: 0,
+        }
+    }
+}
+
 fn build_typed_card(
     kind: CardTypeStub,
     instance: String,
@@ -932,6 +1048,11 @@ fn build_typed_card(
         },
         CardTypeStub::Text => CardKind::Text {
             markdown: String::new(),
+            title,
+        },
+        CardTypeStub::EntityList => CardKind::EntityList {
+            instance,
+            entities: vec![entity],
             title,
         },
     }
@@ -979,7 +1100,7 @@ fn build_card_kind(kind: CardTypeStub, buf: &str, default_alias: Option<&str>) -
             window: "1h".into(),
             title: None,
         },
-        CardTypeStub::Text => unreachable!(),
+        CardTypeStub::Text | CardTypeStub::EntityList => unreachable!(),
     })
 }
 

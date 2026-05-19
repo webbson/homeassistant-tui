@@ -103,6 +103,17 @@ pub fn draw(f: &mut Frame, area: Rect, app: &App) {
             body_buffer,
             focus_body,
         } => draw_text_body(f, area, title_buffer, body_buffer, *focus_body),
+        EditorMode::PickingMulti {
+            instance,
+            query,
+            selected,
+            picked,
+        } => draw_multi_picker(f, area, app, instance, query, *selected, picked),
+        EditorMode::EditingEntityListTitle {
+            instance,
+            picked,
+            title_buffer,
+        } => draw_entity_list_title(f, area, instance, picked, title_buffer),
         EditorMode::ConfirmExit => draw_confirm(f, area, "Unsaved changes. Discard? (y/n)"),
         EditorMode::ConfirmDelete => draw_confirm(f, area, "Delete selected card? (y/n)"),
         EditorMode::Renaming { buffer } => draw_rename(f, area, buffer),
@@ -396,6 +407,164 @@ fn draw_resize_grid(f: &mut Frame, area: Rect, cols: &str, rows: &str, focus_row
     ];
     f.render_widget(
         Paragraph::new(lines).block(Block::bordered().title(" Grid size ")),
+        r,
+    );
+}
+
+fn draw_multi_picker(
+    f: &mut Frame,
+    area: Rect,
+    app: &App,
+    instance: &str,
+    query: &str,
+    selected: usize,
+    picked: &[(String, String)],
+) {
+    let w = 90u16.min(area.width.saturating_sub(2));
+    let h = 26u16.min(area.height.saturating_sub(2));
+    let x = area.x + area.width.saturating_sub(w) / 2;
+    let y = area.y + area.height.saturating_sub(h) / 2;
+    let r = Rect {
+        x,
+        y,
+        width: w,
+        height: h,
+    };
+    f.render_widget(Clear, r);
+    let color = app.theme.instance_color(instance);
+    let title = format!(
+        " entity list → {}  (Space=toggle, Enter=done, ↑/↓ select, Esc cancel) ",
+        instance
+    );
+    f.render_widget(Block::bordered().title(title), r);
+
+    let inner = Rect {
+        x: r.x + 1,
+        y: r.y + 1,
+        width: r.width.saturating_sub(2),
+        height: r.height.saturating_sub(2),
+    };
+    let search_row = Rect {
+        x: inner.x,
+        y: inner.y,
+        width: inner.width,
+        height: 1,
+    };
+    let picked_label = Rect {
+        x: inner.x,
+        y: inner.y + 1,
+        width: inner.width,
+        height: 1,
+    };
+    let list_row = Rect {
+        x: inner.x,
+        y: inner.y + 3,
+        width: inner.width,
+        height: inner.height.saturating_sub(4),
+    };
+
+    f.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("search: ", Style::new().dim()),
+            Span::styled(query.to_string(), Style::new().fg(color).bold()),
+            Span::styled("_", Style::new().fg(color).rapid_blink()),
+        ])),
+        search_row,
+    );
+
+    let picked_text = if picked.is_empty() {
+        "(none yet)".to_string()
+    } else {
+        picked
+            .iter()
+            .map(|(eid, _)| eid.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    f.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("picked: ", Style::new().dim()),
+            Span::styled(picked_text, Style::new().fg(color)),
+        ])),
+        picked_label,
+    );
+
+    let rows = crate::app::entity_search(&app.instances, instance, query);
+    let items: Vec<ListItem<'_>> = rows
+        .iter()
+        .map(|p| {
+            let chosen = picked.iter().any(|(eid, _)| eid == &p.entity_id);
+            let primary = if p.friendly_name.is_empty() {
+                p.entity_id.clone()
+            } else {
+                p.friendly_name.clone()
+            };
+            let mark = if chosen { "[x] " } else { "[ ] " };
+            ListItem::new(Line::from(vec![
+                Span::styled(mark.to_string(), Style::new().bold()),
+                Span::styled(primary, Style::new().fg(color).bold()),
+                Span::raw("  "),
+                Span::styled(p.entity_id.clone(), Style::new().dim()),
+            ]))
+        })
+        .collect();
+    let mut state = ListState::default();
+    if !items.is_empty() {
+        state.select(Some(selected.min(items.len() - 1)));
+    }
+    f.render_stateful_widget(
+        List::new(items)
+            .highlight_style(Style::new().reversed())
+            .highlight_symbol("▶ "),
+        list_row,
+        &mut state,
+    );
+}
+
+fn draw_entity_list_title(
+    f: &mut Frame,
+    area: Rect,
+    instance: &str,
+    picked: &[(String, String)],
+    title_buffer: &str,
+) {
+    let r = modal_rect(area, 72, 10);
+    f.render_widget(Clear, r);
+    let count = picked.len();
+    let preview = picked
+        .iter()
+        .take(3)
+        .map(|(eid, _)| eid.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let preview = if count > 3 {
+        format!("{preview}, … ({count} total)")
+    } else {
+        preview
+    };
+    let lines = vec![
+        Line::from(vec![
+            Span::styled("instance: ", Style::new().dim()),
+            Span::raw(instance.to_string()),
+        ]),
+        Line::from(vec![
+            Span::styled("entities: ", Style::new().dim()),
+            Span::raw(preview),
+        ]),
+        Line::raw(""),
+        Line::from(Span::styled(
+            "title (default: \"Entities\"):",
+            Style::new().bold(),
+        )),
+        Line::from(vec![
+            Span::raw("> "),
+            Span::styled(title_buffer.to_string(), Style::new().bold()),
+            Span::styled("_", Style::new().rapid_blink()),
+        ]),
+    ];
+    f.render_widget(
+        Paragraph::new(lines)
+            .block(Block::bordered().title(" Entity list title (Enter=accept, Esc=cancel) ")),
         r,
     );
 }

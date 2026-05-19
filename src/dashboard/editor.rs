@@ -45,6 +45,19 @@ pub enum EditorMode {
         body_buffer: String,
         focus_body: bool,
     },
+    /// Multi-select entity picker (used only for EntityList card type).
+    PickingMulti {
+        instance: String,
+        query: String,
+        selected: usize,
+        picked: Vec<(String, String)>,
+    },
+    /// Title input for the in-progress EntityList card.
+    EditingEntityListTitle {
+        instance: String,
+        picked: Vec<(String, String)>,
+        title_buffer: String,
+    },
     /// Rename current dashboard.
     Renaming {
         buffer: String,
@@ -68,6 +81,7 @@ pub enum CardTypeStub {
     Gauge,
     Sparkline,
     Text,
+    EntityList,
 }
 
 impl CardTypeStub {
@@ -77,6 +91,7 @@ impl CardTypeStub {
         CardTypeStub::Gauge,
         CardTypeStub::Sparkline,
         CardTypeStub::Text,
+        CardTypeStub::EntityList,
     ];
     pub fn label(self) -> &'static str {
         match self {
@@ -85,6 +100,7 @@ impl CardTypeStub {
             CardTypeStub::Gauge => "gauge",
             CardTypeStub::Sparkline => "sparkline",
             CardTypeStub::Text => "text",
+            CardTypeStub::EntityList => "entity list (multi)",
         }
     }
 }

@@ -1,4 +1,5 @@
 pub mod card_entity;
+pub mod card_entity_list;
 pub mod card_gauge;
 pub mod card_sparkline;
 pub mod card_text;

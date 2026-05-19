@@ -78,6 +78,12 @@ pub enum CardKind {
         #[serde(default)]
         title: Option<String>,
     },
+    EntityList {
+        instance: Alias,
+        entities: Vec<EntityId>,
+        #[serde(default)]
+        title: Option<String>,
+    },
 }
 
 fn default_window() -> String {
@@ -92,6 +98,7 @@ impl Card {
             | CardKind::Gauge { title, entity, .. }
             | CardKind::Sparkline { title, entity, .. } => title.as_deref().unwrap_or(entity),
             CardKind::Text { title, .. } => title.as_deref().unwrap_or("Text"),
+            CardKind::EntityList { title, .. } => title.as_deref().unwrap_or("Entities"),
         }
     }
 
@@ -109,7 +116,7 @@ impl Card {
             | CardKind::Sparkline {
                 instance, entity, ..
             } => Some((instance, entity)),
-            CardKind::Text { .. } => None,
+            CardKind::Text { .. } | CardKind::EntityList { .. } => None,
         }
     }
 }

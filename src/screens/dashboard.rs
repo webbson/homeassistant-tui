@@ -111,5 +111,13 @@ fn render_card(
         CardKind::Text { markdown, .. } => {
             widgets::card_text::render(f, rect, &title, markdown, selected);
         }
+        CardKind::EntityList {
+            instance, entities, ..
+        } => {
+            let rt = app.instances.runtimes.get(instance);
+            widgets::card_entity_list::render(
+                f, rect, &title, instance, entities, rt, &app.theme, selected,
+            );
+        }
     }
 }
