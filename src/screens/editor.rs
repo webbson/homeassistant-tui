@@ -119,6 +119,21 @@ pub fn draw(f: &mut Frame, area: Rect, app: &App) {
         EditorMode::Renaming { buffer } => draw_rename(f, area, buffer),
         EditorMode::RenamingCard { buffer, .. } => draw_card_rename(f, area, buffer),
         EditorMode::EditingWindow { buffer, .. } => draw_window_edit(f, area, buffer),
+        EditorMode::EditingFilterQuery {
+            instance,
+            query_buffer,
+            title_buffer,
+            hide_state,
+            focus,
+        } => draw_filter_query(
+            f,
+            area,
+            instance,
+            query_buffer,
+            title_buffer,
+            *hide_state,
+            *focus,
+        ),
         EditorMode::Menu {
             context,
             items,
@@ -397,6 +412,79 @@ fn draw_menu(
             .highlight_symbol("▶ "),
         r,
         &mut state,
+    );
+}
+
+fn draw_filter_query(
+    f: &mut Frame,
+    area: Rect,
+    instance: &str,
+    query: &str,
+    title: &str,
+    hide_state: bool,
+    focus: crate::dashboard::editor::FilterFocus,
+) {
+    use crate::dashboard::editor::FilterFocus as F;
+    let r = modal_rect(area, 84, 14);
+    f.render_widget(Clear, r);
+    let f_style = |target: F| -> Style {
+        if focus == target {
+            Style::new().bold()
+        } else {
+            Style::new().dim()
+        }
+    };
+    let lines = vec![
+        Line::from(vec![
+            Span::styled("instance: ", Style::new().dim()),
+            Span::raw(instance.to_string()),
+        ]),
+        Line::raw(""),
+        Line::from(vec![
+            Span::styled("query: ", f_style(F::Query)),
+            Span::styled(query.to_string(), f_style(F::Query)),
+            if matches!(focus, F::Query) {
+                Span::styled("_", Style::new().rapid_blink())
+            } else {
+                Span::raw("")
+            },
+        ]),
+        Line::from(Span::styled(
+            "  format: glob[state=on][attr.location=\"HBG - Helsingborg\"]",
+            Style::new().dim(),
+        )),
+        Line::raw(""),
+        Line::from(vec![
+            Span::styled("title: ", f_style(F::Title)),
+            Span::styled(title.to_string(), f_style(F::Title)),
+            if matches!(focus, F::Title) {
+                Span::styled("_", Style::new().rapid_blink())
+            } else {
+                Span::raw("")
+            },
+        ]),
+        Line::raw(""),
+        Line::from(vec![
+            Span::styled("hide state column: ", f_style(F::HideToggle)),
+            Span::styled(
+                if hide_state { "[x]" } else { "[ ]" },
+                f_style(F::HideToggle),
+            ),
+            if matches!(focus, F::HideToggle) {
+                Span::styled("  (space to toggle)", Style::new().dim())
+            } else {
+                Span::raw("")
+            },
+        ]),
+        Line::raw(""),
+        Line::styled(
+            "[Tab cycles fields · F2 save · Esc cancel]".to_string(),
+            Style::new().dim(),
+        ),
+    ];
+    f.render_widget(
+        Paragraph::new(lines).block(Block::bordered().title(" Filtered entity list ")),
+        r,
     );
 }
 

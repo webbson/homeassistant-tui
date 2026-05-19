@@ -15,6 +15,8 @@ pub fn render(
     state: Option<&EntityState>,
     theme: &Theme,
     selected: bool,
+    ticker: bool,
+    ticker_offset: usize,
 ) {
     let color = theme.instance_color(instance);
     let mut block = Block::bordered()
@@ -28,15 +30,40 @@ pub fn render(
         Some(s) => {
             let unit = crate::ui::format::unit_of(s);
             let value = crate::ui::format::format_state(s, 1);
-            Line::from(vec![
-                Span::styled(value, Style::new().bold()),
-                Span::raw(" "),
-                Span::styled(unit.to_string(), Style::new().dim()),
-            ])
+            let raw = if unit.is_empty() {
+                value
+            } else {
+                format!("{value} {unit}")
+            };
+            // Reserve 2 chars padding on each side
+            let usable = area.width.saturating_sub(4) as usize;
+            let display = if ticker && raw.chars().count() > usable.max(1) {
+                ticker_slice(&raw, ticker_offset, usable.max(1))
+            } else {
+                raw
+            };
+            Line::from(vec![Span::styled(display, Style::new().bold())])
         }
     };
     let p = Paragraph::new(body)
         .alignment(Alignment::Center)
         .block(block);
     f.render_widget(p, area);
+}
+
+/// Produce a window of `width` characters that scrolls across `text`,
+/// with a 3-space gap separating loops so the marquee reads cleanly.
+fn ticker_slice(text: &str, offset: usize, width: usize) -> String {
+    let padded: String = format!("{text}   ");
+    let chars: Vec<char> = padded.chars().collect();
+    let len = chars.len();
+    if len == 0 {
+        return String::new();
+    }
+    let start = offset % len;
+    let mut out = String::with_capacity(width);
+    for i in 0..width {
+        out.push(chars[(start + i) % len]);
+    }
+    out
 }

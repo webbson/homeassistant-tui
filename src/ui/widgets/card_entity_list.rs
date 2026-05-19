@@ -17,6 +17,7 @@ pub fn render(
     theme: &Theme,
     selected: bool,
     sub_index: Option<usize>,
+    hide_state: bool,
 ) {
     let color = theme.instance_color(instance);
     let mut block = Block::bordered()
@@ -54,11 +55,15 @@ pub fn render(
                 Some("unavailable" | "unknown") => Style::new().red(),
                 _ => Style::new(),
             };
-            ListItem::new(Line::from(vec![
-                Span::styled(label, Style::new().fg(color).add_modifier(Modifier::BOLD)),
-                Span::raw("  "),
-                Span::styled(state_str, state_style),
-            ]))
+            let mut spans = vec![Span::styled(
+                label,
+                Style::new().fg(color).add_modifier(Modifier::BOLD),
+            )];
+            if !hide_state {
+                spans.push(Span::raw("  "));
+                spans.push(Span::styled(state_str, state_style));
+            }
+            ListItem::new(Line::from(spans))
         })
         .collect();
     let list = List::new(items)

@@ -38,6 +38,7 @@ pub struct App {
     pub last_terminal_size: (u16, u16),
     pub mouse_drag: Option<MouseDrag>,
     pub show_help: bool,
+    pub ticker_offset: usize,
     pub status_msg: Option<String>,
     pub last_error: Option<String>,
     #[allow(dead_code)]
@@ -65,6 +66,7 @@ impl App {
             last_terminal_size: (0, 0),
             mouse_drag: None,
             show_help: false,
+            ticker_offset: 0,
             status_msg: None,
             last_error: None,
             tx,
@@ -532,6 +534,77 @@ impl App {
                 }
                 return;
             }
+            EditorMode::EditingFilterQuery {
+                instance,
+                query_buffer,
+                title_buffer,
+                hide_state,
+                focus,
+            } => {
+                use crate::dashboard::editor::FilterFocus as F;
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Tab => {
+                        *focus = match *focus {
+                            F::Query => F::Title,
+                            F::Title => F::HideToggle,
+                            F::HideToggle => F::Query,
+                        };
+                    }
+                    KeyCode::Backspace => match *focus {
+                        F::Query => {
+                            query_buffer.pop();
+                        }
+                        F::Title => {
+                            title_buffer.pop();
+                        }
+                        F::HideToggle => {}
+                    },
+                    KeyCode::Char(' ') if matches!(*focus, F::HideToggle) => {
+                        *hide_state = !*hide_state;
+                    }
+                    KeyCode::Char(c) => match *focus {
+                        F::Query => query_buffer.push(c),
+                        F::Title => title_buffer.push(c),
+                        F::HideToggle => {}
+                    },
+                    KeyCode::F(2) => {
+                        let inst = instance.clone();
+                        let q = query_buffer.trim().to_string();
+                        let title = if title_buffer.trim().is_empty() {
+                            None
+                        } else {
+                            Some(title_buffer.trim().to_string())
+                        };
+                        let hide = *hide_state;
+                        editor.mode = EditorMode::Browse;
+                        if q.is_empty() {
+                            self.last_error = Some("query cannot be empty".into());
+                            return;
+                        }
+                        if let Err(e) = crate::dashboard::query::EntityQuery::parse(&q) {
+                            self.last_error = Some(format!("invalid query: {e}"));
+                            return;
+                        }
+                        let kind = CardKind::FilteredEntityList {
+                            instance: inst,
+                            query: q,
+                            hide_state: hide,
+                            title,
+                        };
+                        let Some(dash) = self.dashboards.get_mut(dash_idx) else {
+                            return;
+                        };
+                        let Some(editor2) = self.editor.as_mut() else {
+                            return;
+                        };
+                        editor2.snapshot(dash);
+                        editor2.add_card(dash, kind);
+                    }
+                    _ => {}
+                }
+                return;
+            }
             EditorMode::Menu {
                 items, selected, ..
             } => {
@@ -793,7 +866,10 @@ impl App {
                         | crate::dashboard::CardKind::Gauge { title, .. }
                         | crate::dashboard::CardKind::Sparkline { title, .. }
                         | crate::dashboard::CardKind::Text { title, .. }
-                        | crate::dashboard::CardKind::EntityList { title, .. } => title.clone(),
+                        | crate::dashboard::CardKind::EntityList { title, .. }
+                        | crate::dashboard::CardKind::FilteredEntityList { title, .. } => {
+                            title.clone()
+                        }
                     })
                     .unwrap_or_default();
                 if let Some(ed) = self.editor.as_mut() {
@@ -834,6 +910,68 @@ impl App {
                 if let Some(ed) = self.editor.as_mut() {
                     ed.selected_card = Some(idx);
                     ed.mode = EditorMode::ConfirmDelete;
+                }
+            }
+            (A::EditQuery, C::Card(idx)) => {
+                let mut existing: Option<(String, String, bool, String)> = None;
+                if let Some(card) = self.dashboards.get(dash_idx).and_then(|d| d.cards.get(idx)) {
+                    if let CardKind::FilteredEntityList {
+                        instance,
+                        query,
+                        hide_state,
+                        title,
+                    } = &card.kind
+                    {
+                        existing = Some((
+                            instance.clone(),
+                            query.clone(),
+                            *hide_state,
+                            title.clone().unwrap_or_default(),
+                        ));
+                    }
+                }
+                if let Some((inst, q, hs, t)) = existing {
+                    if let Some(ed) = self.editor.as_mut() {
+                        ed.selected_card = Some(idx);
+                        ed.edit_target = Some(idx);
+                        ed.mode = EditorMode::EditingFilterQuery {
+                            instance: inst,
+                            query_buffer: q,
+                            title_buffer: t,
+                            hide_state: hs,
+                            focus: crate::dashboard::editor::FilterFocus::Query,
+                        };
+                    }
+                }
+            }
+            (A::ToggleHideState, C::Card(idx)) => {
+                if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                    if let Some(ed) = self.editor.as_mut() {
+                        ed.snapshot(dash);
+                    }
+                    if let Some(card) = dash.cards.get_mut(idx) {
+                        if let CardKind::FilteredEntityList { hide_state, .. } = &mut card.kind {
+                            *hide_state = !*hide_state;
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.dirty = true;
+                            }
+                        }
+                    }
+                }
+            }
+            (A::ToggleTicker, C::Card(idx)) => {
+                if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                    if let Some(ed) = self.editor.as_mut() {
+                        ed.snapshot(dash);
+                    }
+                    if let Some(card) = dash.cards.get_mut(idx) {
+                        if let CardKind::Entity { ticker, .. } = &mut card.kind {
+                            *ticker = !*ticker;
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.dirty = true;
+                            }
+                        }
+                    }
                 }
             }
             (A::RenameDashboard, C::Dashboard) => {
@@ -909,6 +1047,13 @@ impl App {
                 self.last_error = Some("text cards have no entity to change".into());
                 return;
             }
+            CardKind::FilteredEntityList { .. } => {
+                // Filtered lists are edited via the query editor, not the entity picker.
+                self.last_error = Some(
+                    "filtered list uses query syntax — open menu (m) → Edit filter query".into(),
+                );
+                return;
+            }
         };
         editor.edit_target = Some(idx);
         editor.mode = if let Some(picked) = prefill {
@@ -941,23 +1086,6 @@ impl App {
             return;
         }
         let aliases: Vec<String> = self.instances.runtimes.keys().cloned().collect();
-        let into_picker = |instance: String| -> EditorMode {
-            if matches!(kind, CardTypeStub::EntityList) {
-                EditorMode::PickingMulti {
-                    instance,
-                    query: String::new(),
-                    selected: 0,
-                    picked: Vec::new(),
-                }
-            } else {
-                EditorMode::PickingEntity {
-                    card_type: kind,
-                    instance,
-                    query: String::new(),
-                    selected: 0,
-                }
-            }
-        };
         match aliases.len() {
             0 => {
                 self.last_error = Some("no instances connected".into());
@@ -966,7 +1094,7 @@ impl App {
                 }
             }
             1 => {
-                editor.mode = into_picker(aliases.into_iter().next().unwrap());
+                editor.mode = picker_mode_for(kind, aliases.into_iter().next().unwrap());
             }
             _ => {
                 editor.mode = EditorMode::PickingInstance {
@@ -1098,12 +1226,8 @@ impl App {
                 let Some(card) = dash.cards.get(*selected_card) else {
                     return;
                 };
-                // EntityList: act on the sub-selected entity inside the card.
-                if let CardKind::EntityList {
-                    instance, entities, ..
-                } = &card.kind
-                {
-                    let alias = instance.clone();
+                // EntityList / FilteredEntityList: act on sub-selected entity.
+                if let Some((alias, entities)) = list_entities(card, &self.instances) {
                     let Some(eid) = entities.get(*sub_index).cloned() else {
                         return;
                     };
@@ -1149,7 +1273,7 @@ impl App {
         {
             if let Some(dash) = self.dashboards.get(*idx) {
                 if let Some(card) = dash.cards.get(*selected_card) {
-                    if let CardKind::EntityList { entities, .. } = &card.kind {
+                    if let Some((_, entities)) = list_entities(card, &self.instances) {
                         if entities.is_empty() {
                             return;
                         }
@@ -1385,21 +1509,50 @@ fn parse_window_hours(s: &str) -> u32 {
     1
 }
 
+/// Return the (instance, entities) pair for any card that displays a list of entities.
+pub fn list_entities(
+    card: &crate::dashboard::Card,
+    instances: &InstanceRegistry,
+) -> Option<(Alias, Vec<String>)> {
+    use crate::dashboard::CardKind as CK;
+    match &card.kind {
+        CK::EntityList {
+            instance, entities, ..
+        } => Some((instance.clone(), entities.clone())),
+        CK::FilteredEntityList {
+            instance, query, ..
+        } => {
+            let rt = instances.runtimes.get(instance);
+            Some((
+                instance.clone(),
+                crate::dashboard::query::resolve(rt, query),
+            ))
+        }
+        _ => None,
+    }
+}
+
 fn picker_mode_for(kind: CardTypeStub, instance: String) -> EditorMode {
-    if matches!(kind, CardTypeStub::EntityList) {
-        EditorMode::PickingMulti {
+    match kind {
+        CardTypeStub::EntityList => EditorMode::PickingMulti {
             instance,
             query: String::new(),
             selected: 0,
             picked: Vec::new(),
-        }
-    } else {
-        EditorMode::PickingEntity {
+        },
+        CardTypeStub::FilteredEntityList => EditorMode::EditingFilterQuery {
+            instance,
+            query_buffer: String::new(),
+            title_buffer: String::new(),
+            hide_state: false,
+            focus: crate::dashboard::editor::FilterFocus::Query,
+        },
+        _ => EditorMode::PickingEntity {
             card_type: kind,
             instance,
             query: String::new(),
             selected: 0,
-        }
+        },
     }
 }
 
@@ -1414,6 +1567,7 @@ fn build_typed_card(
             instance,
             entity,
             title,
+            ticker: false,
         },
         CardTypeStub::Toggle => CardKind::Toggle {
             instance,
@@ -1443,6 +1597,9 @@ fn build_typed_card(
             entities: vec![entity],
             title,
         },
+        CardTypeStub::FilteredEntityList => unreachable!(
+            "FilteredEntityList is built via EditingFilterQuery flow, not build_typed_card"
+        ),
     }
 }
 
@@ -1468,6 +1625,7 @@ fn build_card_kind(kind: CardTypeStub, buf: &str, default_alias: Option<&str>) -
             instance,
             entity,
             title: None,
+            ticker: false,
         },
         CardTypeStub::Toggle => CardKind::Toggle {
             instance,
@@ -1488,7 +1646,9 @@ fn build_card_kind(kind: CardTypeStub, buf: &str, default_alias: Option<&str>) -
             window: "1h".into(),
             title: None,
         },
-        CardTypeStub::Text | CardTypeStub::EntityList => unreachable!(),
+        CardTypeStub::Text | CardTypeStub::EntityList | CardTypeStub::FilteredEntityList => {
+            unreachable!()
+        }
     })
 }
 
@@ -1554,7 +1714,7 @@ pub async fn run(
             tokio::select! {
                 Some(Ok(ev)) = term_events.next() => app.handle_term(ev),
                 Some(ev) = rx.recv()              => app.handle_app(ev),
-                _ = tick.tick()                   => {}
+                _ = tick.tick()                   => { app.ticker_offset = app.ticker_offset.wrapping_add(1); }
             }
             if app.should_quit {
                 break;

@@ -85,12 +85,27 @@ pub enum EditorMode {
         card_idx: usize,
         buffer: String,
     },
+    /// Compose / edit a FilteredEntityList query + title + hide_state.
+    EditingFilterQuery {
+        instance: String,
+        query_buffer: String,
+        title_buffer: String,
+        hide_state: bool,
+        focus: FilterFocus,
+    },
     /// Contextual settings menu (card- or dashboard-scoped).
     Menu {
         context: MenuContext,
         items: Vec<MenuItem>,
         selected: usize,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FilterFocus {
+    Query,
+    Title,
+    HideToggle,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -104,6 +119,9 @@ pub enum MenuAction {
     RenameCard,
     ChangeEntity,
     EditWindow,
+    EditQuery,
+    ToggleHideState,
+    ToggleTicker,
     DeleteCard,
     RenameDashboard,
     ResizeGrid,
@@ -123,6 +141,7 @@ pub fn card_menu_items(card: &Card) -> Vec<MenuItem> {
     });
     let entity_change_label = match &card.kind {
         CardKind::EntityList { .. } => Some("Change entities"),
+        CardKind::FilteredEntityList { .. } => None,
         CardKind::Text { .. } => None,
         _ => Some("Change entity"),
     };
@@ -136,6 +155,22 @@ pub fn card_menu_items(card: &Card) -> Vec<MenuItem> {
         items.push(MenuItem {
             action: MenuAction::EditWindow,
             label: "Set history window",
+        });
+    }
+    if matches!(card.kind, CardKind::FilteredEntityList { .. }) {
+        items.push(MenuItem {
+            action: MenuAction::EditQuery,
+            label: "Edit filter query",
+        });
+        items.push(MenuItem {
+            action: MenuAction::ToggleHideState,
+            label: "Toggle hide state column",
+        });
+    }
+    if matches!(card.kind, CardKind::Entity { .. }) {
+        items.push(MenuItem {
+            action: MenuAction::ToggleTicker,
+            label: "Toggle ticker mode",
         });
     }
     items.push(MenuItem {
@@ -166,6 +201,7 @@ pub enum CardTypeStub {
     Sparkline,
     Text,
     EntityList,
+    FilteredEntityList,
 }
 
 impl CardTypeStub {
@@ -176,6 +212,7 @@ impl CardTypeStub {
         CardTypeStub::Sparkline,
         CardTypeStub::Text,
         CardTypeStub::EntityList,
+        CardTypeStub::FilteredEntityList,
     ];
     pub fn label(self) -> &'static str {
         match self {
@@ -185,6 +222,7 @@ impl CardTypeStub {
             CardTypeStub::Sparkline => "sparkline",
             CardTypeStub::Text => "text",
             CardTypeStub::EntityList => "entity list (multi)",
+            CardTypeStub::FilteredEntityList => "filtered list (glob + filters)",
         }
     }
 }
@@ -303,7 +341,8 @@ impl EditorState {
             | CardKind::Gauge { title, .. }
             | CardKind::Sparkline { title, .. }
             | CardKind::Text { title, .. }
-            | CardKind::EntityList { title, .. } => {
+            | CardKind::EntityList { title, .. }
+            | CardKind::FilteredEntityList { title, .. } => {
                 *title = new_title;
             }
         }

@@ -65,14 +65,27 @@ fn render_card(
     let title = card.title().to_string();
     match &card.kind {
         CardKind::Entity {
-            instance, entity, ..
+            instance,
+            entity,
+            ticker,
+            ..
         } => {
             let s = app
                 .instances
                 .runtimes
                 .get(instance)
                 .and_then(|rt| rt.states.get(entity));
-            widgets::card_entity::render(f, rect, &title, instance, s, &app.theme, selected);
+            widgets::card_entity::render(
+                f,
+                rect,
+                &title,
+                instance,
+                s,
+                &app.theme,
+                selected,
+                *ticker,
+                app.ticker_offset,
+            );
         }
         CardKind::Toggle {
             instance, entity, ..
@@ -130,7 +143,28 @@ fn render_card(
         } => {
             let rt = app.instances.runtimes.get(instance);
             widgets::card_entity_list::render(
-                f, rect, &title, instance, entities, rt, &app.theme, selected, sub_index,
+                f, rect, &title, instance, entities, rt, &app.theme, selected, sub_index, false,
+            );
+        }
+        CardKind::FilteredEntityList {
+            instance,
+            query,
+            hide_state,
+            ..
+        } => {
+            let rt = app.instances.runtimes.get(instance);
+            let entities = crate::dashboard::query::resolve(rt, query);
+            widgets::card_entity_list::render(
+                f,
+                rect,
+                &title,
+                instance,
+                &entities,
+                rt,
+                &app.theme,
+                selected,
+                sub_index,
+                *hide_state,
             );
         }
     }

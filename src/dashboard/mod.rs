@@ -1,6 +1,7 @@
 pub mod editor;
 pub mod layout;
 pub mod persist;
+pub mod query;
 
 use serde::{Deserialize, Serialize};
 
@@ -48,6 +49,8 @@ pub enum CardKind {
         entity: EntityId,
         #[serde(default)]
         title: Option<String>,
+        #[serde(default)]
+        ticker: bool,
     },
     Toggle {
         instance: Alias,
@@ -84,6 +87,15 @@ pub enum CardKind {
         #[serde(default)]
         title: Option<String>,
     },
+    FilteredEntityList {
+        instance: Alias,
+        /// Query string: `glob[filter1][filter2]...`
+        query: String,
+        #[serde(default)]
+        hide_state: bool,
+        #[serde(default)]
+        title: Option<String>,
+    },
 }
 
 fn default_window() -> String {
@@ -99,6 +111,7 @@ impl Card {
             | CardKind::Sparkline { title, entity, .. } => title.as_deref().unwrap_or(entity),
             CardKind::Text { title, .. } => title.as_deref().unwrap_or("Text"),
             CardKind::EntityList { title, .. } => title.as_deref().unwrap_or("Entities"),
+            CardKind::FilteredEntityList { title, .. } => title.as_deref().unwrap_or("Filtered"),
         }
     }
 
@@ -116,7 +129,9 @@ impl Card {
             | CardKind::Sparkline {
                 instance, entity, ..
             } => Some((instance, entity)),
-            CardKind::Text { .. } | CardKind::EntityList { .. } => None,
+            CardKind::Text { .. }
+            | CardKind::EntityList { .. }
+            | CardKind::FilteredEntityList { .. } => None,
         }
     }
 }

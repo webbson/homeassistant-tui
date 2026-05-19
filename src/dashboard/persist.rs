@@ -57,6 +57,7 @@ mod tests {
                         instance: "home".into(),
                         entity: "light.kitchen".into(),
                         title: Some("Kitchen".into()),
+                        ticker: false,
                     },
                 }],
             }],
