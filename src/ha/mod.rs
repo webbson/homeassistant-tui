@@ -1,6 +1,7 @@
 pub mod client;
 pub mod protocol;
 pub mod registry;
+pub mod rest;
 
 pub use registry::InstanceRegistry;
 

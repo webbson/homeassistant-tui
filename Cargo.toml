@@ -31,6 +31,9 @@ indexmap = { version = "2", features = ["serde"] }
 # directories dep removed in favor of util::paths (XDG-style on macOS too)
 chrono = { version = "0.4", features = ["serde"] }
 chrono-tz = "0.10"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "stream"] }
+ratatui-image = { version = "11", default-features = false, features = ["crossterm", "image-defaults"] }
+image = "0.25"
 
 [dev-dependencies]
 insta = "1"
