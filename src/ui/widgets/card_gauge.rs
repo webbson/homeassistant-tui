@@ -42,12 +42,14 @@ pub fn render(
 
     // Determine the needle position (cell index within the arc).
     let arc_width = inner.width as usize;
-    let needle_cell: Option<usize> = if needle && value.is_some() && max > min {
-        let v = value.unwrap().clamp(min, max);
-        let pos = ((v - min) / (max - min) * (arc_width.saturating_sub(1) as f64)).round() as usize;
-        Some(pos.min(arc_width.saturating_sub(1)))
-    } else {
-        None
+    let needle_cell: Option<usize> = match (needle, value, max > min) {
+        (true, Some(v), true) => {
+            let clamped = v.clamp(min, max);
+            let pos = ((clamped - min) / (max - min) * (arc_width.saturating_sub(1) as f64)).round()
+                as usize;
+            Some(pos.min(arc_width.saturating_sub(1)))
+        }
+        _ => None,
     };
 
     // Build the arc row as styled spans.

@@ -1419,6 +1419,141 @@ impl App {
                 }
                 return;
             }
+            // ── Gauge severity flow ──────────────────────────────────────────
+            EditorMode::EditSeverityGreen {
+                card_idx,
+                buf,
+                accum,
+            } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        buf.pop();
+                    }
+                    KeyCode::Char(c) => buf.push(c),
+                    KeyCode::Enter => match buf.trim().parse::<f64>() {
+                        Ok(v) => {
+                            let idx = *card_idx;
+                            let new_accum = crate::dashboard::editor::SeverityAccum {
+                                green: v,
+                                yellow: accum.yellow,
+                            };
+                            let cur_sev = self
+                                .dashboards
+                                .get(dash_idx)
+                                .and_then(|d| d.cards.get(idx))
+                                .and_then(|c| {
+                                    if let CardKind::Gauge { severity, .. } = &c.kind {
+                                        severity.as_ref().map(|s| s.yellow.to_string())
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .unwrap_or_default();
+                            editor.mode = EditorMode::EditSeverityYellow {
+                                card_idx: idx,
+                                buf: cur_sev,
+                                accum: new_accum,
+                            };
+                        }
+                        Err(_) => {
+                            self.last_error = Some("invalid number — enter a numeric value".into());
+                        }
+                    },
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::EditSeverityYellow {
+                card_idx,
+                buf,
+                accum,
+            } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        buf.pop();
+                    }
+                    KeyCode::Char(c) => buf.push(c),
+                    KeyCode::Enter => match buf.trim().parse::<f64>() {
+                        Ok(v) => {
+                            let idx = *card_idx;
+                            let new_accum = crate::dashboard::editor::SeverityAccum {
+                                green: accum.green,
+                                yellow: v,
+                            };
+                            let cur_red = self
+                                .dashboards
+                                .get(dash_idx)
+                                .and_then(|d| d.cards.get(idx))
+                                .and_then(|c| {
+                                    if let CardKind::Gauge { severity, .. } = &c.kind {
+                                        severity.as_ref().map(|s| s.red.to_string())
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .unwrap_or_default();
+                            editor.mode = EditorMode::EditSeverityRed {
+                                card_idx: idx,
+                                buf: cur_red,
+                                accum: new_accum,
+                            };
+                        }
+                        Err(_) => {
+                            self.last_error = Some("invalid number — enter a numeric value".into());
+                        }
+                    },
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::EditSeverityRed {
+                card_idx,
+                buf,
+                accum,
+            } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        buf.pop();
+                    }
+                    KeyCode::Char(c) => buf.push(c),
+                    KeyCode::Enter => match buf.trim().parse::<f64>() {
+                        Ok(red) => {
+                            let idx = *card_idx;
+                            let new_sev = crate::dashboard::Severity {
+                                green: accum.green,
+                                yellow: accum.yellow,
+                                red,
+                            };
+                            editor.mode = EditorMode::Browse;
+                            if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                                if let Some(ed) = self.editor.as_mut() {
+                                    ed.snapshot(dash);
+                                }
+                                if let Some(card) = self
+                                    .dashboards
+                                    .get_mut(dash_idx)
+                                    .and_then(|d| d.cards.get_mut(idx))
+                                {
+                                    if let CardKind::Gauge { severity, .. } = &mut card.kind {
+                                        *severity = Some(new_sev);
+                                    }
+                                }
+                                if let Some(ed) = self.editor.as_mut() {
+                                    ed.dirty = true;
+                                }
+                            }
+                        }
+                        Err(_) => {
+                            self.last_error = Some("invalid number — enter a numeric value".into());
+                        }
+                    },
+                    _ => {}
+                }
+                return;
+            }
             EditorMode::Browse => {}
         }
 
@@ -1852,6 +1987,56 @@ impl App {
                         card_idx: idx,
                         current: current_ori,
                     };
+                }
+            }
+            (A::EditSeverityThresholds, C::Card(idx)) => {
+                // Pre-populate buffer with existing green threshold if set.
+                let existing = self
+                    .dashboards
+                    .get(dash_idx)
+                    .and_then(|d| d.cards.get(idx))
+                    .and_then(|c| {
+                        if let CardKind::Gauge { severity, .. } = &c.kind {
+                            severity.as_ref().map(|s| (s.green, s.yellow, s.red))
+                        } else {
+                            None
+                        }
+                    });
+                let (green_str, accum) = match existing {
+                    Some((g, y, _)) => (
+                        g.to_string(),
+                        crate::dashboard::editor::SeverityAccum {
+                            green: g,
+                            yellow: y,
+                        },
+                    ),
+                    None => (
+                        String::new(),
+                        crate::dashboard::editor::SeverityAccum::default(),
+                    ),
+                };
+                if let Some(ed) = self.editor.as_mut() {
+                    ed.selected_card = Some(idx);
+                    ed.mode = EditorMode::EditSeverityGreen {
+                        card_idx: idx,
+                        buf: green_str,
+                        accum,
+                    };
+                }
+            }
+            (A::ToggleGaugeNeedle, C::Card(idx)) => {
+                if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                    if let Some(ed) = self.editor.as_mut() {
+                        ed.snapshot(dash);
+                    }
+                    if let Some(card) = dash.cards.get_mut(idx) {
+                        if let CardKind::Gauge { needle, .. } = &mut card.kind {
+                            *needle = !*needle;
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.dirty = true;
+                            }
+                        }
+                    }
                 }
             }
             _ => {

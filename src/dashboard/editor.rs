@@ -181,6 +181,32 @@ pub enum EditorMode {
         card_idx: usize,
         current: BarOrientation,
     },
+    // ---- Gauge severity flow ----
+    /// Step 1 of 3: enter the "green" lower threshold.
+    EditSeverityGreen {
+        card_idx: usize,
+        buf: String,
+        accum: SeverityAccum,
+    },
+    /// Step 2 of 3: enter the "yellow" warning threshold.
+    EditSeverityYellow {
+        card_idx: usize,
+        buf: String,
+        accum: SeverityAccum,
+    },
+    /// Step 3 of 3: enter the "red" critical threshold.
+    EditSeverityRed {
+        card_idx: usize,
+        buf: String,
+        accum: SeverityAccum,
+    },
+}
+
+/// Accumulates the first two threshold values while collecting severity input.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SeverityAccum {
+    pub green: f64,
+    pub yellow: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -226,6 +252,9 @@ pub enum MenuAction {
     CycleGraphType,
     EditGraphWindow,
     EditGraphOrientation,
+    // Gauge-specific actions
+    EditSeverityThresholds,
+    ToggleGaugeNeedle,
 }
 
 #[derive(Debug, Clone)]
@@ -314,6 +343,19 @@ pub fn card_menu_items(card: &Card) -> Vec<MenuItem> {
         items.push(MenuItem {
             action: MenuAction::ToggleHideWhenEmpty,
             label: hwe_label,
+        });
+    }
+    if let CardKind::Gauge { needle, .. } = &card.kind {
+        items.push(MenuItem {
+            action: MenuAction::EditSeverityThresholds,
+            label: "Severity thresholds",
+        });
+        let needle_label: &'static str = if *needle { "Needle: on" } else { "Needle: off" };
+        // card_idx is only available at dispatch time; use a placeholder, the
+        // action carries the idx via the MenuContext at dispatch.
+        items.push(MenuItem {
+            action: MenuAction::ToggleGaugeNeedle,
+            label: needle_label,
         });
     }
     if matches!(card.kind, CardKind::Entity { .. }) {

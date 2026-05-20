@@ -6,6 +6,7 @@ use ratatui::widgets::{Block, Clear, List, ListItem, ListState, Paragraph};
 use ratatui::Frame;
 
 use crate::app::App;
+use crate::dashboard::editor::SeverityAccum;
 use crate::dashboard::editor::{CardTypeStub, EditorMode, SeriesIndexOp};
 use crate::dashboard::layout::cell_to_rect;
 use crate::dashboard::{BarOrientation, CardSize};
@@ -198,6 +199,37 @@ pub fn draw(f: &mut Frame, area: Rect, app: &App) {
         EditorMode::GraphEditWindow { buf, .. } => draw_window_edit(f, area, buf),
         EditorMode::GraphPickOrientation { current, .. } => {
             draw_graph_pick_orientation(f, area, *current)
+        }
+        // Gauge severity flow
+        EditorMode::EditSeverityGreen { buf, accum, .. } => {
+            draw_numeric_prompt(
+                f,
+                area,
+                " Severity thresholds (1/3) ",
+                "Green threshold (lower bound)",
+                buf,
+                accum,
+            );
+        }
+        EditorMode::EditSeverityYellow { buf, accum, .. } => {
+            draw_numeric_prompt(
+                f,
+                area,
+                " Severity thresholds (2/3) ",
+                "Yellow threshold (warning)",
+                buf,
+                accum,
+            );
+        }
+        EditorMode::EditSeverityRed { buf, accum, .. } => {
+            draw_numeric_prompt(
+                f,
+                area,
+                " Severity thresholds (3/3) ",
+                "Red threshold (critical)",
+                buf,
+                accum,
+            );
         }
         EditorMode::Browse => {}
     }
@@ -843,6 +875,52 @@ fn draw_pick_size(f: &mut Frame, area: Rect, current: CardSize) {
             .highlight_symbol("▶ "),
         r,
         &mut state,
+    );
+}
+
+// ── Gauge severity draw helper ────────────────────────────────────────────────
+
+fn draw_numeric_prompt(
+    f: &mut Frame,
+    area: Rect,
+    title: &str,
+    hint: &str,
+    buf: &str,
+    accum: &SeverityAccum,
+) {
+    let r = modal_rect(area, 64, 9);
+    f.render_widget(Clear, r);
+    let lines = vec![
+        Line::styled(hint.to_string(), Style::new().bold()),
+        Line::raw(""),
+        Line::from(vec![
+            Span::raw("> "),
+            Span::styled(buf.to_string(), Style::new().bold()),
+            Span::styled("_", Style::new().rapid_blink()),
+        ]),
+        Line::raw(""),
+        Line::from(vec![
+            Span::styled("green: ", Style::new().fg(Color::Green).dim()),
+            Span::styled(
+                format!("{:.1}", accum.green),
+                Style::new().fg(Color::Green).dim(),
+            ),
+            Span::raw("    "),
+            Span::styled("yellow: ", Style::new().fg(Color::Yellow).dim()),
+            Span::styled(
+                format!("{:.1}", accum.yellow),
+                Style::new().fg(Color::Yellow).dim(),
+            ),
+        ]),
+        Line::raw(""),
+        Line::styled(
+            "Enter number · Enter to advance · Esc to cancel",
+            Style::new().dim(),
+        ),
+    ];
+    f.render_widget(
+        Paragraph::new(lines).block(Block::bordered().title(title.to_string())),
+        r,
     );
 }
 
