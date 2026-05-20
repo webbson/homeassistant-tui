@@ -7,6 +7,7 @@ use ratatui::Frame;
 use crate::dashboard::CardSize;
 use crate::ha::{EntityState, ForecastDay};
 use crate::ui::theme::{resolve_card_color, Theme};
+use crate::ui::widgets::big_text;
 
 #[allow(clippy::too_many_arguments)]
 pub fn render(
@@ -54,17 +55,31 @@ pub fn render(
             f.render_widget(Paragraph::new(text).style(Style::new().fg(color)), inner);
         }
         CardSize::Large => {
-            // Large: big glyph + temp, no forecast
+            // Large: oversized temperature via big-text + glyph + condition line.
             let temp_str = temp
-                .map(|t| format!("{t:.1}°"))
+                .map(|t| format!("{t:.0}°"))
                 .unwrap_or_else(|| "—".into());
-            let text = format!("{glyph}  {temp_str}");
+
+            let [glyph_area, temp_area] =
+                Layout::vertical([Constraint::Length(2), Constraint::Fill(1)]).areas(inner);
+
             f.render_widget(
-                Paragraph::new(text)
+                Paragraph::new(format!("{glyph}  {condition}"))
                     .style(Style::new().fg(color))
                     .alignment(ratatui::layout::Alignment::Center),
-                inner,
+                glyph_area,
             );
+
+            if big_text::fits(temp_area) {
+                big_text::render_big(f, temp_area, &temp_str, color);
+            } else {
+                f.render_widget(
+                    Paragraph::new(temp_str)
+                        .style(Style::new().fg(color))
+                        .alignment(ratatui::layout::Alignment::Center),
+                    temp_area,
+                );
+            }
         }
         CardSize::Normal => {
             // Normal: header line + attributes + forecast strip
