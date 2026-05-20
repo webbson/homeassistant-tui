@@ -7,6 +7,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [0.3.0] – 2026-05-20
+
+### Added
 - **Grid layout** — new `layout: type: grid` dashboard type. Dashboards are a vertical stack of rows; each row has one or more columns of cards. Cards stack vertically at natural height; columns scroll when content overflows. Rows support `height: <n>` (fixed terminal rows) or `height: auto` (shares remaining space). Columns and rows support `fill_height` to scale card heights proportionally to fill the column.
 - **Grid editor** — full structural editing in the grid layout: add/remove/reorder rows and columns, move cards up/down within a column, set row heights from the menu. `R` focuses the row menu, `C` the column menu, `Esc` returns to card focus. Row/column menus accessible via `m`.
 - **Cross-dashboard move/copy** — `Move to dashboard…` and `Copy to dashboard…` in the card menu for both Free and Grid dashboards. Grid targets prompt for destination row and column.
@@ -75,6 +85,7 @@ First tagged release. The initial milestones (M0–M5 + partial M6).
 - rustls 0.23 requires an explicit `CryptoProvider` — installed at process start so the first TLS handshake doesn't panic.
 - crossterm bumped to 0.29 to match ratatui 0.30.
 
-[Unreleased]: https://github.com/webbson/homeassistant-tui/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/webbson/homeassistant-tui/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/webbson/homeassistant-tui/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/webbson/homeassistant-tui/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/webbson/homeassistant-tui/releases/tag/v0.1.0
