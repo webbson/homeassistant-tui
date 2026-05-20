@@ -330,5 +330,11 @@ fn render_card(
                 selected,
             );
         }
+        // TODO(8.4): decode + cache image bytes and render via ratatui-image Picker
+        CardKind::Image { .. } => {
+            use ratatui::widgets::{Block, Borders, Paragraph};
+            let block = Block::default().title(title.as_ref()).borders(Borders::ALL);
+            f.render_widget(Paragraph::new("image").block(block), rect);
+        }
     }
 }

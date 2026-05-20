@@ -2182,7 +2182,8 @@ impl App {
                         | crate::dashboard::CardKind::FilteredEntityList { title, .. }
                         | crate::dashboard::CardKind::Clock { title, .. }
                         | crate::dashboard::CardKind::Statistics { title, .. }
-                        | crate::dashboard::CardKind::MediaPlayer { title, .. } => title.clone(),
+                        | crate::dashboard::CardKind::MediaPlayer { title, .. }
+                        | crate::dashboard::CardKind::Image { title, .. } => title.clone(),
                     })
                     .unwrap_or_default();
                 if let Some(ed) = self.editor.as_mut() {
@@ -2687,6 +2688,10 @@ impl App {
             }
             CardKind::MediaPlayer { instance, .. } => {
                 (CardTypeStub::MediaPlayer, instance.clone(), None)
+            }
+            CardKind::Image { .. } => {
+                self.last_error = Some("image cards: use the YAML editor to change entity".into());
+                return;
             }
         };
         editor.edit_target = Some(idx);

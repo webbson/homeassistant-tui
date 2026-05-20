@@ -665,7 +665,8 @@ impl EditorState {
             | CardKind::FilteredEntityList { title, .. }
             | CardKind::Clock { title, .. }
             | CardKind::Statistics { title, .. }
-            | CardKind::MediaPlayer { title, .. } => {
+            | CardKind::MediaPlayer { title, .. }
+            | CardKind::Image { title, .. } => {
                 *title = new_title;
             }
         }

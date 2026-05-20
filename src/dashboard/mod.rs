@@ -87,6 +87,13 @@ pub enum GraphType {
     Pie,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ImageSource {
+    ImageEntity { entity: EntityId },
+    Camera { entity: EntityId },
+}
+
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum BarOrientation {
@@ -199,6 +206,14 @@ pub enum CardKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         title: Option<String>,
     },
+    Image {
+        instance: Alias,
+        source: ImageSource,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        refresh_seconds: Option<u32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+    },
 }
 
 fn default_window() -> String {
@@ -237,6 +252,13 @@ impl Card {
             CardKind::MediaPlayer { title, entity, .. } => {
                 title.as_deref().unwrap_or(entity.as_str())
             }
+            CardKind::Image { title, source, .. } => {
+                title.as_deref().unwrap_or_else(|| match source {
+                    ImageSource::ImageEntity { entity } | ImageSource::Camera { entity } => {
+                        entity.as_str()
+                    }
+                })
+            }
         }
     }
 
@@ -271,6 +293,14 @@ impl Card {
             | CardKind::MediaPlayer {
                 instance, entity, ..
             } => Some((instance, entity)),
+            CardKind::Image {
+                instance, source, ..
+            } => Some((
+                instance,
+                match source {
+                    ImageSource::ImageEntity { entity } | ImageSource::Camera { entity } => entity,
+                },
+            )),
             CardKind::Text { .. }
             | CardKind::EntityList { .. }
             | CardKind::FilteredEntityList { .. }
@@ -581,6 +611,32 @@ pos: { col: 0, row: 0, w: 6, h: 4 }
         }
         let back = serde_yaml::to_string(&card).unwrap();
         assert!(back.contains("type: media_player"));
+    }
+
+    #[test]
+    fn image_card_round_trip() {
+        let yaml = r#"
+type: image
+instance: home
+source: { kind: camera, entity: camera.front_door }
+refresh_seconds: 30
+pos: { col: 0, row: 0, w: 6, h: 4 }
+"#;
+        let card: Card = serde_yaml::from_str(yaml).unwrap();
+        if let CardKind::Image {
+            source,
+            refresh_seconds,
+            ..
+        } = &card.kind
+        {
+            assert!(matches!(source, ImageSource::Camera { .. }));
+            assert_eq!(*refresh_seconds, Some(30));
+        } else {
+            panic!("wrong variant");
+        }
+        let back = serde_yaml::to_string(&card).unwrap();
+        assert!(back.contains("type: image"));
+        assert!(back.contains("refresh_seconds: 30"));
     }
 
     #[test]
