@@ -456,7 +456,8 @@ fn draw_entity_picker(
         search_row,
     );
 
-    let rows = crate::app::entity_search(&app.instances, instance, query);
+    let domain_prefix = crate::app::domain_prefix_for_type(card_type);
+    let rows = crate::app::entity_search_filtered(&app.instances, instance, query, domain_prefix);
     let items: Vec<ListItem<'_>> = rows
         .iter()
         .map(|p| {

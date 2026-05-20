@@ -202,7 +202,8 @@ impl App {
                 query,
                 selected,
             } => {
-                let rows = entity_search(&self.instances, instance, query);
+                let domain_prefix = domain_prefix_for_type(*card_type);
+                let rows = entity_search_filtered(&self.instances, instance, query, domain_prefix);
                 match k.code {
                     KeyCode::Esc => editor.mode = EditorMode::Browse,
                     KeyCode::Backspace => {
@@ -3249,6 +3250,15 @@ pub struct EntityPick {
 }
 
 pub fn entity_search(instances: &InstanceRegistry, instance: &str, query: &str) -> Vec<EntityPick> {
+    entity_search_filtered(instances, instance, query, None)
+}
+
+pub fn entity_search_filtered(
+    instances: &InstanceRegistry,
+    instance: &str,
+    query: &str,
+    domain_prefix: Option<&str>,
+) -> Vec<EntityPick> {
     let Some(rt) = instances.runtimes.get(instance) else {
         return Vec::new();
     };
@@ -3269,6 +3279,11 @@ pub fn entity_search(instances: &InstanceRegistry, instance: &str, query: &str) 
             }
         })
         .filter(|p| {
+            if let Some(prefix) = domain_prefix {
+                if !p.entity_id.starts_with(prefix) {
+                    return false;
+                }
+            }
             if q.is_empty() {
                 return true;
             }
@@ -3315,6 +3330,13 @@ pub fn list_entities(
                 crate::dashboard::query::resolve(rt, query),
             ))
         }
+        _ => None,
+    }
+}
+
+pub fn domain_prefix_for_type(kind: CardTypeStub) -> Option<&'static str> {
+    match kind {
+        CardTypeStub::MediaPlayer => Some("media_player."),
         _ => None,
     }
 }
