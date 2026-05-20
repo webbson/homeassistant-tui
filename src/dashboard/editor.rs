@@ -648,12 +648,13 @@ impl EditorState {
 
     pub fn resize_selected(&mut self, dw: i32, dh: i32, dash: &mut Dashboard) {
         let Some(i) = self.selected_card else { return };
-        let Some(card) = dash.cards.get_mut(i) else {
+        let (grid_cols, grid_rows) = (dash.grid.cols, dash.grid.rows);
+        let Some(card) = dash.card_mut(i) else {
             return;
         };
         self.snapshot_inner(card);
-        let new_w = clamp_dim(card.pos.w, dw, dash.grid.cols - card.pos.col);
-        let new_h = clamp_dim(card.pos.h, dh, dash.grid.rows - card.pos.row);
+        let new_w = clamp_dim(card.pos.w, dw, grid_cols - card.pos.col);
+        let new_h = clamp_dim(card.pos.h, dh, grid_rows - card.pos.row);
         card.pos.w = new_w.max(1);
         card.pos.h = new_h.max(1);
         self.dirty = true;
@@ -663,11 +664,12 @@ impl EditorState {
         let Some(i) = self.selected_card else { return };
         let target_col = self.cursor_col;
         let target_row = self.cursor_row;
-        let Some(card) = dash.cards.get_mut(i) else {
+        let (grid_cols, grid_rows) = (dash.grid.cols, dash.grid.rows);
+        let Some(card) = dash.card_mut(i) else {
             return;
         };
-        let new_col = target_col.min(dash.grid.cols.saturating_sub(card.pos.w));
-        let new_row = target_row.min(dash.grid.rows.saturating_sub(card.pos.h));
+        let new_col = target_col.min(grid_cols.saturating_sub(card.pos.w));
+        let new_row = target_row.min(grid_rows.saturating_sub(card.pos.h));
         if card.pos.col != new_col || card.pos.row != new_row {
             card.pos.col = new_col;
             card.pos.row = new_row;
@@ -679,7 +681,7 @@ impl EditorState {
         let Some(i) = self.selected_card.take() else {
             return;
         };
-        if i < dash.cards.len() {
+        if i < dash.card_count() {
             dash.cards.remove(i);
             self.dirty = true;
         }
@@ -687,7 +689,7 @@ impl EditorState {
 
     pub fn add_card(&mut self, dash: &mut Dashboard, kind: CardKind) {
         if let Some(idx) = self.edit_target.take() {
-            if let Some(card) = dash.cards.get_mut(idx) {
+            if let Some(card) = dash.card_mut(idx) {
                 card.kind = kind;
                 self.dirty = true;
                 self.selected_card = Some(idx);
@@ -707,13 +709,13 @@ impl EditorState {
             size: CardSize::Normal,
         };
         dash.cards.push(card);
-        self.selected_card = Some(dash.cards.len() - 1);
+        self.selected_card = Some(dash.card_count() - 1);
         self.dirty = true;
     }
 
     /// Replace just the title of the card at `idx` (keeps everything else).
     pub fn retitle_card(&mut self, dash: &mut Dashboard, idx: usize, new_title: Option<String>) {
-        let Some(card) = dash.cards.get_mut(idx) else {
+        let Some(card) = dash.card_mut(idx) else {
             return;
         };
         match &mut card.kind {

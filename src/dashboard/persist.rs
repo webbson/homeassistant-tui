@@ -29,14 +29,14 @@ pub fn load(explicit: Option<&Path>) -> Result<DashboardFile> {
     let max_existing = file
         .dashboards
         .iter()
-        .flat_map(|d| d.cards.iter())
+        .flat_map(|d| d.cards_iter())
         .map(|c| c.id.0)
         .max()
         .unwrap_or(0);
     let mut next_id = max_existing + 1;
 
     for (d_idx, d) in file.dashboards.iter_mut().enumerate() {
-        for (c_idx, c) in d.cards.iter_mut().enumerate() {
+        for (c_idx, c) in d.cards_iter_mut().enumerate() {
             if c.id.is_zero() {
                 c.id = CardId(next_id);
                 next_id += 1;

@@ -29,7 +29,7 @@ pub fn draw(
         );
         return;
     };
-    for (i, card) in dash.cards.iter().enumerate() {
+    for (i, card) in dash.cards_iter().enumerate() {
         let rect = cell_to_rect(area, dash.grid, card.pos);
         if rect.width < 3 || rect.height < 3 {
             continue;

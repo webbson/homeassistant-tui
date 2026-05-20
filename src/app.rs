@@ -810,7 +810,7 @@ impl App {
                         if !new_window.is_empty() {
                             let mut entity_to_refetch: Option<(String, String, u32)> = None;
                             if let Some(dash) = self.dashboards.get_mut(dash_idx) {
-                                if let Some(card) = dash.cards.get_mut(idx) {
+                                if let Some(card) = dash.card_mut(idx) {
                                     if let crate::dashboard::CardKind::Graph {
                                         instance,
                                         entities,
@@ -898,7 +898,7 @@ impl App {
                                 if let Some(card) = self
                                     .dashboards
                                     .get_mut(dash_idx)
-                                    .and_then(|d| d.cards.get_mut(idx))
+                                    .and_then(|d| d.card_mut(idx))
                                 {
                                     card.color = None;
                                 }
@@ -919,7 +919,7 @@ impl App {
                                 if let Some(card) = self
                                     .dashboards
                                     .get_mut(dash_idx)
-                                    .and_then(|d| d.cards.get_mut(idx))
+                                    .and_then(|d| d.card_mut(idx))
                                 {
                                     card.color = Some(trimmed);
                                 }
@@ -961,7 +961,7 @@ impl App {
                             if let Some(card) = self
                                 .dashboards
                                 .get_mut(dash_idx)
-                                .and_then(|d| d.cards.get_mut(idx))
+                                .and_then(|d| d.card_mut(idx))
                             {
                                 card.size = chosen;
                             }
@@ -1249,7 +1249,7 @@ impl App {
                 let instance = self
                     .dashboards
                     .get(dash_idx)
-                    .and_then(|d| d.cards.get(*card_idx))
+                    .and_then(|d| d.card(*card_idx))
                     .and_then(|c| {
                         if let crate::dashboard::CardKind::Graph { instance, .. } = &c.kind {
                             Some(instance.clone())
@@ -1285,7 +1285,7 @@ impl App {
                                 if let Some(card) = self
                                     .dashboards
                                     .get_mut(dash_idx)
-                                    .and_then(|d| d.cards.get_mut(idx))
+                                    .and_then(|d| d.card_mut(idx))
                                 {
                                     if let crate::dashboard::CardKind::Graph { entities, .. } =
                                         &mut card.kind
@@ -1315,7 +1315,7 @@ impl App {
                 let count = self
                     .dashboards
                     .get(dash_idx)
-                    .and_then(|d| d.cards.get(*card_idx))
+                    .and_then(|d| d.card(*card_idx))
                     .map(|c| {
                         if let crate::dashboard::CardKind::Graph { entities, .. } = &c.kind {
                             entities.len()
@@ -1342,7 +1342,7 @@ impl App {
                                     if let Some(card) = self
                                         .dashboards
                                         .get_mut(dash_idx)
-                                        .and_then(|d| d.cards.get_mut(idx))
+                                        .and_then(|d| d.card_mut(idx))
                                     {
                                         if let crate::dashboard::CardKind::Graph {
                                             entities, ..
@@ -1362,7 +1362,7 @@ impl App {
                                 let cur = self
                                     .dashboards
                                     .get(dash_idx)
-                                    .and_then(|d| d.cards.get(idx))
+                                    .and_then(|d| d.card(idx))
                                     .and_then(|c| {
                                         if let crate::dashboard::CardKind::Graph {
                                             entities, ..
@@ -1384,7 +1384,7 @@ impl App {
                                 let cur = self
                                     .dashboards
                                     .get(dash_idx)
-                                    .and_then(|d| d.cards.get(idx))
+                                    .and_then(|d| d.card(idx))
                                     .and_then(|c| {
                                         if let crate::dashboard::CardKind::Graph {
                                             entities, ..
@@ -1443,7 +1443,7 @@ impl App {
                             if let Some(card) = self
                                 .dashboards
                                 .get_mut(dash_idx)
-                                .and_then(|d| d.cards.get_mut(idx))
+                                .and_then(|d| d.card_mut(idx))
                             {
                                 if let crate::dashboard::CardKind::Graph { entities, .. } =
                                     &mut card.kind
@@ -1490,7 +1490,7 @@ impl App {
                             if let Some(card) = self
                                 .dashboards
                                 .get_mut(dash_idx)
-                                .and_then(|d| d.cards.get_mut(idx))
+                                .and_then(|d| d.card_mut(idx))
                             {
                                 if let crate::dashboard::CardKind::Graph { entities, .. } =
                                     &mut card.kind
@@ -1528,7 +1528,7 @@ impl App {
                                 if let Some(card) = self
                                     .dashboards
                                     .get_mut(dash_idx)
-                                    .and_then(|d| d.cards.get_mut(idx))
+                                    .and_then(|d| d.card_mut(idx))
                                 {
                                     if let crate::dashboard::CardKind::Graph { window, .. } =
                                         &mut card.kind
@@ -1575,7 +1575,7 @@ impl App {
                             if let Some(card) = self
                                 .dashboards
                                 .get_mut(dash_idx)
-                                .and_then(|d| d.cards.get_mut(idx))
+                                .and_then(|d| d.card_mut(idx))
                             {
                                 if let crate::dashboard::CardKind::Graph { orientation, .. } =
                                     &mut card.kind
@@ -1614,7 +1614,7 @@ impl App {
                             let cur_sev = self
                                 .dashboards
                                 .get(dash_idx)
-                                .and_then(|d| d.cards.get(idx))
+                                .and_then(|d| d.card(idx))
                                 .and_then(|c| {
                                     if let CardKind::Gauge { severity, .. } = &c.kind {
                                         severity.as_ref().map(|s| s.yellow.to_string())
@@ -1658,7 +1658,7 @@ impl App {
                             let cur_red = self
                                 .dashboards
                                 .get(dash_idx)
-                                .and_then(|d| d.cards.get(idx))
+                                .and_then(|d| d.card(idx))
                                 .and_then(|c| {
                                     if let CardKind::Gauge { severity, .. } = &c.kind {
                                         severity.as_ref().map(|s| s.red.to_string())
@@ -1708,7 +1708,7 @@ impl App {
                                 if let Some(card) = self
                                     .dashboards
                                     .get_mut(dash_idx)
-                                    .and_then(|d| d.cards.get_mut(idx))
+                                    .and_then(|d| d.card_mut(idx))
                                 {
                                     if let CardKind::Gauge { severity, .. } = &mut card.kind {
                                         *severity = Some(new_sev);
@@ -1921,7 +1921,7 @@ impl App {
                             if let Some(card) = self
                                 .dashboards
                                 .get_mut(dash_idx)
-                                .and_then(|d| d.cards.get_mut(idx))
+                                .and_then(|d| d.card_mut(idx))
                             {
                                 if let CardKind::Statistics { metric, .. } = &mut card.kind {
                                     *metric = new_metric;
@@ -1961,7 +1961,7 @@ impl App {
                             if let Some(card) = self
                                 .dashboards
                                 .get_mut(dash_idx)
-                                .and_then(|d| d.cards.get_mut(idx))
+                                .and_then(|d| d.card_mut(idx))
                             {
                                 if let CardKind::Statistics { window, .. } = &mut card.kind {
                                     *window = new_window;
@@ -1999,7 +1999,7 @@ impl App {
                             if let Some(card) = self
                                 .dashboards
                                 .get_mut(dash_idx)
-                                .and_then(|d| d.cards.get_mut(idx))
+                                .and_then(|d| d.card_mut(idx))
                             {
                                 if let CardKind::Statistics { unit, .. } = &mut card.kind {
                                     *unit = new_unit;
@@ -2128,7 +2128,7 @@ impl App {
                             if let Some(card) = self
                                 .dashboards
                                 .get_mut(dash_idx)
-                                .and_then(|d| d.cards.get_mut(idx))
+                                .and_then(|d| d.card_mut(idx))
                             {
                                 if let CardKind::Clock { format, .. } = &mut card.kind {
                                     *format = new_fmt;
@@ -2166,7 +2166,7 @@ impl App {
                             if let Some(card) = self
                                 .dashboards
                                 .get_mut(dash_idx)
-                                .and_then(|d| d.cards.get_mut(idx))
+                                .and_then(|d| d.card_mut(idx))
                             {
                                 if let CardKind::Clock { timezone, .. } = &mut card.kind {
                                     *timezone = new_tz;
@@ -2510,7 +2510,7 @@ impl App {
         let Some(dash) = self.dashboards.get(dash_idx) else {
             return;
         };
-        let (context, items) = match selected.and_then(|i| dash.cards.get(i).map(|c| (i, c))) {
+        let (context, items) = match selected.and_then(|i| dash.card(i).map(|c| (i, c))) {
             Some((idx, card)) => (
                 crate::dashboard::editor::MenuContext::Card(idx),
                 crate::dashboard::editor::card_menu_items(card),
@@ -2544,7 +2544,7 @@ impl App {
                 let current = self
                     .dashboards
                     .get(dash_idx)
-                    .and_then(|d| d.cards.get(idx))
+                    .and_then(|d| d.card(idx))
                     .and_then(|c| match &c.kind {
                         crate::dashboard::CardKind::Entity { title, .. }
                         | crate::dashboard::CardKind::Toggle { title, .. }
@@ -2578,7 +2578,7 @@ impl App {
                 let current = self
                     .dashboards
                     .get(dash_idx)
-                    .and_then(|d| d.cards.get(idx))
+                    .and_then(|d| d.card(idx))
                     .and_then(|c| match &c.kind {
                         crate::dashboard::CardKind::Graph { window, .. } => Some(window.clone()),
                         _ => None,
@@ -2596,7 +2596,7 @@ impl App {
                 let current_color = self
                     .dashboards
                     .get(dash_idx)
-                    .and_then(|d| d.cards.get(idx))
+                    .and_then(|d| d.card(idx))
                     .and_then(|c| c.color.clone())
                     .unwrap_or_default();
                 if let Some(ed) = self.editor.as_mut() {
@@ -2611,7 +2611,7 @@ impl App {
                 let current_size = self
                     .dashboards
                     .get(dash_idx)
-                    .and_then(|d| d.cards.get(idx))
+                    .and_then(|d| d.card(idx))
                     .map(|c| c.size)
                     .unwrap_or_default();
                 if let Some(ed) = self.editor.as_mut() {
@@ -2630,7 +2630,7 @@ impl App {
             }
             (A::EditQuery, C::Card(idx)) => {
                 let mut existing: Option<(String, String, bool, String)> = None;
-                if let Some(card) = self.dashboards.get(dash_idx).and_then(|d| d.cards.get(idx)) {
+                if let Some(card) = self.dashboards.get(dash_idx).and_then(|d| d.card(idx)) {
                     if let CardKind::FilteredEntityList {
                         instance,
                         query,
@@ -2666,7 +2666,7 @@ impl App {
                     if let Some(ed) = self.editor.as_mut() {
                         ed.snapshot(dash);
                     }
-                    if let Some(card) = dash.cards.get_mut(idx) {
+                    if let Some(card) = dash.card_mut(idx) {
                         if let CardKind::FilteredEntityList { hide_state, .. } = &mut card.kind {
                             *hide_state = !*hide_state;
                             if let Some(ed) = self.editor.as_mut() {
@@ -2681,7 +2681,7 @@ impl App {
                     if let Some(ed) = self.editor.as_mut() {
                         ed.snapshot(dash);
                     }
-                    if let Some(card) = dash.cards.get_mut(idx) {
+                    if let Some(card) = dash.card_mut(idx) {
                         if let CardKind::FilteredEntityList {
                             hide_when_empty, ..
                         } = &mut card.kind
@@ -2699,7 +2699,7 @@ impl App {
                     if let Some(ed) = self.editor.as_mut() {
                         ed.snapshot(dash);
                     }
-                    if let Some(card) = dash.cards.get_mut(idx) {
+                    if let Some(card) = dash.card_mut(idx) {
                         if let CardKind::Entity { ticker, .. } = &mut card.kind {
                             *ticker = !*ticker;
                             if let Some(ed) = self.editor.as_mut() {
@@ -2779,7 +2779,7 @@ impl App {
                         ed.snapshot(dash);
                         ed.selected_card = Some(idx);
                     }
-                    if let Some(card) = dash.cards.get_mut(idx) {
+                    if let Some(card) = dash.card_mut(idx) {
                         if let crate::dashboard::CardKind::Graph { graph_type, .. } = &mut card.kind
                         {
                             *graph_type = match graph_type {
@@ -2804,7 +2804,7 @@ impl App {
                 let current = self
                     .dashboards
                     .get(dash_idx)
-                    .and_then(|d| d.cards.get(idx))
+                    .and_then(|d| d.card(idx))
                     .and_then(|c| match &c.kind {
                         crate::dashboard::CardKind::Graph { window, .. } => Some(window.clone()),
                         _ => None,
@@ -2822,7 +2822,7 @@ impl App {
                 let current_ori = self
                     .dashboards
                     .get(dash_idx)
-                    .and_then(|d| d.cards.get(idx))
+                    .and_then(|d| d.card(idx))
                     .and_then(|c| match &c.kind {
                         crate::dashboard::CardKind::Graph { orientation, .. } => Some(*orientation),
                         _ => None,
@@ -2841,7 +2841,7 @@ impl App {
                 let existing = self
                     .dashboards
                     .get(dash_idx)
-                    .and_then(|d| d.cards.get(idx))
+                    .and_then(|d| d.card(idx))
                     .and_then(|c| {
                         if let CardKind::Gauge { severity, .. } = &c.kind {
                             severity.as_ref().map(|s| (s.green, s.yellow, s.red))
@@ -2876,7 +2876,7 @@ impl App {
                     if let Some(ed) = self.editor.as_mut() {
                         ed.snapshot(dash);
                     }
-                    if let Some(card) = dash.cards.get_mut(idx) {
+                    if let Some(card) = dash.card_mut(idx) {
                         if let CardKind::Gauge { needle, .. } = &mut card.kind {
                             *needle = !*needle;
                             if let Some(ed) = self.editor.as_mut() {
@@ -2890,7 +2890,7 @@ impl App {
                 let current = self
                     .dashboards
                     .get(dash_idx)
-                    .and_then(|d| d.cards.get(idx))
+                    .and_then(|d| d.card(idx))
                     .and_then(|c| {
                         if let CardKind::Clock { format, .. } = &c.kind {
                             Some(format.clone())
@@ -2911,7 +2911,7 @@ impl App {
                 let current = self
                     .dashboards
                     .get(dash_idx)
-                    .and_then(|d| d.cards.get(idx))
+                    .and_then(|d| d.card(idx))
                     .and_then(|c| {
                         if let CardKind::Clock { timezone, .. } = &c.kind {
                             timezone.clone()
@@ -2933,7 +2933,7 @@ impl App {
                 let current_selected = self
                     .dashboards
                     .get(dash_idx)
-                    .and_then(|d| d.cards.get(idx))
+                    .and_then(|d| d.card(idx))
                     .and_then(|c| {
                         if let CardKind::Statistics { metric, .. } = &c.kind {
                             use crate::dashboard::StatsMetric::*;
@@ -2961,7 +2961,7 @@ impl App {
                 let current = self
                     .dashboards
                     .get(dash_idx)
-                    .and_then(|d| d.cards.get(idx))
+                    .and_then(|d| d.card(idx))
                     .and_then(|c| {
                         if let CardKind::Statistics { window, .. } = &c.kind {
                             Some(window.clone())
@@ -2982,7 +2982,7 @@ impl App {
                 let current = self
                     .dashboards
                     .get(dash_idx)
-                    .and_then(|d| d.cards.get(idx))
+                    .and_then(|d| d.card(idx))
                     .and_then(|c| {
                         if let CardKind::Statistics { unit, .. } = &c.kind {
                             unit.clone()
@@ -3013,7 +3013,7 @@ impl App {
         let Some(dash) = self.dashboards.get(editor.dash_idx) else {
             return;
         };
-        let Some(card) = dash.cards.get(idx) else {
+        let Some(card) = dash.card(idx) else {
             return;
         };
         use crate::dashboard::CardKind;
@@ -3297,7 +3297,7 @@ impl App {
         let Some(card) = self
             .dashboards
             .get(idx)
-            .and_then(|d| d.cards.get(selected_card))
+            .and_then(|d| d.card(selected_card))
         else {
             return false;
         };
@@ -3351,7 +3351,7 @@ impl App {
         let Some(dash) = self.dashboards.get(*idx) else {
             return;
         };
-        let Some(card) = dash.cards.get(*selected_card) else {
+        let Some(card) = dash.card(*selected_card) else {
             return;
         };
         // EntityList / FilteredEntityList: act on sub-selected entity.
@@ -3397,7 +3397,7 @@ impl App {
         } = &mut self.screen
         {
             if let Some(dash) = self.dashboards.get(*idx) {
-                if let Some(card) = dash.cards.get(*selected_card) {
+                if let Some(card) = dash.card(*selected_card) {
                     if let Some((_, entities)) = list_entities(card, &self.instances) {
                         if entities.is_empty() {
                             return;
@@ -3434,10 +3434,10 @@ impl App {
         let Some(dash) = self.dashboards.get(*idx) else {
             return;
         };
-        if dash.cards.is_empty() {
+        if dash.card_count() == 0 {
             return;
         }
-        let total = dash.cards.len() as i64;
+        let total = dash.card_count() as i64;
         let cur = i64::try_from(*selected_card).unwrap_or(0);
         let new = (cur + i64::from(delta)).rem_euclid(total);
         *selected_card = new as usize;
@@ -3457,7 +3457,7 @@ impl App {
 
     fn current_row_count(&self) -> usize {
         match &self.screen {
-            Screen::Dashboard { idx, .. } => self.dashboards.get(*idx).map_or(0, |d| d.cards.len()),
+            Screen::Dashboard { idx, .. } => self.dashboards.get(*idx).map_or(0, |d| d.card_count()),
             Screen::Editor => 0,
         }
     }

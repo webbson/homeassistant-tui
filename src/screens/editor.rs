@@ -22,7 +22,7 @@ pub fn draw(f: &mut Frame, area: Rect, app: &mut App) {
         };
         let card_pos = editor
             .selected_card
-            .and_then(|i| dash.cards.get(i))
+            .and_then(|i| dash.card(i))
             .map(|c| c.pos);
         (
             editor.dash_idx,
@@ -1424,7 +1424,7 @@ fn draw_graph_add_one_series(
         .editor
         .as_ref()
         .and_then(|ed| app.dashboards.get(ed.dash_idx))
-        .and_then(|d| d.cards.get(card_idx))
+        .and_then(|d| d.card(card_idx))
         .and_then(|c| {
             if let crate::dashboard::CardKind::Graph { instance, .. } = &c.kind {
                 Some(instance.clone())
