@@ -340,6 +340,14 @@ fn render_card(
                 crate::dashboard::ImageSource::Camera { entity } => entity.clone(),
             };
             let key = (instance.clone(), entity.clone());
+            // On first render of a freshly-added card, the cache has no entry
+            // yet — kick off a fetch. send_image_fetch is a no-op when already
+            // in-flight, so the 250ms tick won't spam requests.
+            if !app.image_cache.contains_key(&key) {
+                let inst = instance.clone();
+                let ent = entity.clone();
+                app.send_image_fetch(&inst, &ent);
+            }
             let error = app
                 .image_cache
                 .get(&key)

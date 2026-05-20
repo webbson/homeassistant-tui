@@ -3617,7 +3617,7 @@ impl App {
     }
 
     /// Send a `FetchImageBytes` command if not already in-flight.
-    fn send_image_fetch(&mut self, instance: &Alias, entity: &EntityId) {
+    pub fn send_image_fetch(&mut self, instance: &Alias, entity: &EntityId) {
         let key = (instance.clone(), entity.clone());
         if self.image_inflight.contains(&key) {
             return;
