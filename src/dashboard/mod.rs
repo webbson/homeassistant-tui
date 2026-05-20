@@ -193,6 +193,12 @@ pub enum CardKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         title: Option<String>,
     },
+    MediaPlayer {
+        instance: Alias,
+        entity: EntityId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+    },
 }
 
 fn default_window() -> String {
@@ -228,6 +234,9 @@ impl Card {
             CardKind::Statistics { title, entity, .. } => {
                 title.as_deref().unwrap_or(entity.as_str())
             }
+            CardKind::MediaPlayer { title, entity, .. } => {
+                title.as_deref().unwrap_or(entity.as_str())
+            }
         }
     }
 
@@ -257,6 +266,9 @@ impl Card {
                 }
             }
             CardKind::Statistics {
+                instance, entity, ..
+            }
+            | CardKind::MediaPlayer {
                 instance, entity, ..
             } => Some((instance, entity)),
             CardKind::Text { .. }
@@ -551,6 +563,24 @@ pos: { col: 0, row: 0, w: 4, h: 3 }
         let back = serde_yaml::to_string(&card).unwrap();
         assert!(back.contains("type: statistics"));
         assert!(back.contains("metric: avg"));
+    }
+
+    #[test]
+    fn media_player_round_trip() {
+        let yaml = r#"
+type: media_player
+instance: home
+entity: media_player.living_room
+pos: { col: 0, row: 0, w: 6, h: 4 }
+"#;
+        let card: Card = serde_yaml::from_str(yaml).unwrap();
+        if let CardKind::MediaPlayer { entity, .. } = &card.kind {
+            assert_eq!(entity.as_str(), "media_player.living_room");
+        } else {
+            panic!("wrong variant");
+        }
+        let back = serde_yaml::to_string(&card).unwrap();
+        assert!(back.contains("type: media_player"));
     }
 
     #[test]

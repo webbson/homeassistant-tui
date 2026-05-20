@@ -2173,7 +2173,8 @@ impl App {
                         | crate::dashboard::CardKind::EntityList { title, .. }
                         | crate::dashboard::CardKind::FilteredEntityList { title, .. }
                         | crate::dashboard::CardKind::Clock { title, .. }
-                        | crate::dashboard::CardKind::Statistics { title, .. } => title.clone(),
+                        | crate::dashboard::CardKind::Statistics { title, .. }
+                        | crate::dashboard::CardKind::MediaPlayer { title, .. } => title.clone(),
                     })
                     .unwrap_or_default();
                 if let Some(ed) = self.editor.as_mut() {
@@ -2675,6 +2676,9 @@ impl App {
             }
             CardKind::Statistics { instance, .. } => {
                 (CardTypeStub::Statistics, instance.clone(), None)
+            }
+            CardKind::MediaPlayer { instance, .. } => {
+                (CardTypeStub::MediaPlayer, instance.clone(), None)
             }
         };
         editor.edit_target = Some(idx);
@@ -3333,6 +3337,11 @@ fn build_typed_card(
         CardTypeStub::Statistics => {
             unreachable!("Statistics is built via StatsPickMetric flow, not build_typed_card")
         }
+        CardTypeStub::MediaPlayer => CardKind::MediaPlayer {
+            instance,
+            entity,
+            title,
+        },
     }
 }
 
@@ -3382,6 +3391,11 @@ fn build_card_kind(kind: CardTypeStub, buf: &str, default_alias: Option<&str>) -
             graph_type: crate::dashboard::GraphType::default(),
             window: "1h".into(),
             orientation: crate::dashboard::BarOrientation::default(),
+            title: None,
+        },
+        CardTypeStub::MediaPlayer => CardKind::MediaPlayer {
+            instance,
+            entity,
             title: None,
         },
         CardTypeStub::Text

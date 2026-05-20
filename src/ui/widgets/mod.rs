@@ -4,6 +4,7 @@ pub mod card_entity;
 pub mod card_entity_list;
 pub mod card_gauge;
 pub mod card_graph;
+pub mod card_media_player;
 pub mod card_statistics;
 pub mod card_text;
 pub mod card_toggle;

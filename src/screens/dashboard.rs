@@ -310,5 +310,25 @@ fn render_card(
                 selected,
             );
         }
+        CardKind::MediaPlayer {
+            instance, entity, ..
+        } => {
+            let s = app
+                .instances
+                .runtimes
+                .get(instance)
+                .and_then(|rt| rt.states.get(entity));
+            widgets::card_media_player::render(
+                f,
+                rect,
+                &title,
+                instance,
+                s,
+                card.color.as_deref(),
+                card.size,
+                &app.theme,
+                selected,
+            );
+        }
     }
 }

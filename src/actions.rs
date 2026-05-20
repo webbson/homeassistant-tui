@@ -25,6 +25,18 @@ pub fn default_action(entity_id: &EntityId) -> Option<HaCommand> {
     })
 }
 
+pub fn media_service_for_key(k: char) -> Option<&'static str> {
+    match k {
+        ' ' => Some("media_play_pause"),
+        'n' => Some("media_next_track"),
+        'p' => Some("media_previous_track"),
+        '+' => Some("volume_up"),
+        '-' => Some("volume_down"),
+        'm' => Some("volume_mute"),
+        _ => None,
+    }
+}
+
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct PendingAction {
