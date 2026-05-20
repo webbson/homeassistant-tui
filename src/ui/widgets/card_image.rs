@@ -29,9 +29,9 @@ pub fn render(
         .title(format!(" {title} "))
         .border_style(border_style);
     let inner = block.inner(area);
-    f.render_widget(block, area);
 
     if let Some(err) = error {
+        f.render_widget(block, area);
         f.render_widget(
             Paragraph::new(format!("Image unavailable\n{err}")).style(Style::new().fg(Color::Red)),
             inner,
@@ -39,8 +39,14 @@ pub fn render(
         return;
     }
     if let Some(p) = protocol {
+        // Render image FIRST so the kitty/iterm2 placeholder cells aren't
+        // touched by the block's border draw. Then draw the block on top —
+        // Block::bordered only writes the edge cells, so the inner image
+        // cells stay intact.
         f.render_stateful_widget(StatefulImage::default(), inner, p);
+        f.render_widget(block, area);
     } else {
+        f.render_widget(block, area);
         f.render_widget(
             Paragraph::new("(loading…)").style(Style::new().fg(Color::DarkGray)),
             inner,
