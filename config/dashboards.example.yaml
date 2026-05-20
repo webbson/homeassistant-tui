@@ -1,35 +1,103 @@
 # ha-tui — dashboard definitions
-# Each dashboard is a 12x8 (configurable) grid of cards.
+# Each dashboard is a 12x24 (configurable) grid of cards.
+# pos units are grid cells, not characters.
 
 dashboards:
   - name: "Home"
-    grid: { cols: 12, rows: 8 }
+    grid: { cols: 12, rows: 24 }
     cards:
+      # --- entity: show any HA entity state ---
       - type: entity
         instance: home
         entity: light.kitchen
         title: "Kitchen Light"
+        ticker: true
         pos: { col: 0, row: 0, w: 3, h: 2 }
 
+      # --- toggle: on/off indicator ---
       - type: toggle
         instance: home
         entity: switch.coffee
         pos: { col: 3, row: 0, w: 3, h: 2 }
 
+      # --- clock: strftime format, optional IANA timezone ---
+      - type: clock
+        format: "%H:%M"
+        timezone: "Europe/London"
+        pos: { col: 6, row: 0, w: 3, h: 2 }
+
+      # --- text: static markdown ---
+      - type: text
+        markdown: "## Notes\nMQTT down? check broker."
+        pos: { col: 9, row: 0, w: 3, h: 4 }
+
+      # --- gauge: arc with severity zones + needle ---
       - type: gauge
         instance: cabin
         entity: sensor.cabin_temp
         min: -20
         max: 30
         unit: "°C"
-        pos: { col: 6, row: 0, w: 3, h: 3 }
+        needle: true
+        severity:
+          - { from: -20, to: 0,  color: blue }
+          - { from: 0,   to: 20, color: green }
+          - { from: 20,  to: 30, color: red }
+        pos: { col: 0, row: 2, w: 3, h: 4 }
 
-      - type: sparkline
-        instance: cabin
+      # --- graph: sparkline with history backfill ---
+      - type: graph
+        instance: home
         entity: sensor.power
         window: "1h"
-        pos: { col: 0, row: 2, w: 6, h: 3 }
+        chart: line
+        pos: { col: 3, row: 2, w: 6, h: 4 }
 
-      - type: text
-        markdown: "## Notes\nMQTT down? check broker."
-        pos: { col: 9, row: 0, w: 3, h: 4 }
+      # --- statistics: rolling aggregate ---
+      - type: statistics
+        instance: home
+        entity: sensor.power
+        metric: avg
+        window: "1h"
+        unit: "W"
+        title: "Avg Power"
+        pos: { col: 0, row: 6, w: 3, h: 2 }
+
+      # --- entity_list: static list of entities ---
+      - type: entity_list
+        instance: home
+        entities:
+          - light.kitchen
+          - switch.coffee
+          - sensor.front_door
+        title: "Quick View"
+        pos: { col: 3, row: 6, w: 3, h: 4 }
+
+      # --- filtered_entity_list: dynamic glob+filter query ---
+      - type: filtered_entity_list
+        instance: home
+        query: "light.*[state=on]"
+        title: "Lights On"
+        pos: { col: 6, row: 6, w: 3, h: 4 }
+
+      # --- media_player: now-playing + volume gauge ---
+      - type: media_player
+        instance: home
+        entity: media_player.living_room
+        pos: { col: 0, row: 8, w: 6, h: 3 }
+
+      # --- image: camera proxy with auto-refresh ---
+      - type: image
+        instance: home
+        entity: camera.front_door
+        refresh_interval: 10
+        pos: { col: 6, row: 8, w: 6, h: 6 }
+
+      # --- weather: current conditions + forecast strip ---
+      - type: weather
+        instance: home
+        entity: weather.home
+        show_forecast: true
+        forecast_days: 3
+        title: "Home Weather"
+        pos: { col: 0, row: 11, w: 6, h: 5 }

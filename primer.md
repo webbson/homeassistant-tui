@@ -3,47 +3,54 @@
 ## What this is
 Terminal UI for Home Assistant. Rust + Ratatui 0.30. Multi-instance, color-coded entities, YAML dashboards, interactive dashboard editor (mouse + keyboard). Long-lived access token auth.
 
-## Current state — M0–M5 complete + M6 partial
-- `cargo build` passes (0 errors, ~10 dead-code warnings on future-use fields).
-- `cargo test` — 15 tests pass.
-- Binary runs `cargo run --` and renders empty UI when no config; loads config + connects multi-instance when present.
+## Current state — M1–M9 complete, branch `feature/card-improvements`
+- `cargo build` passes (0 errors, 0 warnings).
+- `cargo test` — 42 tests pass.
+- `cargo clippy --all-targets` — clean.
 
 ## What's implemented
 - **HA WebSocket client** (custom, on `tokio-tungstenite`): auth handshake, `subscribe_events`, `call_service`, reconnect with backoff. One tokio task per instance, mpsc to/from main.
-- **Multi-instance**: connect N HA servers concurrently. Each gets distinct color (auto from 8-color palette, or `color:` override per instance — also supports `#rrggbb`).
+- **Multi-instance**: connect N HA servers concurrently. Each gets distinct color (auto from 8-color palette, or `color:` override per instance).
 - **Entity browser**: live state list, color-prefixed by instance, JSON attrs in right pane, `f` cycles instance filter.
-- **Service calls**: Enter triggers domain-aware default (`light.toggle`, `script.turn_on`, `cover.toggle`, `lock.unlock`, …). Errors surface in status bar.
-- **YAML dashboards**: 5 card types — `entity`, `toggle`, `gauge`, `sparkline`, `text`. `1..9` switches dashboards.
-- **Dashboard editor** (`e` from dashboard view):
-  - Keyboard: `hjkl` cursor, `HJKL` resize, `Enter` select / place, `a` add (palette + entity prompt), `d` delete (confirm), `u` undo, `s` save, `Esc` exit (confirm if dirty).
-  - Mouse: click cell to select card, drag card to move. Mouse capture enabled via crossterm.
-- **Help overlay**: `?` toggles a centered modal.
-- **Logging**: tracing → rotating daily file at `~/Library/Application Support/ha-tui/log/ha-tui.log` (XDG-equivalent on Linux).
-- **CLI**: `--config <path>`, `--dashboards <path>`.
+- **Service calls**: Enter triggers domain-aware default (`light.toggle`, etc.).
+- **YAML dashboards**: all card types below.
+- **Dashboard editor** (`e`): keyboard + mouse, add/delete/move/resize/undo/save.
+- **Help overlay**: `?` toggles modal.
+
+## Card types (M1–M9 complete)
+- `entity` — state + optional ticker animation
+- `toggle` — on/off indicator
+- `gauge` — HA-style horizontal arc with severity zones + needle
+- `graph` — multi-series sparkline (Line/Bar/Pie, axes, backfilled history)
+- `text` — markdown body
+- `entity_list` — static entity list
+- `filtered_entity_list` — dynamic glob+filter query
+- `clock` — strftime format, optional IANA timezone
+- `statistics` — Avg/Min/Max/Sum/Count over configurable window
+- `media_player` — title/artist/app/volume gauge
+- `image` — image entity or camera proxy with optional refresh interval
+- `weather` — current conditions + optional forecast strip, 30-min auto-refresh
 
 ## Files
-- [Cargo.toml](Cargo.toml) — deps pinned (ratatui 0.30, crossterm 0.28, tokio 1, tokio-tungstenite 0.24).
-- [src/main.rs](src/main.rs) — clap, tracing init, tokio runtime, ratatui init/restore.
-- [src/app.rs](src/app.rs) — `App` state, event loop, all key/mouse handlers, editor dispatcher.
-- [src/event.rs](src/event.rs) — `AppEvent` enum.
-- [src/actions.rs](src/actions.rs) — domain default action for Enter.
-- [src/config/{mod,load}.rs](src/config/load.rs) — YAML config + env / token-file resolution.
-- [src/ha/{mod,client,protocol,registry}.rs](src/ha/client.rs) — HA WS protocol layer.
-- [src/dashboard/{mod,layout,persist,editor}.rs](src/dashboard/editor.rs) — dashboard model + editor reducer.
-- [src/screens/{mod,entities,instances,dashboard,editor}.rs](src/screens/mod.rs) — screen state + draw entry points.
-- [src/ui/{mod,theme}.rs](src/ui/mod.rs) + [src/ui/widgets/](src/ui/widgets/) — render layer.
-- [src/util/{logging,history}.rs](src/util/history.rs) — log appender, sparkline ring buffer.
-- [config/config.example.yaml](config/config.example.yaml), [config/dashboards.example.yaml](config/dashboards.example.yaml).
-- [README.md](README.md) — full user docs.
+- `src/app.rs` — App state, event loop, all handlers (4000+ lines)
+- `src/event.rs` — AppEvent enum (includes HaWeatherForecast, RefreshWeatherForecast)
+- `src/ha/mod.rs` — HaCommand (including GetWeatherForecast), ForecastKind, ForecastDay
+- `src/ha/client.rs` — WS loop, pending_history + pending_weather maps, parse_weather_forecast
+- `src/ha/protocol.rs` — ClientMsg/ServerMsg, weather_get_forecasts_payload()
+- `src/dashboard/mod.rs` — CardKind (including Weather), Card methods
+- `src/dashboard/editor.rs` — EditorMode (including Wx* variants), CardTypeStub (including Weather)
+- `src/screens/dashboard.rs` — render_card dispatch (all variants including Weather)
+- `src/screens/editor.rs` — draw handlers (all variants including Wx*)
+- `src/ui/widgets/card_weather.rs` — Weather renderer (Small/Normal/Large + forecast strip)
 
-## Plan
-Full plan at `~/.claude/plans/i-would-like-to-async-panda.md`. Milestones M0–M5 done, M6 partial (README + help overlay shipped; CI + Windows test pending).
+## Plan / milestone tracking
+Full plan at `docs/superpowers/plans/2026-05-20-card-improvements.md`.
+Spec at `docs/superpowers/specs/2026-05-20-card-improvements-design.md`.
 
 ## Next steps
-1. **Commit current state** — `git commit` currently blocked by locked 1Password SSH agent. Either unlock it (`op signin`) or temporarily disable signing for this initial commit.
-2. **Test against a real HA instance** — set up `~/.config/ha-tui/config.yaml` with a valid long-lived token and run `cargo run --release`. Verify the acceptance checklist in the plan.
-3. **Windows CI** — add GitHub Actions workflow building on Linux + macOS + Windows.
-4. **Free-form service call dialog** — current Enter handles only domain defaults.
+1. **M10 Final**: Update README, add example YAML snippets for new card types, update primer, merge feature branch to main.
+2. **Test against a real HA instance**: verify weather.get_forecasts works with HA 2024.x+.
+3. Weather cards on older HA (pre-2024) will get empty forecasts gracefully (defensive parser).
 
 ## Open blockers
-- **1Password SSH agent locked** — commits fail with `1Password: failed to fill whole buffer`. No code committed yet. All M0–M5 work is staged + on disk only.
+- None. Build is clean, all tests pass.
