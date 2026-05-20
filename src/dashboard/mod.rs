@@ -119,6 +119,40 @@ fn default_window() -> String {
     "1h".into()
 }
 
+impl Card {
+    pub fn title(&self) -> &str {
+        match &self.kind {
+            CardKind::Entity { title, entity, .. }
+            | CardKind::Toggle { title, entity, .. }
+            | CardKind::Gauge { title, entity, .. }
+            | CardKind::Sparkline { title, entity, .. } => title.as_deref().unwrap_or(entity),
+            CardKind::Text { title, .. } => title.as_deref().unwrap_or("Text"),
+            CardKind::EntityList { title, .. } => title.as_deref().unwrap_or("Entities"),
+            CardKind::FilteredEntityList { title, .. } => title.as_deref().unwrap_or("Filtered"),
+        }
+    }
+
+    pub fn entity_ref(&self) -> Option<(&Alias, &EntityId)> {
+        match &self.kind {
+            CardKind::Entity {
+                instance, entity, ..
+            }
+            | CardKind::Toggle {
+                instance, entity, ..
+            }
+            | CardKind::Gauge {
+                instance, entity, ..
+            }
+            | CardKind::Sparkline {
+                instance, entity, ..
+            } => Some((instance, entity)),
+            CardKind::Text { .. }
+            | CardKind::EntityList { .. }
+            | CardKind::FilteredEntityList { .. } => None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -155,39 +189,5 @@ pos: { col: 0, row: 0, w: 4, h: 2 }
         let back = serde_yaml::to_string(&card).unwrap();
         assert!(!back.contains("size:"));
         assert!(!back.contains("color:"));
-    }
-}
-
-impl Card {
-    pub fn title(&self) -> &str {
-        match &self.kind {
-            CardKind::Entity { title, entity, .. }
-            | CardKind::Toggle { title, entity, .. }
-            | CardKind::Gauge { title, entity, .. }
-            | CardKind::Sparkline { title, entity, .. } => title.as_deref().unwrap_or(entity),
-            CardKind::Text { title, .. } => title.as_deref().unwrap_or("Text"),
-            CardKind::EntityList { title, .. } => title.as_deref().unwrap_or("Entities"),
-            CardKind::FilteredEntityList { title, .. } => title.as_deref().unwrap_or("Filtered"),
-        }
-    }
-
-    pub fn entity_ref(&self) -> Option<(&Alias, &EntityId)> {
-        match &self.kind {
-            CardKind::Entity {
-                instance, entity, ..
-            }
-            | CardKind::Toggle {
-                instance, entity, ..
-            }
-            | CardKind::Gauge {
-                instance, entity, ..
-            }
-            | CardKind::Sparkline {
-                instance, entity, ..
-            } => Some((instance, entity)),
-            CardKind::Text { .. }
-            | CardKind::EntityList { .. }
-            | CardKind::FilteredEntityList { .. } => None,
-        }
     }
 }
