@@ -111,6 +111,8 @@ pub enum CardKind {
         #[serde(default)]
         hide_state: bool,
         #[serde(default)]
+        hide_when_empty: bool,
+        #[serde(default)]
         title: Option<String>,
     },
 }
@@ -189,5 +191,25 @@ pos: { col: 0, row: 0, w: 4, h: 2 }
         let back = serde_yaml::to_string(&card).unwrap();
         assert!(!back.contains("size:"));
         assert!(!back.contains("color:"));
+    }
+
+    #[test]
+    fn filtered_list_hide_when_empty_round_trip() {
+        let yaml = r#"
+type: filtered_entity_list
+instance: home
+query: "light.*"
+hide_when_empty: true
+pos: { col: 0, row: 0, w: 6, h: 4 }
+"#;
+        let card: Card = serde_yaml::from_str(yaml).unwrap();
+        if let CardKind::FilteredEntityList {
+            hide_when_empty, ..
+        } = &card.kind
+        {
+            assert!(*hide_when_empty);
+        } else {
+            panic!("wrong variant");
+        }
     }
 }

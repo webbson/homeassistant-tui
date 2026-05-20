@@ -580,6 +580,7 @@ impl App {
                             instance: inst,
                             query: q,
                             hide_state: hide,
+                            hide_when_empty: false,
                             title,
                         };
                         let Some(dash) = self.dashboards.get_mut(dash_idx) else {
@@ -1030,6 +1031,7 @@ impl App {
                         query,
                         hide_state,
                         title,
+                        ..
                     } = &card.kind
                     {
                         existing = Some((
