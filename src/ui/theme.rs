@@ -50,7 +50,7 @@ impl Theme {
     }
 }
 
-fn parse_color(s: &str) -> Option<Color> {
+pub fn parse_color(s: &str) -> Option<Color> {
     match s.to_ascii_lowercase().as_str() {
         "black" => Some(Color::Black),
         "red" => Some(Color::Red),
@@ -74,5 +74,40 @@ fn parse_color(s: &str) -> Option<Color> {
             Some(Color::Rgb(r, g, b))
         }
         _ => None,
+    }
+}
+
+pub fn resolve_card_color(card_color: Option<&str>, instance: &str, theme: &Theme) -> Color {
+    card_color
+        .and_then(parse_color)
+        .unwrap_or_else(|| theme.instance_color(instance))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolve_card_color_uses_override_when_set() {
+        let theme = Theme::empty();
+        assert_eq!(
+            resolve_card_color(Some("#ff0000"), "any", &theme),
+            Color::Rgb(0xff, 0x00, 0x00),
+        );
+    }
+
+    #[test]
+    fn resolve_card_color_falls_back_to_instance_when_no_override() {
+        let theme = Theme::empty();
+        assert_eq!(resolve_card_color(None, "missing", &theme), Color::White);
+    }
+
+    #[test]
+    fn resolve_card_color_falls_back_when_override_unparseable() {
+        let theme = Theme::empty();
+        assert_eq!(
+            resolve_card_color(Some("not-a-color"), "missing", &theme),
+            Color::White,
+        );
     }
 }
