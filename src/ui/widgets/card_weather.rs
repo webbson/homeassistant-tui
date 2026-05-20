@@ -110,7 +110,10 @@ pub fn render(
             let total_fixed = attr_count + fc_count;
 
             let constraints: Vec<Constraint> = std::iter::once(Constraint::Fill(1))
-                .chain(std::iter::repeat(Constraint::Length(1)).take(total_fixed as usize))
+                .chain(std::iter::repeat_n(
+                    Constraint::Length(1),
+                    total_fixed as usize,
+                ))
                 .collect();
 
             let areas = Layout::vertical(constraints).split(inner);

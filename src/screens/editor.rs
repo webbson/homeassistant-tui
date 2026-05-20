@@ -376,6 +376,29 @@ pub fn draw(f: &mut Frame, area: Rect, app: &mut App) {
                 buf,
             );
         }
+        // Weather add-flow
+        EditorMode::WxEditShowForecast { selected, .. } => {
+            draw_wx_show_forecast(f, area, *selected);
+        }
+        EditorMode::WxEditForecastDays {
+            buf, show_forecast, ..
+        } => {
+            let hint = if *show_forecast {
+                "Days of forecast to show (1–7, default 3)"
+            } else {
+                "Days of forecast (1–7, default 3 — ignored since forecast is off)"
+            };
+            draw_text_input(f, area, " New weather card (4/5) ", hint, buf);
+        }
+        EditorMode::WxEditTitleAdd { buf, .. } => {
+            draw_text_input(
+                f,
+                area,
+                " New weather card (5/5) ",
+                "Title (optional — Enter to use entity name)",
+                buf,
+            );
+        }
         EditorMode::Browse => {}
     }
 }
@@ -389,6 +412,32 @@ fn draw_image_pick_source(f: &mut Frame, area: Rect, selected: usize) {
     let items: [(&str, &str); 2] = [
         ("1", "Image entity  (image.*)"),
         ("2", "Camera stream (camera.*)"),
+    ];
+    let list_items: Vec<ListItem> = items
+        .iter()
+        .enumerate()
+        .map(|(i, (key, label))| {
+            let style = if i == selected {
+                Style::new().bold().fg(Color::Yellow)
+            } else {
+                Style::new()
+            };
+            ListItem::new(format!("[{key}] {label}")).style(style)
+        })
+        .collect();
+    let list = List::new(list_items);
+    f.render_widget(list, inner);
+}
+
+fn draw_wx_show_forecast(f: &mut Frame, area: Rect, selected: usize) {
+    let r = modal_rect(area, 44, 6);
+    f.render_widget(Clear, r);
+    let block = Block::bordered().title(" New weather card (3/5) ");
+    let inner = block.inner(r);
+    f.render_widget(block, r);
+    let items: [(&str, &str); 2] = [
+        ("y", "Yes — show forecast strip"),
+        ("n", "No  — current conditions only"),
     ];
     let list_items: Vec<ListItem> = items
         .iter()

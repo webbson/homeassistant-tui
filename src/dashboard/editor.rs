@@ -300,6 +300,31 @@ pub enum EditorMode {
         refresh_seconds: Option<u32>,
         buf: String,
     },
+    // ---- Weather add-flow ----
+    /// Step 3 (after entity pick): toggle show_forecast on/off.
+    WxEditShowForecast {
+        instance: String,
+        entity: String,
+        friendly_name: String,
+        selected: usize, // 0 = yes, 1 = no
+    },
+    /// Step 4: numeric forecast_days (1-7, default 3).
+    WxEditForecastDays {
+        instance: String,
+        entity: String,
+        friendly_name: String,
+        show_forecast: bool,
+        buf: String,
+    },
+    /// Step 5: optional title.
+    WxEditTitleAdd {
+        instance: String,
+        entity: String,
+        friendly_name: String,
+        show_forecast: bool,
+        forecast_days: u8,
+        buf: String,
+    },
 }
 
 /// Accumulates the first two threshold values while collecting severity input.

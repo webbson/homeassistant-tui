@@ -279,6 +279,13 @@ impl App {
                                         buf: String::new(),
                                     };
                                 }
+                            } else if ct == CardTypeStub::Weather {
+                                editor.mode = EditorMode::WxEditShowForecast {
+                                    instance: inst,
+                                    entity: eid,
+                                    friendly_name: fname,
+                                    selected: 0,
+                                };
                             } else {
                                 editor.mode = EditorMode::EditingTitle {
                                     card_type: ct,
@@ -2170,6 +2177,112 @@ impl App {
                 }
                 return;
             }
+            // ---- Weather add-flow ----
+            EditorMode::WxEditShowForecast {
+                instance,
+                entity,
+                friendly_name,
+                selected,
+            } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Up if *selected > 0 => *selected -= 1,
+                    KeyCode::Down if *selected < 1 => *selected += 1,
+                    KeyCode::Char('y') | KeyCode::Char('Y') => *selected = 0,
+                    KeyCode::Char('n') | KeyCode::Char('N') => *selected = 1,
+                    KeyCode::Enter => {
+                        let show = *selected == 0;
+                        let inst = instance.clone();
+                        let ent = entity.clone();
+                        let fname = friendly_name.clone();
+                        editor.mode = EditorMode::WxEditForecastDays {
+                            instance: inst,
+                            entity: ent,
+                            friendly_name: fname,
+                            show_forecast: show,
+                            buf: "3".into(),
+                        };
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::WxEditForecastDays {
+                instance,
+                entity,
+                friendly_name,
+                show_forecast,
+                buf,
+            } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        buf.pop();
+                    }
+                    KeyCode::Char(c) if c.is_ascii_digit() => buf.push(c),
+                    KeyCode::Enter => {
+                        let days: u8 = buf.trim().parse::<u8>().unwrap_or(3).clamp(1, 7);
+                        let inst = instance.clone();
+                        let ent = entity.clone();
+                        let fname = friendly_name.clone();
+                        let sf = *show_forecast;
+                        editor.mode = EditorMode::WxEditTitleAdd {
+                            instance: inst,
+                            entity: ent,
+                            friendly_name: fname,
+                            show_forecast: sf,
+                            forecast_days: days,
+                            buf: String::new(),
+                        };
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::WxEditTitleAdd {
+                instance,
+                entity,
+                friendly_name,
+                show_forecast,
+                forecast_days,
+                buf,
+            } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        buf.pop();
+                    }
+                    KeyCode::Char(c) => buf.push(c),
+                    KeyCode::Enter => {
+                        let title_raw = buf.trim().to_string();
+                        let title = if title_raw.is_empty() {
+                            if friendly_name.is_empty() {
+                                None
+                            } else {
+                                Some(friendly_name.clone())
+                            }
+                        } else {
+                            Some(title_raw)
+                        };
+                        let kind = CardKind::Weather {
+                            instance: instance.clone(),
+                            entity: entity.clone(),
+                            show_forecast: *show_forecast,
+                            forecast_days: *forecast_days,
+                            title,
+                        };
+                        editor.mode = EditorMode::Browse;
+                        if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.snapshot(dash);
+                                ed.add_card(dash, kind);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
             EditorMode::Browse => {}
         }
 
@@ -3666,6 +3779,7 @@ pub fn list_entities(
 pub fn domain_prefix_for_type(kind: CardTypeStub) -> Option<&'static str> {
     match kind {
         CardTypeStub::MediaPlayer => Some("media_player."),
+        CardTypeStub::Weather => Some("weather."),
         // Image cards accept both `image.` and `camera.` entities — no single prefix filter.
         _ => None,
     }
