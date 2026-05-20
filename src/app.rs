@@ -3508,7 +3508,7 @@ impl App {
                 self.image_inflight.remove(&key);
                 match result {
                     Ok(bytes) => {
-                        tracing::debug!(
+                        tracing::info!(
                             instance = %instance,
                             entity = %entity,
                             bytes = bytes.len(),
@@ -3517,7 +3517,14 @@ impl App {
                         if let Some(picker) = &mut self.image_picker {
                             match image::load_from_memory(&bytes) {
                                 Ok(img) => {
+                                    let (w, h) = (img.width(), img.height());
                                     let protocol = picker.new_resize_protocol(img);
+                                    tracing::info!(
+                                        entity = %entity,
+                                        width = w,
+                                        height = h,
+                                        "image decoded + protocol built"
+                                    );
                                     self.image_cache.insert(
                                         key,
                                         ImageCacheEntry {
@@ -3531,6 +3538,8 @@ impl App {
                                     // Keep any existing cached frame; only log the error.
                                 }
                             }
+                        } else {
+                            tracing::warn!(entity = %entity, "no image_picker — cannot decode");
                         }
                     }
                     Err(e) => {
@@ -3624,15 +3633,31 @@ impl App {
         }
         // Determine kind from the card definition.
         let kind = self.image_fetch_kind_for(instance, entity);
-        let Some(kind) = kind else { return };
+        let Some(kind) = kind else {
+            tracing::warn!(
+                instance = %instance,
+                entity = %entity,
+                "send_image_fetch: no Image card found for entity"
+            );
+            return;
+        };
+        tracing::info!(instance = %instance, entity = %entity, ?kind, "sending FetchImageBytes");
         self.image_inflight.insert(key);
-        let _ = self.instances.send(
+        let send_res = self.instances.send(
             instance,
             crate::ha::HaCommand::FetchImageBytes {
                 entity: entity.clone(),
                 kind,
             },
         );
+        if send_res.is_err() {
+            tracing::warn!(
+                instance = %instance,
+                entity = %entity,
+                "FetchImageBytes send failed (instance channel closed)"
+            );
+        }
+        let _ = send_res;
     }
 
     /// Look up whether an entity is an image or camera source across all dashboards.
