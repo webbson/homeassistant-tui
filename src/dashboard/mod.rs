@@ -20,6 +20,60 @@ pub struct Dashboard {
     pub cards: Vec<Card>,
 }
 
+impl Dashboard {
+    /// Iterate all cards in the dashboard (flat order).
+    pub fn cards_iter(&self) -> impl Iterator<Item = &Card> {
+        self.cards.iter()
+    }
+
+    /// Iterate all cards mutably.
+    pub fn cards_iter_mut(&mut self) -> impl Iterator<Item = &mut Card> {
+        self.cards.iter_mut()
+    }
+
+    /// Get card by flat index.
+    pub fn card(&self, idx: usize) -> Option<&Card> {
+        self.cards.get(idx)
+    }
+
+    /// Get card mutably by flat index.
+    pub fn card_mut(&mut self, idx: usize) -> Option<&mut Card> {
+        self.cards.get_mut(idx)
+    }
+
+    /// Total card count.
+    pub fn card_count(&self) -> usize {
+        self.cards.len()
+    }
+
+    /// Get card by stable ID.
+    pub fn card_by_id(&self, id: CardId) -> Option<&Card> {
+        self.cards.iter().find(|c| c.id == id)
+    }
+
+    /// Get card mutably by stable ID.
+    pub fn card_by_id_mut(&mut self, id: CardId) -> Option<&mut Card> {
+        self.cards.iter_mut().find(|c| c.id == id)
+    }
+
+    /// Resolve a `CardId` to its flat index.
+    pub fn flat_idx_of(&self, id: CardId) -> Option<usize> {
+        self.cards.iter().position(|c| c.id == id)
+    }
+
+    /// Remove a card by stable ID; returns the removed card.
+    pub fn remove_card_by_id(&mut self, id: CardId) -> Option<Card> {
+        let idx = self.flat_idx_of(id)?;
+        Some(self.cards.remove(idx))
+    }
+
+    /// Compute the next unique `CardId` for this dashboard (max existing + 1).
+    pub fn next_card_id(&self) -> CardId {
+        let max = self.cards.iter().map(|c| c.id.0).max().unwrap_or(0);
+        CardId(max + 1)
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Grid {
     pub cols: u16,
@@ -35,8 +89,22 @@ pub enum CardSize {
     Large,
 }
 
+/// Stable per-card identity. Assigned at load time; zero means unassigned.
+/// Hand-written YAML may omit this field; `persist::load` assigns fresh IDs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+pub struct CardId(pub u64);
+
+impl CardId {
+    pub const ZERO: CardId = CardId(0);
+    pub fn is_zero(&self) -> bool {
+        self.0 == 0
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Card {
+    #[serde(default, skip_serializing_if = "CardId::is_zero")]
+    pub id: CardId,
     #[serde(flatten)]
     pub kind: CardKind,
     pub pos: Pos,

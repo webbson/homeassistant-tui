@@ -3,7 +3,7 @@ use std::path::Path;
 use color_eyre::eyre::Context;
 use color_eyre::Result;
 
-use crate::dashboard::{Card, CardKind, CardSize, Dashboard, DashboardFile, Grid, Pos};
+use crate::dashboard::{Card, CardId, CardKind, CardSize, Dashboard, DashboardFile, Grid, Pos};
 
 const EXAMPLE_CONFIG: &str = include_str!("../../config/config.example.yaml");
 
@@ -47,6 +47,7 @@ fn welcome_dashboard_file() -> DashboardFile {
             name: "Welcome".into(),
             grid: Grid { cols: 12, rows: 8 },
             cards: vec![Card {
+                id: CardId::ZERO,
                 kind: CardKind::Text {
                     markdown: WELCOME_MARKDOWN.into(),
                     title: Some("Setup".into()),

@@ -1,5 +1,6 @@
 use crate::dashboard::{
-    BarOrientation, Card, CardKind, CardSize, Dashboard, GraphSeries, GraphType, Pos, StatsMetric,
+    BarOrientation, Card, CardId, CardKind, CardSize, Dashboard, GraphSeries, GraphType, Pos,
+    StatsMetric,
 };
 
 const MAX_UNDO: usize = 32;
@@ -694,6 +695,7 @@ impl EditorState {
             }
         }
         let card = Card {
+            id: dash.next_card_id(),
             pos: Pos {
                 col: self.cursor_col,
                 row: self.cursor_row,
@@ -773,6 +775,7 @@ mod tests {
             grid: Grid { cols: 12, rows: 8 },
             cards: vec![
                 Card {
+                    id: CardId(1),
                     pos: Pos {
                         col: 0,
                         row: 0,
@@ -787,6 +790,7 @@ mod tests {
                     size: CardSize::Normal,
                 },
                 Card {
+                    id: CardId(2),
                     pos: Pos {
                         col: 4,
                         row: 0,
