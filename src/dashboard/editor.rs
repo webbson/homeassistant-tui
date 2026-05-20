@@ -164,7 +164,7 @@ pub fn card_menu_items(card: &Card) -> Vec<MenuItem> {
             label,
         });
     }
-    if matches!(card.kind, CardKind::Sparkline { .. }) {
+    if matches!(card.kind, CardKind::Graph { .. }) {
         items.push(MenuItem {
             action: MenuAction::EditWindow,
             label: "Set history window",
@@ -231,7 +231,7 @@ pub enum CardTypeStub {
     Entity,
     Toggle,
     Gauge,
-    Sparkline,
+    Graph,
     Text,
     EntityList,
     FilteredEntityList,
@@ -242,7 +242,7 @@ impl CardTypeStub {
         CardTypeStub::Entity,
         CardTypeStub::Toggle,
         CardTypeStub::Gauge,
-        CardTypeStub::Sparkline,
+        CardTypeStub::Graph,
         CardTypeStub::Text,
         CardTypeStub::EntityList,
         CardTypeStub::FilteredEntityList,
@@ -252,7 +252,7 @@ impl CardTypeStub {
             CardTypeStub::Entity => "entity",
             CardTypeStub::Toggle => "toggle",
             CardTypeStub::Gauge => "gauge",
-            CardTypeStub::Sparkline => "sparkline",
+            CardTypeStub::Graph => "graph",
             CardTypeStub::Text => "text",
             CardTypeStub::EntityList => "entity list (multi)",
             CardTypeStub::FilteredEntityList => "filtered list (glob + filters)",
@@ -374,7 +374,7 @@ impl EditorState {
             CardKind::Entity { title, .. }
             | CardKind::Toggle { title, .. }
             | CardKind::Gauge { title, .. }
-            | CardKind::Sparkline { title, .. }
+            | CardKind::Graph { title, .. }
             | CardKind::Text { title, .. }
             | CardKind::EntityList { title, .. }
             | CardKind::FilteredEntityList { title, .. } => {

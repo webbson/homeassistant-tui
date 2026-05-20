@@ -139,15 +139,14 @@ fn render_card(
                 selected,
             );
         }
-        CardKind::Sparkline {
-            instance,
-            entity,
-            window,
-            ..
+        CardKind::Graph {
+            instance, window, ..
         } => {
-            let key = (instance.clone(), entity.clone());
-            let h = app.history.get(&key);
-            widgets::card_sparkline::render(
+            let entity = card.graph_entities().into_iter().next().cloned();
+            let h = entity
+                .as_ref()
+                .and_then(|e| app.history.get(&(instance.clone(), e.clone())));
+            widgets::card_graph::render(
                 f,
                 rect,
                 &title,

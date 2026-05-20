@@ -496,7 +496,7 @@ fn draw_window_edit(f: &mut Frame, area: Rect, buffer: &str) {
     let r = modal_rect(area, 56, 6);
     f.render_widget(Clear, r);
     let lines = vec![
-        Line::raw("Sparkline window — examples: 1h, 6h, 24h, 7d"),
+        Line::raw("Graph history window — examples: 1h, 6h, 24h, 7d"),
         Line::raw(""),
         Line::from(vec![
             Span::raw("> "),

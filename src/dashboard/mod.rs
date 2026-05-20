@@ -59,6 +59,32 @@ pub struct Pos {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GraphSeries {
+    pub entity: EntityId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum GraphType {
+    #[default]
+    Line,
+    Bar,
+    Pie,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BarOrientation {
+    #[default]
+    Vertical,
+    Horizontal,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CardKind {
     Entity {
@@ -85,11 +111,19 @@ pub enum CardKind {
         #[serde(default)]
         title: Option<String>,
     },
-    Sparkline {
+    #[serde(rename = "graph", alias = "sparkline")]
+    Graph {
         instance: Alias,
-        entity: EntityId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        entity: Option<EntityId>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        entities: Vec<GraphSeries>,
+        #[serde(default)]
+        graph_type: GraphType,
         #[serde(default = "default_window")]
         window: String,
+        #[serde(default)]
+        orientation: BarOrientation,
         #[serde(default)]
         title: Option<String>,
     },
@@ -126,8 +160,19 @@ impl Card {
         match &self.kind {
             CardKind::Entity { title, entity, .. }
             | CardKind::Toggle { title, entity, .. }
-            | CardKind::Gauge { title, entity, .. }
-            | CardKind::Sparkline { title, entity, .. } => title.as_deref().unwrap_or(entity),
+            | CardKind::Gauge { title, entity, .. } => title.as_deref().unwrap_or(entity),
+            CardKind::Graph {
+                title,
+                entity,
+                entities,
+                ..
+            } => title.as_deref().unwrap_or_else(|| {
+                entities
+                    .first()
+                    .map(|s| s.entity.as_str())
+                    .or_else(|| entity.as_deref())
+                    .unwrap_or("Graph")
+            }),
             CardKind::Text { title, .. } => title.as_deref().unwrap_or("Text"),
             CardKind::EntityList { title, .. } => title.as_deref().unwrap_or("Entities"),
             CardKind::FilteredEntityList { title, .. } => title.as_deref().unwrap_or("Filtered"),
@@ -144,13 +189,58 @@ impl Card {
             }
             | CardKind::Gauge {
                 instance, entity, ..
-            }
-            | CardKind::Sparkline {
-                instance, entity, ..
             } => Some((instance, entity)),
+            CardKind::Graph {
+                instance,
+                entity,
+                entities,
+                ..
+            } => {
+                if !entities.is_empty() {
+                    Some((instance, &entities[0].entity))
+                } else if let Some(e) = entity {
+                    Some((instance, e))
+                } else {
+                    None
+                }
+            }
             CardKind::Text { .. }
             | CardKind::EntityList { .. }
             | CardKind::FilteredEntityList { .. } => None,
+        }
+    }
+
+    pub fn graph_entities(&self) -> Vec<&EntityId> {
+        match &self.kind {
+            CardKind::Graph {
+                entity, entities, ..
+            } => {
+                if !entities.is_empty() {
+                    entities.iter().map(|s| &s.entity).collect()
+                } else if let Some(e) = entity {
+                    vec![e]
+                } else {
+                    Vec::new()
+                }
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    pub fn normalize(&mut self) {
+        if let CardKind::Graph {
+            entity, entities, ..
+        } = &mut self.kind
+        {
+            if entities.is_empty() {
+                if let Some(e) = entity.take() {
+                    entities.push(GraphSeries {
+                        entity: e,
+                        label: None,
+                        color: None,
+                    });
+                }
+            }
         }
     }
 }

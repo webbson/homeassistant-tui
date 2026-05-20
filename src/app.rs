@@ -638,19 +638,26 @@ impl App {
                             let mut entity_to_refetch: Option<(String, String, u32)> = None;
                             if let Some(dash) = self.dashboards.get_mut(dash_idx) {
                                 if let Some(card) = dash.cards.get_mut(idx) {
-                                    if let crate::dashboard::CardKind::Sparkline {
+                                    if let crate::dashboard::CardKind::Graph {
                                         instance,
+                                        entities,
                                         entity,
                                         window,
                                         ..
                                     } = &mut card.kind
                                     {
                                         *window = new_window.clone();
-                                        entity_to_refetch = Some((
-                                            instance.clone(),
-                                            entity.clone(),
-                                            parse_window_hours(&new_window),
-                                        ));
+                                        let eid = entities
+                                            .first()
+                                            .map(|s| s.entity.clone())
+                                            .or_else(|| entity.clone());
+                                        if let Some(eid) = eid {
+                                            entity_to_refetch = Some((
+                                                instance.clone(),
+                                                eid,
+                                                parse_window_hours(&new_window),
+                                            ));
+                                        }
                                     }
                                 }
                             }
@@ -945,7 +952,7 @@ impl App {
                         crate::dashboard::CardKind::Entity { title, .. }
                         | crate::dashboard::CardKind::Toggle { title, .. }
                         | crate::dashboard::CardKind::Gauge { title, .. }
-                        | crate::dashboard::CardKind::Sparkline { title, .. }
+                        | crate::dashboard::CardKind::Graph { title, .. }
                         | crate::dashboard::CardKind::Text { title, .. }
                         | crate::dashboard::CardKind::EntityList { title, .. }
                         | crate::dashboard::CardKind::FilteredEntityList { title, .. } => {
@@ -973,9 +980,7 @@ impl App {
                     .get(dash_idx)
                     .and_then(|d| d.cards.get(idx))
                     .and_then(|c| match &c.kind {
-                        crate::dashboard::CardKind::Sparkline { window, .. } => {
-                            Some(window.clone())
-                        }
+                        crate::dashboard::CardKind::Graph { window, .. } => Some(window.clone()),
                         _ => None,
                     })
                     .unwrap_or_else(|| "1h".to_string());
@@ -1150,9 +1155,7 @@ impl App {
             CardKind::Entity { instance, .. } => (CardTypeStub::Entity, instance.clone(), None),
             CardKind::Toggle { instance, .. } => (CardTypeStub::Toggle, instance.clone(), None),
             CardKind::Gauge { instance, .. } => (CardTypeStub::Gauge, instance.clone(), None),
-            CardKind::Sparkline { instance, .. } => {
-                (CardTypeStub::Sparkline, instance.clone(), None)
-            }
+            CardKind::Graph { instance, .. } => (CardTypeStub::Graph, instance.clone(), None),
             CardKind::EntityList {
                 instance, entities, ..
             } => {
@@ -1552,20 +1555,21 @@ impl App {
     }
 
     fn fetch_sparkline_history(&mut self, instance: &Alias) {
-        // For each sparkline card on every dashboard matching this instance, request backfill.
+        // For each graph card on every dashboard matching this instance, request backfill.
         let mut requests: Vec<(String, u32)> = Vec::new();
         for dash in &self.dashboards {
             for card in &dash.cards {
-                if let crate::dashboard::CardKind::Sparkline {
+                if let crate::dashboard::CardKind::Graph {
                     instance: card_inst,
-                    entity,
                     window,
                     ..
                 } = &card.kind
                 {
                     if card_inst == instance {
                         let hours = parse_window_hours(window);
-                        requests.push((entity.clone(), hours));
+                        for eid in card.graph_entities() {
+                            requests.push((eid.clone(), hours));
+                        }
                     }
                 }
             }
@@ -1710,10 +1714,13 @@ fn build_typed_card(
             unit: None,
             title,
         },
-        CardTypeStub::Sparkline => CardKind::Sparkline {
+        CardTypeStub::Graph => CardKind::Graph {
             instance,
-            entity,
+            entity: Some(entity),
+            entities: Vec::new(),
+            graph_type: crate::dashboard::GraphType::default(),
             window: "1h".into(),
+            orientation: crate::dashboard::BarOrientation::default(),
             title,
         },
         CardTypeStub::Text => CardKind::Text {
@@ -1768,10 +1775,13 @@ fn build_card_kind(kind: CardTypeStub, buf: &str, default_alias: Option<&str>) -
             unit: None,
             title: None,
         },
-        CardTypeStub::Sparkline => CardKind::Sparkline {
+        CardTypeStub::Graph => CardKind::Graph {
             instance,
-            entity,
+            entity: Some(entity),
+            entities: Vec::new(),
+            graph_type: crate::dashboard::GraphType::default(),
             window: "1h".into(),
+            orientation: crate::dashboard::BarOrientation::default(),
             title: None,
         },
         CardTypeStub::Text | CardTypeStub::EntityList | CardTypeStub::FilteredEntityList => {
