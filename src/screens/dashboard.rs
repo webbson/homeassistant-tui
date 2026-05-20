@@ -6,8 +6,10 @@ use ratatui::Frame;
 
 use crate::app::App;
 use crate::dashboard::layout::cell_to_rect;
-use crate::dashboard::{CardKind, Dashboard};
+use crate::dashboard::{CardKind, Dashboard, GraphType};
 use crate::ui::widgets;
+use crate::ui::widgets::card_graph::GraphRender;
+use crate::util::history::RingBuf;
 
 pub fn draw(
     f: &mut Frame,
@@ -140,23 +142,68 @@ fn render_card(
             );
         }
         CardKind::Graph {
-            instance, window, ..
+            instance,
+            entities,
+            graph_type,
+            window,
+            orientation,
+            ..
         } => {
-            let entity = card.graph_entities().into_iter().next().cloned();
-            let h = entity
-                .as_ref()
-                .and_then(|e| app.history.get(&(instance.clone(), e.clone())));
-            widgets::card_graph::render(
-                f,
-                rect,
-                &title,
+            let histories: Vec<(crate::ha::EntityId, Option<&RingBuf>)> = entities
+                .iter()
+                .map(|s| {
+                    (
+                        s.entity.clone(),
+                        app.history.get(&(instance.clone(), s.entity.clone())),
+                    )
+                })
+                .collect();
+            let graph_args = GraphRender {
+                area: rect,
+                title: &title,
                 instance,
-                h,
+                series: entities,
+                histories: &histories,
                 window,
-                card.color.as_deref(),
-                &app.theme,
+                card_color: card.color.as_deref(),
+                theme: &app.theme,
                 selected,
-            );
+            };
+            match graph_type {
+                GraphType::Line => {
+                    widgets::card_graph::render_line(f, graph_args);
+                }
+                GraphType::Bar => {
+                    let current: Vec<(crate::ha::EntityId, Option<f64>)> = entities
+                        .iter()
+                        .map(|s| {
+                            let val = app
+                                .instances
+                                .runtimes
+                                .get(instance)
+                                .and_then(|rt| rt.states.get(&s.entity))
+                                .and_then(|st| st.state.parse::<f64>().ok());
+                            (s.entity.clone(), val)
+                        })
+                        .collect();
+                    widgets::card_graph::render_bar(f, graph_args, *orientation, &current);
+                }
+                GraphType::Pie => {
+                    let current: Vec<(crate::ha::EntityId, Option<f64>)> = entities
+                        .iter()
+                        .map(|s| {
+                            let val = app
+                                .instances
+                                .runtimes
+                                .get(instance)
+                                .and_then(|rt| rt.states.get(&s.entity))
+                                .and_then(|st| st.state.parse::<f64>().ok());
+                            (s.entity.clone(), val)
+                        })
+                        .collect();
+                    widgets::card_graph::render_pie(f, graph_args, &current);
+                }
+            }
         }
         CardKind::Text { markdown, .. } => {
             widgets::card_text::render(f, rect, &title, markdown, card.color.as_deref(), selected);

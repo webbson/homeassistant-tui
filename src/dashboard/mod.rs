@@ -170,7 +170,7 @@ impl Card {
                 entities
                     .first()
                     .map(|s| s.entity.as_str())
-                    .or_else(|| entity.as_deref())
+                    .or(entity.as_deref())
                     .unwrap_or("Graph")
             }),
             CardKind::Text { title, .. } => title.as_deref().unwrap_or("Text"),
