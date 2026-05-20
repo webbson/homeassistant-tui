@@ -134,23 +134,91 @@ pub struct Severity {
 
 Old configs with just `min`/`max`/`unit` parse correctly. `severity` and `needle` default to `None` / `true` so behaviour for existing dashboards is "horizontal arc in instance colour with needle". Visual change vs. the old vertical bar is documented in the release notes.
 
-## 6. Sparkline → Graph rename
+## 6. Sparkline → Graph rename + multi-entity + multi-type
+
+`Sparkline` is renamed `Graph` and expanded to support multiple series and three render modes: line chart (history-backed, current behaviour), bar chart (current value per entity), and pie chart (current value per entity).
 
 ```rust
 #[serde(rename = "graph", alias = "sparkline")]
 Graph {
     instance: Alias,
-    entity: EntityId,
-    #[serde(default = "default_window")] window: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    entity: Option<EntityId>,           // legacy single-entity form (sparkline)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    entities: Vec<GraphSeries>,         // new multi-series form
+    #[serde(default = "default_graph_type")]
+    graph_type: GraphType,
+    #[serde(default = "default_window")]
+    window: String,                     // Line only; ignored for Bar/Pie
+    #[serde(default = "default_bar_orientation")]
+    orientation: BarOrientation,        // Bar only; ignored for Line/Pie
     #[serde(default)] title: Option<String>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GraphSeries {
+    pub entity: EntityId,
+    #[serde(default)] pub label: Option<String>,
+    #[serde(default)] pub color: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GraphType { Line, Bar, Pie }
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BarOrientation { Horizontal, Vertical }
+
+fn default_graph_type() -> GraphType { GraphType::Line }
+fn default_bar_orientation() -> BarOrientation { BarOrientation::Vertical }
 ```
 
-- Editor palette entry renamed `Graph`.
+### 6.1 Series normalization
+
+At load time, every `Graph` is normalized:
+
+- If `entity` is `Some` and `entities` is empty, a single synthetic `GraphSeries { entity, label: None, color: None }` is pushed into `entities`, and `entity` is cleared.
+- An empty series list is a config error (surfaced at load with a clear message including the dashboard + card index).
+
+Saves only ever write `entities`; the `entity` field exists solely as a legacy ingress path.
+
+### 6.2 Render modes
+
+**Line** — current behaviour, extended to N series.
+- History fetched per series on `HaInitialStates` (one `FetchHistory` per entity, reusing existing plumbing).
+- Each series renders as a ratatui `Chart` dataset, coloured by `series.color` ?? `card.color` ?? `instance.color`.
+- Y-axis auto-scaled to span all series. X-axis spans the `window`.
+- Legend shown when there are 2+ series (one row per series with its colour swatch + label/entity).
+
+**Bar** — uses ratatui `BarChart`, current state value of each series parsed as `f64`.
+- One bar per series; bar label = `series.label` ?? short entity name (last `.` segment); bar value = parsed numeric state.
+- `orientation: vertical` (default) uses `BarChart::default()`. `orientation: horizontal` uses `BarChart::default().direction(Direction::Horizontal)`.
+- Bar colours come from per-series colour fallback chain.
+- Non-numeric state is shown as a 0-height bar with the literal state as the label suffix.
+
+**Pie** — uses `tui-piechart` (verify exact crate name + ratatui-0.30 compat at implementation; if no compatible crate exists, fall back to a hand-rolled renderer using unicode block characters drawn into a `Canvas` widget).
+- One slice per series, sized by the entity's current numeric state. Slices use the per-series colour fallback chain.
+- Slice labels render as a side legend when the card's content area is too narrow for inline labels (heuristic: if pie radius < N cells, use legend).
+- Non-numeric states are skipped (with a status-bar warning the first time they're skipped per card).
+
+### 6.3 Editor support
+
+- Add-flow for Graph:
+  1. Type prompt (Line / Bar / Pie).
+  2. Repeated entity prompt; finish entry with `Esc` (or a "done" sentinel).
+  3. For Line, also prompt for `window`. For Bar, prompt for `orientation`.
+- Card context menu (`m`) on a Graph adds:
+  - "Add series" / "Remove series" / "Set series colour" / "Set series label".
+  - "Change type" (cycle Line/Bar/Pie).
+  - "Orientation" (only when `graph_type == Bar`).
+  - "Window" (only when `graph_type == Line`).
+
+### 6.4 Help & docs
+
 - Help overlay updated.
-- Internal type name `CardKind::Graph` (was `Sparkline`).
-- README + examples updated to use `graph`.
-- Old YAML using `type: sparkline` continues to load via the serde alias.
+- README + example YAML show all three modes with multi-entity configs.
+- Old YAML using `type: sparkline` continues to load via the serde alias and the legacy `entity` field.
 
 ## 7. New card: Clock
 
@@ -302,6 +370,7 @@ Added:
 - `ratatui-image` — image protocol rendering.
 - `reqwest` (rustls-tls-native-roots, stream) — HTTP client for HA image/camera proxies.
 - `image` — pulled in by `ratatui-image`, listed for clarity.
+- `tui-piechart` (or equivalent ratatui-0.30-compatible pie crate; fallback: hand-rolled `Canvas`-based pie) — Graph card Pie mode.
 
 Removed: none.
 
@@ -322,19 +391,21 @@ Removed: none.
 ## 16. Implementation milestones
 
 1. **M1**: `Card.color` + `Card.size` fields + plumbing. Apply in all existing renderers. New menu entries.
-2. **M2**: Sparkline → Graph rename. FilteredEntityList `hide_when_empty`.
-3. **M3**: Replace old Gauge with new HA-style Gauge.
-4. **M4**: Clock card.
-5. **M5**: Statistics card (reuses existing history plumbing — small).
-6. **M6**: MediaPlayer card (new key bindings, service calls).
-7. **M7**: Image card (largest — new deps, fetch loop, ratatui-image integration).
-8. **M8**: Weather card (forecast fetch + cache).
+2. **M2**: FilteredEntityList `hide_when_empty`.
+3. **M3**: Sparkline → Graph rename + multi-entity + Line/Bar/Pie modes.
+4. **M4**: Replace old Gauge with new HA-style Gauge.
+5. **M5**: Clock card.
+6. **M6**: Statistics card (reuses existing history plumbing — small).
+7. **M7**: MediaPlayer card (new key bindings, service calls).
+8. **M8**: Image card (largest — new deps, fetch loop, ratatui-image integration).
+9. **M9**: Weather card (forecast fetch + cache).
 
 Each milestone lands on its own feature branch, tested via `cargo test` and `cargo clippy --all-targets`, with insta snapshots reviewed before merge.
 
 ## 17. Risks & open questions
 
 - **`ratatui-image` 0.30 compatibility** — the crate's MSRV and ratatui version pin must be verified at implementation time. If incompatible, fall back to halfblocks-only via a hand-rolled rendering path.
+- **Pie chart crate compatibility** — `tui-piechart` may not be published against ratatui 0.30 yet. Implementation verifies the crate; if unavailable, builds a small renderer on `ratatui::widgets::canvas::Canvas` using arc segments. Either way, Pie mode is in scope for M3.
 - **HA image_proxy auth scheme** — the long-lived token may need to be passed as a query param vs. a header depending on HA version. Implementation will test both and pick the working one.
 - **Weather forecast service shape** — HA's `weather.get_forecasts` service response shape may differ across releases. Pin to the 2024.x shape and document the minimum supported HA version.
 - **MediaPlayer key binding conflicts** — `Space` and `n`/`p` are unused in dashboard navigation today, but verify before landing.
