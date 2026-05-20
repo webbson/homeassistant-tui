@@ -17,10 +17,11 @@ pub fn render(
     min: f64,
     max: f64,
     unit: Option<&str>,
+    card_color: Option<&str>,
     theme: &Theme,
     selected: bool,
 ) {
-    let color = theme.instance_color(instance);
+    let color = crate::ui::theme::resolve_card_color(card_color, instance, theme);
     let value = state.and_then(|s| s.state.parse::<f64>().ok());
     let ratio = match value {
         Some(v) if max > min => ((v - min) / (max - min)).clamp(0.0, 1.0),

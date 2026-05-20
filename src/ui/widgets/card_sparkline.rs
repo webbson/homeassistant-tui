@@ -17,10 +17,11 @@ pub fn render(
     instance: &str,
     history: Option<&RingBuf>,
     window: &str,
+    card_color: Option<&str>,
     theme: &Theme,
     selected: bool,
 ) {
-    let color = theme.instance_color(instance);
+    let color = crate::ui::theme::resolve_card_color(card_color, instance, theme);
     let mut block = Block::bordered()
         .title(format!(" {title} "))
         .border_style(Style::new().fg(color));

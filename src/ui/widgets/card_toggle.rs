@@ -8,16 +8,18 @@ use ratatui::Frame;
 use crate::ha::EntityState;
 use crate::ui::theme::Theme;
 
+#[allow(clippy::too_many_arguments)]
 pub fn render(
     f: &mut Frame,
     area: Rect,
     title: &str,
     instance: &str,
     state: Option<&EntityState>,
+    card_color: Option<&str>,
     theme: &Theme,
     selected: bool,
 ) {
-    let color = theme.instance_color(instance);
+    let color = crate::ui::theme::resolve_card_color(card_color, instance, theme);
     let mut block = Block::bordered()
         .title(format!(" {title} "))
         .border_style(Style::new().fg(color));

@@ -82,6 +82,7 @@ fn render_card(
                 &title,
                 instance,
                 s,
+                card.color.as_deref(),
                 &app.theme,
                 selected,
                 *ticker,
@@ -96,7 +97,16 @@ fn render_card(
                 .runtimes
                 .get(instance)
                 .and_then(|rt| rt.states.get(entity));
-            widgets::card_toggle::render(f, rect, &title, instance, s, &app.theme, selected);
+            widgets::card_toggle::render(
+                f,
+                rect,
+                &title,
+                instance,
+                s,
+                card.color.as_deref(),
+                &app.theme,
+                selected,
+            );
         }
         CardKind::Gauge {
             instance,
@@ -120,6 +130,7 @@ fn render_card(
                 *min,
                 *max,
                 unit.as_deref(),
+                card.color.as_deref(),
                 &app.theme,
                 selected,
             );
@@ -133,18 +144,36 @@ fn render_card(
             let key = (instance.clone(), entity.clone());
             let h = app.history.get(&key);
             widgets::card_sparkline::render(
-                f, rect, &title, instance, h, window, &app.theme, selected,
+                f,
+                rect,
+                &title,
+                instance,
+                h,
+                window,
+                card.color.as_deref(),
+                &app.theme,
+                selected,
             );
         }
         CardKind::Text { markdown, .. } => {
-            widgets::card_text::render(f, rect, &title, markdown, selected);
+            widgets::card_text::render(f, rect, &title, markdown, card.color.as_deref(), selected);
         }
         CardKind::EntityList {
             instance, entities, ..
         } => {
             let rt = app.instances.runtimes.get(instance);
             widgets::card_entity_list::render(
-                f, rect, &title, instance, entities, rt, &app.theme, selected, sub_index, false,
+                f,
+                rect,
+                &title,
+                instance,
+                entities,
+                rt,
+                card.color.as_deref(),
+                &app.theme,
+                selected,
+                sub_index,
+                false,
             );
         }
         CardKind::FilteredEntityList {
@@ -162,6 +191,7 @@ fn render_card(
                 instance,
                 &entities,
                 rt,
+                card.color.as_deref(),
                 &app.theme,
                 selected,
                 sub_index,
