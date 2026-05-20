@@ -99,6 +99,13 @@ impl App {
             self.handle_key_editor(k);
             return;
         }
+        // MediaPlayer-scoped keys: intercept before generic dispatch so 'n', 'm', etc.
+        // don't fall through to create_new_dashboard or other global bindings.
+        if let KeyCode::Char(ch) = k.code {
+            if self.handle_key_media_player(ch) {
+                return;
+            }
+        }
         match k.code {
             KeyCode::Char('q') | KeyCode::Esc => self.should_quit = true,
             KeyCode::Up | KeyCode::Char('k') => self.move_selection(-1),
@@ -2910,6 +2917,60 @@ impl App {
                 }
             }
         };
+    }
+
+    /// Returns `true` if the key was consumed by a MediaPlayer card action.
+    fn handle_key_media_player(&mut self, ch: char) -> bool {
+        let Screen::Dashboard {
+            idx, selected_card, ..
+        } = &self.screen
+        else {
+            return false;
+        };
+        let (idx, selected_card) = (*idx, *selected_card);
+        let Some(card) = self
+            .dashboards
+            .get(idx)
+            .and_then(|d| d.cards.get(selected_card))
+        else {
+            return false;
+        };
+        let CardKind::MediaPlayer {
+            instance, entity, ..
+        } = &card.kind
+        else {
+            return false;
+        };
+        let Some(service) = crate::actions::media_service_for_key(ch) else {
+            return false;
+        };
+        let instance = instance.clone();
+        let entity = entity.clone();
+        let service_data = if service == "volume_mute" {
+            let current_muted = self
+                .instances
+                .runtimes
+                .get(&instance)
+                .and_then(|rt| rt.states.get(&entity))
+                .and_then(|s| s.attributes.get("is_volume_muted"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            serde_json::json!({ "is_volume_muted": !current_muted })
+        } else {
+            serde_json::Value::Null
+        };
+        let cmd = crate::ha::HaCommand::CallService {
+            domain: "media_player".to_string(),
+            service: service.to_string(),
+            service_data,
+            target: serde_json::json!({ "entity_id": entity }),
+        };
+        if !self.instances.send(&instance, cmd) {
+            self.last_error = Some(format!("{instance}: no command channel"));
+        } else {
+            tracing::info!(%instance, %entity, %service, "media service call dispatched");
+        }
+        true
     }
 
     fn trigger_default_action(&mut self) {
