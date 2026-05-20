@@ -26,11 +26,39 @@ pub struct Grid {
     pub rows: u16,
 }
 
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CardSize {
+    Small,
+    #[default]
+    Normal,
+    Large,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Card {
     #[serde(flatten)]
     pub kind: CardKind,
     pub pos: Pos,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    #[serde(default, skip_serializing_if = "is_default_size")]
+    pub size: CardSize,
+}
+
+fn is_default_size(s: &CardSize) -> bool {
+    *s == CardSize::Normal
+}
+
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct Severity {
+    pub green: f64,
+    pub yellow: f64,
+    pub red: f64,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -39,6 +67,49 @@ pub struct Pos {
     pub row: u16,
     pub w: u16,
     pub h: u16,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GraphSeries {
+    pub entity: EntityId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum GraphType {
+    #[default]
+    Line,
+    Bar,
+    Pie,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ImageSource {
+    ImageEntity { entity: EntityId },
+    Camera { entity: EntityId },
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BarOrientation {
+    #[default]
+    Vertical,
+    Horizontal,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum StatsMetric {
+    Avg,
+    Min,
+    Max,
+    Sum,
+    Count,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -63,16 +134,28 @@ pub enum CardKind {
         entity: EntityId,
         min: f64,
         max: f64,
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         unit: Option<String>,
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        severity: Option<Severity>,
+        #[serde(default = "default_true")]
+        needle: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         title: Option<String>,
     },
-    Sparkline {
+    #[serde(rename = "graph", alias = "sparkline")]
+    Graph {
         instance: Alias,
-        entity: EntityId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        entity: Option<EntityId>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        entities: Vec<GraphSeries>,
+        #[serde(default)]
+        graph_type: GraphType,
         #[serde(default = "default_window")]
         window: String,
+        #[serde(default)]
+        orientation: BarOrientation,
         #[serde(default)]
         title: Option<String>,
     },
@@ -94,6 +177,51 @@ pub enum CardKind {
         #[serde(default)]
         hide_state: bool,
         #[serde(default)]
+        hide_when_empty: bool,
+        #[serde(default)]
+        title: Option<String>,
+    },
+    Clock {
+        #[serde(default = "default_clock_format")]
+        format: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        timezone: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+    },
+    Statistics {
+        instance: Alias,
+        entity: EntityId,
+        #[serde(default = "default_window")]
+        window: String,
+        metric: StatsMetric,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        unit: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+    },
+    MediaPlayer {
+        instance: Alias,
+        entity: EntityId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+    },
+    Image {
+        instance: Alias,
+        source: ImageSource,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        refresh_seconds: Option<u32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+    },
+    Weather {
+        instance: Alias,
+        entity: EntityId,
+        #[serde(default = "default_true")]
+        show_forecast: bool,
+        #[serde(default = "default_forecast_days")]
+        forecast_days: u8,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         title: Option<String>,
     },
 }
@@ -102,16 +230,48 @@ fn default_window() -> String {
     "1h".into()
 }
 
+fn default_clock_format() -> String {
+    "%H:%M:%S".into()
+}
+
+fn default_forecast_days() -> u8 {
+    3
+}
+
 impl Card {
     pub fn title(&self) -> &str {
         match &self.kind {
             CardKind::Entity { title, entity, .. }
             | CardKind::Toggle { title, entity, .. }
-            | CardKind::Gauge { title, entity, .. }
-            | CardKind::Sparkline { title, entity, .. } => title.as_deref().unwrap_or(entity),
+            | CardKind::Gauge { title, entity, .. } => title.as_deref().unwrap_or(entity),
+            CardKind::Graph {
+                title,
+                entity,
+                entities,
+                ..
+            } => title.as_deref().unwrap_or_else(|| {
+                entities
+                    .first()
+                    .map(|s| s.entity.as_str())
+                    .or(entity.as_deref())
+                    .unwrap_or("Graph")
+            }),
             CardKind::Text { title, .. } => title.as_deref().unwrap_or("Text"),
             CardKind::EntityList { title, .. } => title.as_deref().unwrap_or("Entities"),
             CardKind::FilteredEntityList { title, .. } => title.as_deref().unwrap_or("Filtered"),
+            CardKind::Clock { title, .. } => title.as_deref().unwrap_or("Clock"),
+            CardKind::Statistics { title, entity, .. } => {
+                title.as_deref().unwrap_or(entity.as_str())
+            }
+            CardKind::MediaPlayer { title, entity, .. } => {
+                title.as_deref().unwrap_or(entity.as_str())
+            }
+            CardKind::Image { title, source, .. } => title.as_deref().unwrap_or(match source {
+                ImageSource::ImageEntity { entity } | ImageSource::Camera { entity } => {
+                    entity.as_str()
+                }
+            }),
+            CardKind::Weather { title, entity, .. } => title.as_deref().unwrap_or(entity.as_str()),
         }
     }
 
@@ -125,13 +285,427 @@ impl Card {
             }
             | CardKind::Gauge {
                 instance, entity, ..
+            } => Some((instance, entity)),
+            CardKind::Graph {
+                instance,
+                entity,
+                entities,
+                ..
+            } => {
+                if !entities.is_empty() {
+                    Some((instance, &entities[0].entity))
+                } else if let Some(e) = entity {
+                    Some((instance, e))
+                } else {
+                    None
+                }
             }
-            | CardKind::Sparkline {
+            CardKind::Statistics {
+                instance, entity, ..
+            }
+            | CardKind::MediaPlayer {
+                instance, entity, ..
+            }
+            | CardKind::Weather {
                 instance, entity, ..
             } => Some((instance, entity)),
+            CardKind::Image {
+                instance, source, ..
+            } => Some((
+                instance,
+                match source {
+                    ImageSource::ImageEntity { entity } | ImageSource::Camera { entity } => entity,
+                },
+            )),
             CardKind::Text { .. }
             | CardKind::EntityList { .. }
-            | CardKind::FilteredEntityList { .. } => None,
+            | CardKind::FilteredEntityList { .. }
+            | CardKind::Clock { .. } => None,
+        }
+    }
+
+    pub fn graph_entities(&self) -> Vec<&EntityId> {
+        match &self.kind {
+            CardKind::Graph {
+                entity, entities, ..
+            } => {
+                if !entities.is_empty() {
+                    entities.iter().map(|s| &s.entity).collect()
+                } else if let Some(e) = entity {
+                    vec![e]
+                } else {
+                    Vec::new()
+                }
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    pub fn normalize(&mut self) {
+        if let CardKind::Graph {
+            entity, entities, ..
+        } = &mut self.kind
+        {
+            if entities.is_empty() {
+                if let Some(e) = entity.take() {
+                    entities.push(GraphSeries {
+                        entity: e,
+                        label: None,
+                        color: None,
+                    });
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn card_serde_round_trip_with_size_and_color() {
+        let yaml = r##"
+type: entity
+instance: home
+entity: light.kitchen
+pos: { col: 0, row: 0, w: 4, h: 2 }
+color: "#ff8800"
+size: large
+"##;
+        let card: Card = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(card.color.as_deref(), Some("#ff8800"));
+        assert_eq!(card.size, CardSize::Large);
+        let back = serde_yaml::to_string(&card).unwrap();
+        assert!(back.contains("size: large"));
+        assert!(back.contains("color: \"#ff8800\"") || back.contains("color: '#ff8800'"));
+    }
+
+    #[test]
+    fn card_serde_omits_defaults() {
+        let yaml = r#"
+type: entity
+instance: home
+entity: light.kitchen
+pos: { col: 0, row: 0, w: 4, h: 2 }
+"#;
+        let card: Card = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(card.color, None);
+        assert_eq!(card.size, CardSize::Normal);
+        let back = serde_yaml::to_string(&card).unwrap();
+        assert!(!back.contains("size:"));
+        assert!(!back.contains("color:"));
+    }
+
+    #[test]
+    fn graph_legacy_sparkline_normalizes_to_single_series() {
+        let yaml = r#"
+type: sparkline
+instance: home
+entity: sensor.temp
+window: 6h
+pos: { col: 0, row: 0, w: 6, h: 4 }
+"#;
+        let mut card: Card = serde_yaml::from_str(yaml).unwrap();
+        card.normalize();
+        if let CardKind::Graph {
+            entity,
+            entities,
+            window,
+            ..
+        } = &card.kind
+        {
+            assert!(
+                entity.is_none(),
+                "legacy entity should be cleared after normalize"
+            );
+            assert_eq!(entities.len(), 1);
+            assert_eq!(entities[0].entity.as_str(), "sensor.temp");
+            assert_eq!(window, "6h");
+        } else {
+            panic!("wrong variant");
+        }
+    }
+
+    #[test]
+    fn graph_multi_series_round_trip() {
+        let yaml = r##"
+type: graph
+instance: home
+graph_type: bar
+orientation: horizontal
+entities:
+  - { entity: sensor.cpu_0 }
+  - { entity: sensor.cpu_1, label: "CPU 1", color: "#ff00ff" }
+pos: { col: 0, row: 0, w: 6, h: 4 }
+"##;
+        let card: Card = serde_yaml::from_str(yaml).unwrap();
+        if let CardKind::Graph {
+            entities,
+            graph_type,
+            orientation,
+            ..
+        } = &card.kind
+        {
+            assert_eq!(entities.len(), 2);
+            assert_eq!(*graph_type, GraphType::Bar);
+            assert_eq!(*orientation, BarOrientation::Horizontal);
+            assert_eq!(entities[1].label.as_deref(), Some("CPU 1"));
+        } else {
+            panic!("wrong variant");
+        }
+    }
+
+    #[test]
+    fn gauge_round_trip_with_severity() {
+        let yaml = r#"
+type: gauge
+instance: home
+entity: sensor.cpu
+min: 0
+max: 100
+unit: "%"
+severity: { green: 0, yellow: 60, red: 85 }
+needle: true
+pos: { col: 0, row: 0, w: 4, h: 4 }
+"#;
+        let card: Card = serde_yaml::from_str(yaml).unwrap();
+        if let CardKind::Gauge {
+            severity, needle, ..
+        } = &card.kind
+        {
+            assert!(severity.is_some());
+            assert!(*needle);
+        } else {
+            panic!("wrong variant")
+        }
+    }
+
+    #[test]
+    fn gauge_legacy_round_trip() {
+        let yaml = r#"
+type: gauge
+instance: home
+entity: sensor.cpu
+min: 0
+max: 100
+unit: "%"
+pos: { col: 0, row: 0, w: 4, h: 4 }
+"#;
+        let card: Card = serde_yaml::from_str(yaml).unwrap();
+        if let CardKind::Gauge {
+            severity, needle, ..
+        } = &card.kind
+        {
+            assert!(severity.is_none());
+            assert!(*needle, "needle defaults to true");
+        } else {
+            panic!("wrong variant")
+        }
+    }
+
+    #[test]
+    fn filtered_list_hide_when_empty_round_trip() {
+        let yaml = r#"
+type: filtered_entity_list
+instance: home
+query: "light.*"
+hide_when_empty: true
+pos: { col: 0, row: 0, w: 6, h: 4 }
+"#;
+        let card: Card = serde_yaml::from_str(yaml).unwrap();
+        if let CardKind::FilteredEntityList {
+            hide_when_empty, ..
+        } = &card.kind
+        {
+            assert!(*hide_when_empty);
+        } else {
+            panic!("wrong variant");
+        }
+    }
+
+    #[test]
+    fn clock_round_trip() {
+        let yaml = r#"
+type: clock
+format: "%H:%M"
+timezone: "Europe/London"
+title: "My Clock"
+pos: { col: 0, row: 0, w: 4, h: 3 }
+"#;
+        let card: Card = serde_yaml::from_str(yaml).unwrap();
+        if let CardKind::Clock {
+            format,
+            timezone,
+            title,
+        } = &card.kind
+        {
+            assert_eq!(format, "%H:%M");
+            assert_eq!(timezone.as_deref(), Some("Europe/London"));
+            assert_eq!(title.as_deref(), Some("My Clock"));
+        } else {
+            panic!("wrong variant");
+        }
+        let back = serde_yaml::to_string(&card).unwrap();
+        assert!(back.contains("type: clock"));
+        assert!(back.contains("format: '%H:%M'") || back.contains("format: \"%H:%M\""));
+    }
+
+    #[test]
+    fn clock_defaults() {
+        let yaml = r#"
+type: clock
+pos: { col: 0, row: 0, w: 4, h: 3 }
+"#;
+        let card: Card = serde_yaml::from_str(yaml).unwrap();
+        if let CardKind::Clock {
+            format,
+            timezone,
+            title,
+        } = &card.kind
+        {
+            assert_eq!(format, "%H:%M:%S");
+            assert!(timezone.is_none());
+            assert!(title.is_none());
+        } else {
+            panic!("wrong variant");
+        }
+        let back = serde_yaml::to_string(&card).unwrap();
+        assert!(!back.contains("timezone:"));
+        assert!(!back.contains("title:"));
+    }
+
+    #[test]
+    fn statistics_round_trip() {
+        let yaml = r#"
+type: statistics
+instance: home
+entity: sensor.temperature
+window: 6h
+metric: avg
+unit: "°C"
+title: "Avg Temp"
+pos: { col: 0, row: 0, w: 4, h: 3 }
+"#;
+        let card: Card = serde_yaml::from_str(yaml).unwrap();
+        if let CardKind::Statistics {
+            instance,
+            entity,
+            window,
+            metric,
+            unit,
+            title,
+        } = &card.kind
+        {
+            assert_eq!(instance.as_str(), "home");
+            assert_eq!(entity.as_str(), "sensor.temperature");
+            assert_eq!(window, "6h");
+            assert_eq!(*metric, StatsMetric::Avg);
+            assert_eq!(unit.as_deref(), Some("°C"));
+            assert_eq!(title.as_deref(), Some("Avg Temp"));
+        } else {
+            panic!("wrong variant");
+        }
+        let back = serde_yaml::to_string(&card).unwrap();
+        assert!(back.contains("type: statistics"));
+        assert!(back.contains("metric: avg"));
+    }
+
+    #[test]
+    fn media_player_round_trip() {
+        let yaml = r#"
+type: media_player
+instance: home
+entity: media_player.living_room
+pos: { col: 0, row: 0, w: 6, h: 4 }
+"#;
+        let card: Card = serde_yaml::from_str(yaml).unwrap();
+        if let CardKind::MediaPlayer { entity, .. } = &card.kind {
+            assert_eq!(entity.as_str(), "media_player.living_room");
+        } else {
+            panic!("wrong variant");
+        }
+        let back = serde_yaml::to_string(&card).unwrap();
+        assert!(back.contains("type: media_player"));
+    }
+
+    #[test]
+    fn image_card_round_trip() {
+        let yaml = r#"
+type: image
+instance: home
+source: { kind: camera, entity: camera.front_door }
+refresh_seconds: 30
+pos: { col: 0, row: 0, w: 6, h: 4 }
+"#;
+        let card: Card = serde_yaml::from_str(yaml).unwrap();
+        if let CardKind::Image {
+            source,
+            refresh_seconds,
+            ..
+        } = &card.kind
+        {
+            assert!(matches!(source, ImageSource::Camera { .. }));
+            assert_eq!(*refresh_seconds, Some(30));
+        } else {
+            panic!("wrong variant");
+        }
+        let back = serde_yaml::to_string(&card).unwrap();
+        assert!(back.contains("type: image"));
+        assert!(back.contains("refresh_seconds: 30"));
+    }
+
+    #[test]
+    fn statistics_defaults() {
+        let yaml = r#"
+type: statistics
+instance: home
+entity: sensor.temperature
+metric: min
+pos: { col: 0, row: 0, w: 4, h: 3 }
+"#;
+        let card: Card = serde_yaml::from_str(yaml).unwrap();
+        if let CardKind::Statistics {
+            window,
+            unit,
+            title,
+            ..
+        } = &card.kind
+        {
+            assert_eq!(window, "1h");
+            assert!(unit.is_none());
+            assert!(title.is_none());
+        } else {
+            panic!("wrong variant");
+        }
+        let back = serde_yaml::to_string(&card).unwrap();
+        assert!(!back.contains("unit:"));
+        assert!(!back.contains("title:"));
+    }
+
+    #[test]
+    fn weather_round_trip() {
+        let yaml = r#"
+type: weather
+instance: home
+entity: weather.home
+show_forecast: true
+forecast_days: 5
+pos: { col: 0, row: 0, w: 6, h: 4 }
+"#;
+        let card: Card = serde_yaml::from_str(yaml).unwrap();
+        if let CardKind::Weather {
+            entity,
+            show_forecast,
+            forecast_days,
+            ..
+        } = &card.kind
+        {
+            assert_eq!(entity.as_str(), "weather.home");
+            assert!(*show_forecast);
+            assert_eq!(*forecast_days, 5);
+        } else {
+            panic!("wrong variant")
         }
     }
 }

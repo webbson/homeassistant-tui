@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::ha::ForecastKind;
+
 /// Outgoing client messages. HA WebSocket protocol.
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -106,4 +108,21 @@ impl From<RawState> for crate::ha::EntityState {
             last_updated: r.last_updated,
         }
     }
+}
+
+/// Build a `call_service` payload for `weather.get_forecasts` with `return_response: true`.
+pub fn weather_get_forecasts_payload(id: u64, entity_id: &str, kind: ForecastKind) -> Value {
+    let kind_str = match kind {
+        ForecastKind::Daily => "daily",
+        ForecastKind::Hourly => "hourly",
+    };
+    serde_json::json!({
+        "id": id,
+        "type": "call_service",
+        "domain": "weather",
+        "service": "get_forecasts",
+        "service_data": { "type": kind_str },
+        "target": { "entity_id": entity_id },
+        "return_response": true,
+    })
 }

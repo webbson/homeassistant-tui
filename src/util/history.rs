@@ -48,6 +48,21 @@ impl RingBuf {
     pub fn is_empty(&self) -> bool {
         self.buf.is_empty()
     }
+
+    pub fn compute(&self, metric: crate::dashboard::StatsMetric) -> Option<f64> {
+        let vals: Vec<f64> = self.values().collect();
+        if vals.is_empty() {
+            return None;
+        }
+        use crate::dashboard::StatsMetric::*;
+        Some(match metric {
+            Min => vals.iter().cloned().fold(f64::INFINITY, f64::min),
+            Max => vals.iter().cloned().fold(f64::NEG_INFINITY, f64::max),
+            Sum => vals.iter().sum(),
+            Avg => vals.iter().sum::<f64>() / vals.len() as f64,
+            Count => vals.len() as f64,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -65,5 +80,27 @@ mod tests {
         r.push(t + Duration::from_secs(3), 4.0);
         let vs: Vec<f64> = r.values().collect();
         assert_eq!(vs, vec![2.0, 3.0, 4.0]);
+    }
+
+    #[test]
+    fn metric_min_max_avg_sum_count() {
+        use crate::dashboard::StatsMetric;
+        let mut b = RingBuf::new(64);
+        let t = Instant::now();
+        for (i, v) in [1.0, 2.0, 3.0, 4.0].iter().enumerate() {
+            b.push(t + std::time::Duration::from_secs(i as u64), *v);
+        }
+        assert_eq!(b.compute(StatsMetric::Min), Some(1.0));
+        assert_eq!(b.compute(StatsMetric::Max), Some(4.0));
+        assert_eq!(b.compute(StatsMetric::Avg), Some(2.5));
+        assert_eq!(b.compute(StatsMetric::Sum), Some(10.0));
+        assert_eq!(b.compute(StatsMetric::Count), Some(4.0));
+    }
+
+    #[test]
+    fn metric_empty_buffer_returns_none() {
+        use crate::dashboard::StatsMetric;
+        let b = RingBuf::new(64);
+        assert_eq!(b.compute(StatsMetric::Avg), None);
     }
 }

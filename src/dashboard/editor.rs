@@ -1,4 +1,6 @@
-use crate::dashboard::{Card, CardKind, Dashboard, Pos};
+use crate::dashboard::{
+    BarOrientation, Card, CardKind, CardSize, Dashboard, GraphSeries, GraphType, Pos, StatsMetric,
+};
 
 const MAX_UNDO: usize = 32;
 
@@ -15,13 +17,18 @@ pub struct EditorState {
     /// When `Some(idx)`, the in-progress picker/title flow replaces card[idx]
     /// instead of appending a new card.
     pub edit_target: Option<usize>,
+    /// During the Image add-flow, set after `ImagePickSourceKind` so the
+    /// downstream entity picker can filter to `image.*` or `camera.*` only.
+    pub image_pending_is_camera: Option<bool>,
 }
 
 #[derive(Debug, Clone)]
 pub enum EditorMode {
     Browse,
     /// User pressed `a` — picking a card type.
-    PickingType,
+    PickingType {
+        selected: usize,
+    },
     /// Card type chosen, multi-instance — pick which HA instance.
     PickingInstance {
         card_type: CardTypeStub,
@@ -99,6 +106,244 @@ pub enum EditorMode {
         items: Vec<MenuItem>,
         selected: usize,
     },
+    /// Enter a named color or #rrggbb for the selected card.
+    EnterColorOverride {
+        card_idx: usize,
+        buf: String,
+    },
+    /// Pick Small / Normal / Large for the selected card.
+    PickCardSize {
+        card_idx: usize,
+        current: CardSize,
+    },
+    // ---- Graph add-flow ----
+    /// Step 1: pick Line / Bar / Pie.
+    GraphPickType,
+    /// Step 2: pick HA instance.
+    GraphPickInstance {
+        graph_type: GraphType,
+        selected: usize,
+    },
+    /// Step 3: pick entities one by one; loop until user says "done".
+    GraphAddEntities {
+        instance: String,
+        graph_type: GraphType,
+        accumulated: Vec<GraphSeries>,
+        query: String,
+        selected: usize,
+        /// true while we're showing the "add another? (y/n)" prompt
+        asking_more: bool,
+    },
+    /// Step 4a (Line): enter window string.
+    GraphEditWindowAdd {
+        instance: String,
+        graph_type: GraphType,
+        series: Vec<GraphSeries>,
+        window_buf: String,
+        title_buf: String,
+        title_stage: bool,
+    },
+    /// Step 4b (Bar): pick orientation.
+    GraphPickOrientationAdd {
+        instance: String,
+        series: Vec<GraphSeries>,
+        current: BarOrientation,
+        title_buf: String,
+        title_stage: bool,
+    },
+    // ---- Graph context-menu flows ----
+    /// Add one series to an existing Graph card.
+    GraphAddOneSeries {
+        card_idx: usize,
+        query: String,
+        selected: usize,
+    },
+    /// Pick which series to operate on.
+    GraphPickSeriesIndex {
+        card_idx: usize,
+        op: SeriesIndexOp,
+        selected: usize,
+    },
+    /// Edit the color of one series.
+    GraphEditSeriesColor {
+        card_idx: usize,
+        series_idx: usize,
+        buf: String,
+    },
+    /// Edit the label of one series.
+    GraphEditSeriesLabel {
+        card_idx: usize,
+        series_idx: usize,
+        buf: String,
+    },
+    /// Edit window on an existing Graph card (from menu).
+    GraphEditWindow {
+        card_idx: usize,
+        buf: String,
+    },
+    /// Pick orientation on an existing Bar Graph card (from menu).
+    GraphPickOrientation {
+        card_idx: usize,
+        current: BarOrientation,
+    },
+    // ---- Gauge severity flow ----
+    /// Step 1 of 3: enter the "green" lower threshold.
+    EditSeverityGreen {
+        card_idx: usize,
+        buf: String,
+        accum: SeverityAccum,
+    },
+    /// Step 2 of 3: enter the "yellow" warning threshold.
+    EditSeverityYellow {
+        card_idx: usize,
+        buf: String,
+        accum: SeverityAccum,
+    },
+    /// Step 3 of 3: enter the "red" critical threshold.
+    EditSeverityRed {
+        card_idx: usize,
+        buf: String,
+        accum: SeverityAccum,
+    },
+    // ---- Clock add-flow ----
+    /// Step 1: optional title.
+    ClockAddTitle {
+        title_buffer: String,
+    },
+    /// Step 2: strftime format string.
+    ClockAddFormat {
+        title: Option<String>,
+        format_buffer: String,
+    },
+    /// Step 3: optional IANA timezone (empty = local).
+    ClockAddTimezone {
+        title: Option<String>,
+        format: String,
+        tz_buffer: String,
+    },
+    // ---- Clock context-menu flows ----
+    /// Edit the strftime format of an existing Clock card.
+    ClockEditFormat {
+        card_idx: usize,
+        buf: String,
+    },
+    /// Edit the timezone of an existing Clock card.
+    ClockEditTimezone {
+        card_idx: usize,
+        buf: String,
+    },
+    // ---- Statistics add-flow ----
+    /// Step 3 (after entity pick): choose Avg/Min/Max/Sum/Count.
+    StatsPickMetric {
+        instance: String,
+        entity: String,
+        friendly_name: String,
+        selected: usize,
+    },
+    /// Step 4: enter window string (default "1h").
+    StatsEditWindowAdd {
+        instance: String,
+        entity: String,
+        friendly_name: String,
+        metric: StatsMetric,
+        buf: String,
+    },
+    /// Step 5: optional unit string.
+    StatsEditUnitAdd {
+        instance: String,
+        entity: String,
+        friendly_name: String,
+        metric: StatsMetric,
+        window: String,
+        buf: String,
+    },
+    /// Step 6: optional title.
+    StatsEditTitleAdd {
+        instance: String,
+        entity: String,
+        friendly_name: String,
+        metric: StatsMetric,
+        window: String,
+        unit: Option<String>,
+        buf: String,
+    },
+    // ---- Statistics context-menu flows ----
+    /// Edit the metric of an existing Statistics card.
+    StatsEditMetric {
+        card_idx: usize,
+        selected: usize,
+    },
+    /// Edit the window of an existing Statistics card.
+    StatsEditWindow {
+        card_idx: usize,
+        buf: String,
+    },
+    /// Edit the unit of an existing Statistics card.
+    StatsEditUnit {
+        card_idx: usize,
+        buf: String,
+    },
+    // ---- Image add-flow ----
+    /// Step 1: pick source kind — 1 = image entity, 2 = camera.
+    ImagePickSourceKind {
+        selected: usize,
+    },
+    /// Step 2 (camera only): optional refresh interval in seconds.
+    ImageEditRefreshSeconds {
+        instance: String,
+        entity: String,
+        friendly_name: String,
+        is_camera: bool,
+        buf: String,
+    },
+    /// Step 3: optional title override.
+    ImageEditTitleAdd {
+        instance: String,
+        entity: String,
+        friendly_name: String,
+        is_camera: bool,
+        refresh_seconds: Option<u32>,
+        buf: String,
+    },
+    // ---- Weather add-flow ----
+    /// Step 3 (after entity pick): toggle show_forecast on/off.
+    WxEditShowForecast {
+        instance: String,
+        entity: String,
+        friendly_name: String,
+        selected: usize, // 0 = yes, 1 = no
+    },
+    /// Step 4: numeric forecast_days (1-7, default 3).
+    WxEditForecastDays {
+        instance: String,
+        entity: String,
+        friendly_name: String,
+        show_forecast: bool,
+        buf: String,
+    },
+    /// Step 5: optional title.
+    WxEditTitleAdd {
+        instance: String,
+        entity: String,
+        friendly_name: String,
+        show_forecast: bool,
+        forecast_days: u8,
+        buf: String,
+    },
+}
+
+/// Accumulates the first two threshold values while collecting severity input.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SeverityAccum {
+    pub green: f64,
+    pub yellow: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SeriesIndexOp {
+    Remove,
+    SetColor,
+    SetLabel,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -118,13 +363,35 @@ pub enum MenuContext {
 pub enum MenuAction {
     RenameCard,
     ChangeEntity,
+    #[allow(dead_code)]
     EditWindow,
     EditQuery,
     ToggleHideState,
+    ToggleHideWhenEmpty,
     ToggleTicker,
+    SetColorOverride,
+    SetCardSize,
     DeleteCard,
     RenameDashboard,
     ResizeGrid,
+    // Graph-specific actions
+    AddGraphSeries,
+    RemoveGraphSeries,
+    SetGraphSeriesColor,
+    SetGraphSeriesLabel,
+    CycleGraphType,
+    EditGraphWindow,
+    EditGraphOrientation,
+    // Gauge-specific actions
+    EditSeverityThresholds,
+    ToggleGaugeNeedle,
+    // Clock-specific actions
+    ClockEditFormat,
+    ClockEditTimezone,
+    // Statistics-specific actions
+    StatsEditMetric,
+    StatsEditWindow,
+    StatsEditUnit,
 }
 
 #[derive(Debug, Clone)]
@@ -141,8 +408,10 @@ pub fn card_menu_items(card: &Card) -> Vec<MenuItem> {
     });
     let entity_change_label = match &card.kind {
         CardKind::EntityList { .. } => Some("Change entities"),
-        CardKind::FilteredEntityList { .. } => None,
-        CardKind::Text { .. } => None,
+        CardKind::FilteredEntityList { .. }
+        | CardKind::Graph { .. }
+        | CardKind::Text { .. }
+        | CardKind::Clock { .. } => None,
         _ => Some("Change entity"),
     };
     if let Some(label) = entity_change_label {
@@ -151,13 +420,51 @@ pub fn card_menu_items(card: &Card) -> Vec<MenuItem> {
             label,
         });
     }
-    if matches!(card.kind, CardKind::Sparkline { .. }) {
+    if let CardKind::Graph {
+        graph_type,
+        entities,
+        ..
+    } = &card.kind
+    {
         items.push(MenuItem {
-            action: MenuAction::EditWindow,
-            label: "Set history window",
+            action: MenuAction::AddGraphSeries,
+            label: "Add series",
         });
+        if entities.len() > 1 {
+            items.push(MenuItem {
+                action: MenuAction::RemoveGraphSeries,
+                label: "Remove series",
+            });
+        }
+        items.push(MenuItem {
+            action: MenuAction::SetGraphSeriesColor,
+            label: "Set series colour",
+        });
+        items.push(MenuItem {
+            action: MenuAction::SetGraphSeriesLabel,
+            label: "Set series label",
+        });
+        items.push(MenuItem {
+            action: MenuAction::CycleGraphType,
+            label: "Change type",
+        });
+        if *graph_type == GraphType::Line {
+            items.push(MenuItem {
+                action: MenuAction::EditGraphWindow,
+                label: "Window",
+            });
+        }
+        if *graph_type == GraphType::Bar {
+            items.push(MenuItem {
+                action: MenuAction::EditGraphOrientation,
+                label: "Orientation",
+            });
+        }
     }
-    if matches!(card.kind, CardKind::FilteredEntityList { .. }) {
+    if let CardKind::FilteredEntityList {
+        hide_when_empty, ..
+    } = &card.kind
+    {
         items.push(MenuItem {
             action: MenuAction::EditQuery,
             label: "Edit filter query",
@@ -166,6 +473,52 @@ pub fn card_menu_items(card: &Card) -> Vec<MenuItem> {
             action: MenuAction::ToggleHideState,
             label: "Toggle hide state column",
         });
+        let hwe_label: &'static str = if *hide_when_empty {
+            "Hide when empty: on"
+        } else {
+            "Hide when empty: off"
+        };
+        items.push(MenuItem {
+            action: MenuAction::ToggleHideWhenEmpty,
+            label: hwe_label,
+        });
+    }
+    if let CardKind::Gauge { needle, .. } = &card.kind {
+        items.push(MenuItem {
+            action: MenuAction::EditSeverityThresholds,
+            label: "Severity thresholds",
+        });
+        let needle_label: &'static str = if *needle { "Needle: on" } else { "Needle: off" };
+        // card_idx is only available at dispatch time; use a placeholder, the
+        // action carries the idx via the MenuContext at dispatch.
+        items.push(MenuItem {
+            action: MenuAction::ToggleGaugeNeedle,
+            label: needle_label,
+        });
+    }
+    if let CardKind::Clock { .. } = &card.kind {
+        items.push(MenuItem {
+            action: MenuAction::ClockEditFormat,
+            label: "Format",
+        });
+        items.push(MenuItem {
+            action: MenuAction::ClockEditTimezone,
+            label: "Timezone",
+        });
+    }
+    if let CardKind::Statistics { .. } = &card.kind {
+        items.push(MenuItem {
+            action: MenuAction::StatsEditMetric,
+            label: "Metric",
+        });
+        items.push(MenuItem {
+            action: MenuAction::StatsEditWindow,
+            label: "Window",
+        });
+        items.push(MenuItem {
+            action: MenuAction::StatsEditUnit,
+            label: "Unit",
+        });
     }
     if matches!(card.kind, CardKind::Entity { .. }) {
         items.push(MenuItem {
@@ -173,6 +526,14 @@ pub fn card_menu_items(card: &Card) -> Vec<MenuItem> {
             label: "Toggle ticker mode",
         });
     }
+    items.push(MenuItem {
+        action: MenuAction::SetColorOverride,
+        label: "Color override",
+    });
+    items.push(MenuItem {
+        action: MenuAction::SetCardSize,
+        label: "Size",
+    });
     items.push(MenuItem {
         action: MenuAction::DeleteCard,
         label: "Delete card",
@@ -193,15 +554,20 @@ pub fn dashboard_menu_items() -> Vec<MenuItem> {
     ]
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CardTypeStub {
     Entity,
     Toggle,
     Gauge,
-    Sparkline,
+    Graph,
     Text,
     EntityList,
     FilteredEntityList,
+    Clock,
+    Statistics,
+    MediaPlayer,
+    Image,
+    Weather,
 }
 
 impl CardTypeStub {
@@ -209,20 +575,30 @@ impl CardTypeStub {
         CardTypeStub::Entity,
         CardTypeStub::Toggle,
         CardTypeStub::Gauge,
-        CardTypeStub::Sparkline,
+        CardTypeStub::Graph,
         CardTypeStub::Text,
         CardTypeStub::EntityList,
         CardTypeStub::FilteredEntityList,
+        CardTypeStub::Clock,
+        CardTypeStub::Statistics,
+        CardTypeStub::MediaPlayer,
+        CardTypeStub::Image,
+        CardTypeStub::Weather,
     ];
     pub fn label(self) -> &'static str {
         match self {
             CardTypeStub::Entity => "entity",
             CardTypeStub::Toggle => "toggle",
             CardTypeStub::Gauge => "gauge",
-            CardTypeStub::Sparkline => "sparkline",
+            CardTypeStub::Graph => "graph",
             CardTypeStub::Text => "text",
             CardTypeStub::EntityList => "entity list (multi)",
             CardTypeStub::FilteredEntityList => "filtered list (glob + filters)",
+            CardTypeStub::Clock => "clock",
+            CardTypeStub::Statistics => "statistics",
+            CardTypeStub::MediaPlayer => "media player",
+            CardTypeStub::Image => "image / camera",
+            CardTypeStub::Weather => "weather",
         }
     }
 }
@@ -239,6 +615,7 @@ impl EditorState {
             dirty: false,
             source_path,
             edit_target: None,
+            image_pending_is_camera: None,
         }
     }
 
@@ -324,6 +701,8 @@ impl EditorState {
                 h: 2.min(dash.grid.rows.saturating_sub(self.cursor_row).max(1)),
             },
             kind,
+            color: None,
+            size: CardSize::Normal,
         };
         dash.cards.push(card);
         self.selected_card = Some(dash.cards.len() - 1);
@@ -339,10 +718,15 @@ impl EditorState {
             CardKind::Entity { title, .. }
             | CardKind::Toggle { title, .. }
             | CardKind::Gauge { title, .. }
-            | CardKind::Sparkline { title, .. }
+            | CardKind::Graph { title, .. }
             | CardKind::Text { title, .. }
             | CardKind::EntityList { title, .. }
-            | CardKind::FilteredEntityList { title, .. } => {
+            | CardKind::FilteredEntityList { title, .. }
+            | CardKind::Clock { title, .. }
+            | CardKind::Statistics { title, .. }
+            | CardKind::MediaPlayer { title, .. }
+            | CardKind::Image { title, .. }
+            | CardKind::Weather { title, .. } => {
                 *title = new_title;
             }
         }
@@ -399,6 +783,8 @@ mod tests {
                         markdown: "a".into(),
                         title: None,
                     },
+                    color: None,
+                    size: CardSize::Normal,
                 },
                 Card {
                     pos: Pos {
@@ -411,6 +797,8 @@ mod tests {
                         markdown: "b".into(),
                         title: None,
                     },
+                    color: None,
+                    size: CardSize::Normal,
                 },
             ],
         }

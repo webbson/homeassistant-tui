@@ -5,6 +5,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph};
 use ratatui::Frame;
 
+use crate::dashboard::CardSize;
 use crate::ha::EntityState;
 use crate::ui::theme::Theme;
 
@@ -15,28 +16,48 @@ pub fn render(
     title: &str,
     instance: &str,
     state: Option<&EntityState>,
+    card_color: Option<&str>,
     theme: &Theme,
     selected: bool,
     ticker: bool,
     ticker_offset: usize,
+    size: CardSize,
 ) {
-    let color = theme.instance_color(instance);
+    let color = crate::ui::theme::resolve_card_color(card_color, instance, theme);
     let mut block = Block::bordered()
         .title(format!(" {title} "))
         .border_style(Style::new().fg(color));
     if selected {
         block = block.border_style(Style::new().fg(color).bold());
     }
+
+    let unit = state.map(crate::ui::format::unit_of).unwrap_or("");
+    let value = state
+        .map(|s| crate::ui::format::format_state(s, 1))
+        .unwrap_or_default();
+    let raw = if unit.is_empty() {
+        value
+    } else {
+        format!("{value} {unit}")
+    };
+
+    // Inner area (inside the 1-char border on each side).
+    let inner = Rect {
+        x: area.x + 1,
+        y: area.y + 1,
+        width: area.width.saturating_sub(2),
+        height: area.height.saturating_sub(2),
+    };
+
+    if size == CardSize::Large && state.is_some() && super::big_text::fits(inner) {
+        f.render_widget(block, area);
+        super::big_text::render_big(f, inner, &raw, color);
+        return;
+    }
+
     let body = match state {
         None => Line::from(Span::styled("(unknown)", Style::new().fg(Color::DarkGray))),
-        Some(s) => {
-            let unit = crate::ui::format::unit_of(s);
-            let value = crate::ui::format::format_state(s, 1);
-            let raw = if unit.is_empty() {
-                value
-            } else {
-                format!("{value} {unit}")
-            };
+        Some(_) => {
             // Reserve 2 chars padding on each side
             let usable = area.width.saturating_sub(4) as usize;
             let display = if ticker && raw.chars().count() > usable.max(1) {

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -18,7 +18,9 @@ use crate::config::{self, Alias, Config};
 use crate::dashboard::editor::{CardTypeStub, EditorMode, EditorState};
 use crate::dashboard::{self, CardKind, Dashboard};
 use crate::event::AppEvent;
-use crate::ha::{client, EntityId, InstanceRegistry, InstanceRuntime};
+use crate::ha::{
+    client, EntityId, ForecastDay, ForecastKind, ImageFetchKind, InstanceRegistry, InstanceRuntime,
+};
 use crate::screens::Screen;
 use crate::ui;
 use crate::ui::theme::Theme;
@@ -44,6 +46,19 @@ pub struct App {
     pub last_error: Option<String>,
     #[allow(dead_code)]
     pub tx: mpsc::UnboundedSender<AppEvent>,
+    /// Weather forecast cache keyed by (instance, entity).
+    pub weather_forecasts: HashMap<(Alias, EntityId), Vec<ForecastDay>>,
+    /// Decoded image cache keyed by (instance, entity).
+    pub image_cache: HashMap<(Alias, EntityId), ImageCacheEntry>,
+    /// Entities currently being fetched — prevents duplicate in-flight requests.
+    pub image_inflight: HashSet<(Alias, EntityId)>,
+    /// ratatui-image protocol picker; None when terminal doesn't support graphics.
+    pub image_picker: Option<ratatui_image::picker::Picker>,
+}
+
+pub struct ImageCacheEntry {
+    pub protocol: ratatui_image::protocol::StatefulProtocol,
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -72,6 +87,10 @@ impl App {
             status_msg: None,
             last_error: None,
             tx,
+            weather_forecasts: HashMap::new(),
+            image_cache: HashMap::new(),
+            image_inflight: HashSet::new(),
+            image_picker: None,
         }
     }
 
@@ -98,6 +117,13 @@ impl App {
         if matches!(self.screen, Screen::Editor) {
             self.handle_key_editor(k);
             return;
+        }
+        // MediaPlayer-scoped keys: intercept before generic dispatch so 'n', 'm', etc.
+        // don't fall through to create_new_dashboard or other global bindings.
+        if let KeyCode::Char(ch) = k.code {
+            if self.handle_key_media_player(ch) {
+                return;
+            }
         }
         match k.code {
             KeyCode::Char('q') | KeyCode::Esc => self.should_quit = true,
@@ -143,17 +169,29 @@ impl App {
 
         // Modal modes have their own handling
         match &mut editor.mode {
-            EditorMode::PickingType => {
-                if let KeyCode::Char(c) = k.code {
-                    if let Some(d) = c.to_digit(10) {
-                        if let Some(kind) = CardTypeStub::ALL.get((d as usize).wrapping_sub(1)) {
+            EditorMode::PickingType { selected } => {
+                let n = CardTypeStub::ALL.len();
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Up | KeyCode::Char('k') if *selected > 0 => *selected -= 1,
+                    KeyCode::Down | KeyCode::Char('j') if *selected + 1 < n => *selected += 1,
+                    KeyCode::Enter => {
+                        if let Some(kind) = CardTypeStub::ALL.get(*selected) {
                             self.start_card_after_type(*kind);
                             return;
                         }
                     }
-                }
-                if matches!(k.code, KeyCode::Esc) {
-                    editor.mode = EditorMode::Browse;
+                    KeyCode::Char(c) => {
+                        if let Some(d) = c.to_digit(10) {
+                            if d >= 1 {
+                                if let Some(kind) = CardTypeStub::ALL.get((d as usize) - 1) {
+                                    self.start_card_after_type(*kind);
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
                 }
                 return;
             }
@@ -195,7 +233,15 @@ impl App {
                 query,
                 selected,
             } => {
-                let rows = entity_search(&self.instances, instance, query);
+                let domain_prefix = match *card_type {
+                    CardTypeStub::Image => match editor.image_pending_is_camera {
+                        Some(true) => Some("camera."),
+                        Some(false) => Some("image."),
+                        None => None,
+                    },
+                    other => domain_prefix_for_type(other),
+                };
+                let rows = entity_search_filtered(&self.instances, instance, query, domain_prefix);
                 match k.code {
                     KeyCode::Esc => editor.mode = EditorMode::Browse,
                     KeyCode::Backspace => {
@@ -224,13 +270,52 @@ impl App {
                             let inst = instance.clone();
                             let eid = pick.entity_id.clone();
                             let fname = pick.friendly_name.clone();
-                            editor.mode = EditorMode::EditingTitle {
-                                card_type: ct,
-                                instance: inst,
-                                entity: eid,
-                                friendly_name: fname,
-                                title_buffer: String::new(),
-                            };
+                            if ct == CardTypeStub::Statistics {
+                                editor.mode = EditorMode::StatsPickMetric {
+                                    instance: inst,
+                                    entity: eid,
+                                    friendly_name: fname,
+                                    selected: 0,
+                                };
+                            } else if ct == CardTypeStub::Image {
+                                let is_camera = editor
+                                    .image_pending_is_camera
+                                    .unwrap_or_else(|| eid.starts_with("camera."));
+                                if is_camera {
+                                    editor.mode = EditorMode::ImageEditRefreshSeconds {
+                                        instance: inst,
+                                        entity: eid,
+                                        friendly_name: fname,
+                                        is_camera: true,
+                                        buf: String::new(),
+                                    };
+                                } else {
+                                    // image entity — skip refresh_seconds step
+                                    editor.mode = EditorMode::ImageEditTitleAdd {
+                                        instance: inst,
+                                        entity: eid,
+                                        friendly_name: fname,
+                                        is_camera: false,
+                                        refresh_seconds: None,
+                                        buf: String::new(),
+                                    };
+                                }
+                            } else if ct == CardTypeStub::Weather {
+                                editor.mode = EditorMode::WxEditShowForecast {
+                                    instance: inst,
+                                    entity: eid,
+                                    friendly_name: fname,
+                                    selected: 0,
+                                };
+                            } else {
+                                editor.mode = EditorMode::EditingTitle {
+                                    card_type: ct,
+                                    instance: inst,
+                                    entity: eid,
+                                    friendly_name: fname,
+                                    title_buffer: String::new(),
+                                };
+                            }
                         }
                     }
                     _ => {}
@@ -580,6 +665,7 @@ impl App {
                             instance: inst,
                             query: q,
                             hide_state: hide,
+                            hide_when_empty: false,
                             title,
                         };
                         let Some(dash) = self.dashboards.get_mut(dash_idx) else {
@@ -637,19 +723,26 @@ impl App {
                             let mut entity_to_refetch: Option<(String, String, u32)> = None;
                             if let Some(dash) = self.dashboards.get_mut(dash_idx) {
                                 if let Some(card) = dash.cards.get_mut(idx) {
-                                    if let crate::dashboard::CardKind::Sparkline {
+                                    if let crate::dashboard::CardKind::Graph {
                                         instance,
+                                        entities,
                                         entity,
                                         window,
                                         ..
                                     } = &mut card.kind
                                     {
                                         *window = new_window.clone();
-                                        entity_to_refetch = Some((
-                                            instance.clone(),
-                                            entity.clone(),
-                                            parse_window_hours(&new_window),
-                                        ));
+                                        let eid = entities
+                                            .first()
+                                            .map(|s| s.entity.clone())
+                                            .or_else(|| entity.clone());
+                                        if let Some(eid) = eid {
+                                            entity_to_refetch = Some((
+                                                instance.clone(),
+                                                eid,
+                                                parse_window_hours(&new_window),
+                                            ));
+                                        }
                                     }
                                 }
                             }
@@ -690,6 +783,1526 @@ impl App {
                             if let Some(ed) = self.editor.as_mut() {
                                 ed.snapshot(dash);
                                 ed.retitle_card(dash, idx, new_title);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::EnterColorOverride { card_idx, buf } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        buf.pop();
+                    }
+                    KeyCode::Char(c) => buf.push(c),
+                    KeyCode::Enter => {
+                        let idx = *card_idx;
+                        let trimmed = buf.trim().to_string();
+                        if trimmed.is_empty() {
+                            // Clear override
+                            editor.mode = EditorMode::Browse;
+                            if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                                if let Some(ed) = self.editor.as_mut() {
+                                    ed.snapshot(dash);
+                                }
+                                if let Some(card) = self
+                                    .dashboards
+                                    .get_mut(dash_idx)
+                                    .and_then(|d| d.cards.get_mut(idx))
+                                {
+                                    card.color = None;
+                                }
+                                if let Some(ed) = self.editor.as_mut() {
+                                    ed.dirty = true;
+                                }
+                            }
+                        } else if crate::ui::theme::parse_color(&trimmed).is_none() {
+                            self.last_error = Some(format!(
+                                "invalid color \"{trimmed}\" — use a named color or #rrggbb"
+                            ));
+                        } else {
+                            editor.mode = EditorMode::Browse;
+                            if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                                if let Some(ed) = self.editor.as_mut() {
+                                    ed.snapshot(dash);
+                                }
+                                if let Some(card) = self
+                                    .dashboards
+                                    .get_mut(dash_idx)
+                                    .and_then(|d| d.cards.get_mut(idx))
+                                {
+                                    card.color = Some(trimmed);
+                                }
+                                if let Some(ed) = self.editor.as_mut() {
+                                    ed.dirty = true;
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::PickCardSize { card_idx, current } => {
+                use crate::dashboard::CardSize;
+                const SIZES: [CardSize; 3] = [CardSize::Small, CardSize::Normal, CardSize::Large];
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        let pos = SIZES.iter().position(|s| s == current).unwrap_or(1);
+                        if pos > 0 {
+                            *current = SIZES[pos - 1];
+                        }
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        let pos = SIZES.iter().position(|s| s == current).unwrap_or(1);
+                        if pos + 1 < SIZES.len() {
+                            *current = SIZES[pos + 1];
+                        }
+                    }
+                    KeyCode::Enter => {
+                        let idx = *card_idx;
+                        let chosen = *current;
+                        editor.mode = EditorMode::Browse;
+                        if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.snapshot(dash);
+                            }
+                            if let Some(card) = self
+                                .dashboards
+                                .get_mut(dash_idx)
+                                .and_then(|d| d.cards.get_mut(idx))
+                            {
+                                card.size = chosen;
+                            }
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.dirty = true;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            // ── Graph add-flow ────────────────────────────────────────────────────
+            EditorMode::GraphPickType => {
+                match k.code {
+                    KeyCode::Char('1') => {
+                        self.start_graph_after_type(crate::dashboard::GraphType::Line);
+                    }
+                    KeyCode::Char('2') => {
+                        self.start_graph_after_type(crate::dashboard::GraphType::Bar);
+                    }
+                    KeyCode::Char('3') => {
+                        self.start_graph_after_type(crate::dashboard::GraphType::Pie);
+                    }
+                    KeyCode::Esc => {
+                        editor.mode = EditorMode::Browse;
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::GraphPickInstance {
+                graph_type,
+                selected,
+            } => {
+                let aliases: Vec<String> = self.instances.runtimes.keys().cloned().collect();
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Up | KeyCode::Char('k') if *selected > 0 => *selected -= 1,
+                    KeyCode::Down | KeyCode::Char('j') if *selected + 1 < aliases.len() => {
+                        *selected += 1;
+                    }
+                    KeyCode::Enter => {
+                        if let Some(inst) = aliases.get(*selected) {
+                            let gt = *graph_type;
+                            let inst = inst.clone();
+                            editor.mode = EditorMode::GraphAddEntities {
+                                instance: inst,
+                                graph_type: gt,
+                                accumulated: Vec::new(),
+                                query: String::new(),
+                                selected: 0,
+                                asking_more: false,
+                            };
+                        }
+                    }
+                    KeyCode::Char(c) if c.is_ascii_digit() => {
+                        let i = c.to_digit(10).unwrap() as usize;
+                        if i >= 1 && i <= aliases.len() {
+                            let gt = *graph_type;
+                            let inst = aliases[i - 1].clone();
+                            editor.mode = EditorMode::GraphAddEntities {
+                                instance: inst,
+                                graph_type: gt,
+                                accumulated: Vec::new(),
+                                query: String::new(),
+                                selected: 0,
+                                asking_more: false,
+                            };
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::GraphAddEntities {
+                instance,
+                graph_type,
+                accumulated,
+                query,
+                selected,
+                asking_more,
+            } => {
+                if *asking_more {
+                    match k.code {
+                        KeyCode::Char('y') | KeyCode::Char('Y') => {
+                            *asking_more = false;
+                            *query = String::new();
+                            *selected = 0;
+                        }
+                        KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                            if !accumulated.is_empty() {
+                                let inst = instance.clone();
+                                let gt = *graph_type;
+                                let series = accumulated.clone();
+                                self.advance_graph_to_config(inst, gt, series);
+                            } else {
+                                if let Some(ed) = self.editor.as_mut() {
+                                    ed.mode = EditorMode::Browse;
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                    return;
+                }
+                let rows = entity_search(&self.instances, instance, query);
+                match k.code {
+                    KeyCode::Esc => {
+                        // Esc with at least one entity = done
+                        if !accumulated.is_empty() {
+                            let inst = instance.clone();
+                            let gt = *graph_type;
+                            let series = accumulated.clone();
+                            self.advance_graph_to_config(inst, gt, series);
+                        } else {
+                            editor.mode = EditorMode::Browse;
+                        }
+                    }
+                    KeyCode::Backspace => {
+                        query.pop();
+                        *selected = 0;
+                    }
+                    KeyCode::Up | KeyCode::Char('k') if *selected > 0 => *selected -= 1,
+                    KeyCode::Down | KeyCode::Char('j') if *selected + 1 < rows.len() => {
+                        *selected += 1;
+                    }
+                    KeyCode::Char(c) => {
+                        query.push(c);
+                        *selected = 0;
+                    }
+                    KeyCode::Enter => {
+                        if let Some(pick) = rows.get(*selected) {
+                            let eid = pick.entity_id.clone();
+                            accumulated.push(crate::dashboard::GraphSeries {
+                                entity: eid,
+                                label: None,
+                                color: None,
+                            });
+                            *asking_more = true;
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::GraphEditWindowAdd {
+                instance,
+                graph_type,
+                series,
+                window_buf,
+                title_buf,
+                title_stage,
+            } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        if *title_stage {
+                            title_buf.pop();
+                        } else {
+                            window_buf.pop();
+                        }
+                    }
+                    KeyCode::Char(c) => {
+                        if *title_stage {
+                            title_buf.push(c);
+                        } else {
+                            window_buf.push(c);
+                        }
+                    }
+                    KeyCode::Enter => {
+                        if *title_stage {
+                            let inst = instance.clone();
+                            let gt = *graph_type;
+                            let s = series.clone();
+                            let w = if window_buf.trim().is_empty() {
+                                "1h".to_string()
+                            } else {
+                                window_buf.trim().to_string()
+                            };
+                            let title = if title_buf.trim().is_empty() {
+                                None
+                            } else {
+                                Some(title_buf.trim().to_string())
+                            };
+                            editor.mode = EditorMode::Browse;
+                            let kind = crate::dashboard::CardKind::Graph {
+                                instance: inst,
+                                entity: None,
+                                entities: s,
+                                graph_type: gt,
+                                window: w,
+                                orientation: crate::dashboard::BarOrientation::default(),
+                                title,
+                            };
+                            let Some(dash) = self.dashboards.get_mut(dash_idx) else {
+                                return;
+                            };
+                            let Some(ed) = self.editor.as_mut() else {
+                                return;
+                            };
+                            ed.snapshot(dash);
+                            ed.add_card(dash, kind);
+                        } else {
+                            *title_stage = true;
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::GraphPickOrientationAdd {
+                instance,
+                series,
+                current,
+                title_buf,
+                title_stage,
+            } => {
+                const OPTS: [crate::dashboard::BarOrientation; 2] = [
+                    crate::dashboard::BarOrientation::Vertical,
+                    crate::dashboard::BarOrientation::Horizontal,
+                ];
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Up | KeyCode::Char('k') if !*title_stage => {
+                        let pos = OPTS.iter().position(|o| o == current).unwrap_or(0);
+                        if pos > 0 {
+                            *current = OPTS[pos - 1];
+                        }
+                    }
+                    KeyCode::Down | KeyCode::Char('j') if !*title_stage => {
+                        let pos = OPTS.iter().position(|o| o == current).unwrap_or(0);
+                        if pos + 1 < OPTS.len() {
+                            *current = OPTS[pos + 1];
+                        }
+                    }
+                    KeyCode::Backspace => {
+                        title_buf.pop();
+                    }
+                    KeyCode::Char(c) if *title_stage => {
+                        title_buf.push(c);
+                    }
+                    KeyCode::Enter => {
+                        if *title_stage {
+                            let inst = instance.clone();
+                            let s = series.clone();
+                            let ori = *current;
+                            let title = if title_buf.trim().is_empty() {
+                                None
+                            } else {
+                                Some(title_buf.trim().to_string())
+                            };
+                            editor.mode = EditorMode::Browse;
+                            let kind = crate::dashboard::CardKind::Graph {
+                                instance: inst,
+                                entity: None,
+                                entities: s,
+                                graph_type: crate::dashboard::GraphType::Bar,
+                                window: "1h".to_string(),
+                                orientation: ori,
+                                title,
+                            };
+                            let Some(dash) = self.dashboards.get_mut(dash_idx) else {
+                                return;
+                            };
+                            let Some(ed) = self.editor.as_mut() else {
+                                return;
+                            };
+                            ed.snapshot(dash);
+                            ed.add_card(dash, kind);
+                        } else {
+                            *title_stage = true;
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            // ── Graph context-menu handlers ───────────────────────────────────────
+            EditorMode::GraphAddOneSeries {
+                card_idx,
+                query,
+                selected,
+            } => {
+                let instance = self
+                    .dashboards
+                    .get(dash_idx)
+                    .and_then(|d| d.cards.get(*card_idx))
+                    .and_then(|c| {
+                        if let crate::dashboard::CardKind::Graph { instance, .. } = &c.kind {
+                            Some(instance.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_default();
+                let rows = entity_search(&self.instances, &instance, query);
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        query.pop();
+                        *selected = 0;
+                    }
+                    KeyCode::Up | KeyCode::Char('k') if *selected > 0 => *selected -= 1,
+                    KeyCode::Down | KeyCode::Char('j') if *selected + 1 < rows.len() => {
+                        *selected += 1
+                    }
+                    KeyCode::Char(c) => {
+                        query.push(c);
+                        *selected = 0;
+                    }
+                    KeyCode::Enter => {
+                        if let Some(pick) = rows.get(*selected) {
+                            let idx = *card_idx;
+                            let eid = pick.entity_id.clone();
+                            editor.mode = EditorMode::Browse;
+                            if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                                if let Some(ed) = self.editor.as_mut() {
+                                    ed.snapshot(dash);
+                                }
+                                if let Some(card) = self
+                                    .dashboards
+                                    .get_mut(dash_idx)
+                                    .and_then(|d| d.cards.get_mut(idx))
+                                {
+                                    if let crate::dashboard::CardKind::Graph { entities, .. } =
+                                        &mut card.kind
+                                    {
+                                        entities.push(crate::dashboard::GraphSeries {
+                                            entity: eid,
+                                            label: None,
+                                            color: None,
+                                        });
+                                    }
+                                }
+                                if let Some(ed) = self.editor.as_mut() {
+                                    ed.dirty = true;
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::GraphPickSeriesIndex {
+                card_idx,
+                op,
+                selected,
+            } => {
+                let count = self
+                    .dashboards
+                    .get(dash_idx)
+                    .and_then(|d| d.cards.get(*card_idx))
+                    .map(|c| {
+                        if let crate::dashboard::CardKind::Graph { entities, .. } = &c.kind {
+                            entities.len()
+                        } else {
+                            0
+                        }
+                    })
+                    .unwrap_or(0);
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Up | KeyCode::Char('k') if *selected > 0 => *selected -= 1,
+                    KeyCode::Down | KeyCode::Char('j') if *selected + 1 < count => *selected += 1,
+                    KeyCode::Enter => {
+                        let idx = *card_idx;
+                        let sidx = *selected;
+                        let op = *op;
+                        match op {
+                            crate::dashboard::editor::SeriesIndexOp::Remove => {
+                                editor.mode = EditorMode::Browse;
+                                if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                                    if let Some(ed) = self.editor.as_mut() {
+                                        ed.snapshot(dash);
+                                    }
+                                    if let Some(card) = self
+                                        .dashboards
+                                        .get_mut(dash_idx)
+                                        .and_then(|d| d.cards.get_mut(idx))
+                                    {
+                                        if let crate::dashboard::CardKind::Graph {
+                                            entities, ..
+                                        } = &mut card.kind
+                                        {
+                                            if sidx < entities.len() {
+                                                entities.remove(sidx);
+                                            }
+                                        }
+                                    }
+                                    if let Some(ed) = self.editor.as_mut() {
+                                        ed.dirty = true;
+                                    }
+                                }
+                            }
+                            crate::dashboard::editor::SeriesIndexOp::SetColor => {
+                                let cur = self
+                                    .dashboards
+                                    .get(dash_idx)
+                                    .and_then(|d| d.cards.get(idx))
+                                    .and_then(|c| {
+                                        if let crate::dashboard::CardKind::Graph {
+                                            entities, ..
+                                        } = &c.kind
+                                        {
+                                            entities.get(sidx).and_then(|s| s.color.clone())
+                                        } else {
+                                            None
+                                        }
+                                    })
+                                    .unwrap_or_default();
+                                editor.mode = EditorMode::GraphEditSeriesColor {
+                                    card_idx: idx,
+                                    series_idx: sidx,
+                                    buf: cur,
+                                };
+                            }
+                            crate::dashboard::editor::SeriesIndexOp::SetLabel => {
+                                let cur = self
+                                    .dashboards
+                                    .get(dash_idx)
+                                    .and_then(|d| d.cards.get(idx))
+                                    .and_then(|c| {
+                                        if let crate::dashboard::CardKind::Graph {
+                                            entities, ..
+                                        } = &c.kind
+                                        {
+                                            entities.get(sidx).and_then(|s| s.label.clone())
+                                        } else {
+                                            None
+                                        }
+                                    })
+                                    .unwrap_or_default();
+                                editor.mode = EditorMode::GraphEditSeriesLabel {
+                                    card_idx: idx,
+                                    series_idx: sidx,
+                                    buf: cur,
+                                };
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::GraphEditSeriesColor {
+                card_idx,
+                series_idx,
+                buf,
+            } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        buf.pop();
+                    }
+                    KeyCode::Char(c) => buf.push(c),
+                    KeyCode::Enter => {
+                        let idx = *card_idx;
+                        let sidx = *series_idx;
+                        let trimmed = buf.trim().to_string();
+                        if !trimmed.is_empty() && crate::ui::theme::parse_color(&trimmed).is_none()
+                        {
+                            self.last_error = Some(format!(
+                                "invalid color \"{trimmed}\" — use a named color or #rrggbb"
+                            ));
+                            return;
+                        }
+                        editor.mode = EditorMode::Browse;
+                        let color_val = if trimmed.is_empty() {
+                            None
+                        } else {
+                            Some(trimmed)
+                        };
+                        if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.snapshot(dash);
+                            }
+                            if let Some(card) = self
+                                .dashboards
+                                .get_mut(dash_idx)
+                                .and_then(|d| d.cards.get_mut(idx))
+                            {
+                                if let crate::dashboard::CardKind::Graph { entities, .. } =
+                                    &mut card.kind
+                                {
+                                    if let Some(s) = entities.get_mut(sidx) {
+                                        s.color = color_val;
+                                    }
+                                }
+                            }
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.dirty = true;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::GraphEditSeriesLabel {
+                card_idx,
+                series_idx,
+                buf,
+            } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        buf.pop();
+                    }
+                    KeyCode::Char(c) => buf.push(c),
+                    KeyCode::Enter => {
+                        let idx = *card_idx;
+                        let sidx = *series_idx;
+                        let trimmed = buf.trim().to_string();
+                        editor.mode = EditorMode::Browse;
+                        let label_val = if trimmed.is_empty() {
+                            None
+                        } else {
+                            Some(trimmed)
+                        };
+                        if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.snapshot(dash);
+                            }
+                            if let Some(card) = self
+                                .dashboards
+                                .get_mut(dash_idx)
+                                .and_then(|d| d.cards.get_mut(idx))
+                            {
+                                if let crate::dashboard::CardKind::Graph { entities, .. } =
+                                    &mut card.kind
+                                {
+                                    if let Some(s) = entities.get_mut(sidx) {
+                                        s.label = label_val;
+                                    }
+                                }
+                            }
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.dirty = true;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::GraphEditWindow { card_idx, buf } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        buf.pop();
+                    }
+                    KeyCode::Char(c) => buf.push(c),
+                    KeyCode::Enter => {
+                        let idx = *card_idx;
+                        let new_window = buf.trim().to_string();
+                        editor.mode = EditorMode::Browse;
+                        if !new_window.is_empty() {
+                            if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                                if let Some(ed) = self.editor.as_mut() {
+                                    ed.snapshot(dash);
+                                }
+                                if let Some(card) = self
+                                    .dashboards
+                                    .get_mut(dash_idx)
+                                    .and_then(|d| d.cards.get_mut(idx))
+                                {
+                                    if let crate::dashboard::CardKind::Graph { window, .. } =
+                                        &mut card.kind
+                                    {
+                                        *window = new_window;
+                                    }
+                                }
+                                if let Some(ed) = self.editor.as_mut() {
+                                    ed.dirty = true;
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::GraphPickOrientation { card_idx, current } => {
+                use crate::dashboard::BarOrientation;
+                const OPTS: [BarOrientation; 2] =
+                    [BarOrientation::Vertical, BarOrientation::Horizontal];
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        let pos = OPTS.iter().position(|o| o == current).unwrap_or(0);
+                        if pos > 0 {
+                            *current = OPTS[pos - 1];
+                        }
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        let pos = OPTS.iter().position(|o| o == current).unwrap_or(0);
+                        if pos + 1 < OPTS.len() {
+                            *current = OPTS[pos + 1];
+                        }
+                    }
+                    KeyCode::Enter => {
+                        let idx = *card_idx;
+                        let ori = *current;
+                        editor.mode = EditorMode::Browse;
+                        if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.snapshot(dash);
+                            }
+                            if let Some(card) = self
+                                .dashboards
+                                .get_mut(dash_idx)
+                                .and_then(|d| d.cards.get_mut(idx))
+                            {
+                                if let crate::dashboard::CardKind::Graph { orientation, .. } =
+                                    &mut card.kind
+                                {
+                                    *orientation = ori;
+                                }
+                            }
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.dirty = true;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            // ── Gauge severity flow ──────────────────────────────────────────
+            EditorMode::EditSeverityGreen {
+                card_idx,
+                buf,
+                accum,
+            } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        buf.pop();
+                    }
+                    KeyCode::Char(c) => buf.push(c),
+                    KeyCode::Enter => match buf.trim().parse::<f64>() {
+                        Ok(v) => {
+                            let idx = *card_idx;
+                            let new_accum = crate::dashboard::editor::SeverityAccum {
+                                green: v,
+                                yellow: accum.yellow,
+                            };
+                            let cur_sev = self
+                                .dashboards
+                                .get(dash_idx)
+                                .and_then(|d| d.cards.get(idx))
+                                .and_then(|c| {
+                                    if let CardKind::Gauge { severity, .. } = &c.kind {
+                                        severity.as_ref().map(|s| s.yellow.to_string())
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .unwrap_or_default();
+                            editor.mode = EditorMode::EditSeverityYellow {
+                                card_idx: idx,
+                                buf: cur_sev,
+                                accum: new_accum,
+                            };
+                        }
+                        Err(_) => {
+                            self.last_error = Some("invalid number — enter a numeric value".into());
+                        }
+                    },
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::EditSeverityYellow {
+                card_idx,
+                buf,
+                accum,
+            } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        buf.pop();
+                    }
+                    KeyCode::Char(c) => buf.push(c),
+                    KeyCode::Enter => match buf.trim().parse::<f64>() {
+                        Ok(v) => {
+                            let idx = *card_idx;
+                            let new_accum = crate::dashboard::editor::SeverityAccum {
+                                green: accum.green,
+                                yellow: v,
+                            };
+                            let cur_red = self
+                                .dashboards
+                                .get(dash_idx)
+                                .and_then(|d| d.cards.get(idx))
+                                .and_then(|c| {
+                                    if let CardKind::Gauge { severity, .. } = &c.kind {
+                                        severity.as_ref().map(|s| s.red.to_string())
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .unwrap_or_default();
+                            editor.mode = EditorMode::EditSeverityRed {
+                                card_idx: idx,
+                                buf: cur_red,
+                                accum: new_accum,
+                            };
+                        }
+                        Err(_) => {
+                            self.last_error = Some("invalid number — enter a numeric value".into());
+                        }
+                    },
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::EditSeverityRed {
+                card_idx,
+                buf,
+                accum,
+            } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        buf.pop();
+                    }
+                    KeyCode::Char(c) => buf.push(c),
+                    KeyCode::Enter => match buf.trim().parse::<f64>() {
+                        Ok(red) => {
+                            let idx = *card_idx;
+                            let new_sev = crate::dashboard::Severity {
+                                green: accum.green,
+                                yellow: accum.yellow,
+                                red,
+                            };
+                            editor.mode = EditorMode::Browse;
+                            if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                                if let Some(ed) = self.editor.as_mut() {
+                                    ed.snapshot(dash);
+                                }
+                                if let Some(card) = self
+                                    .dashboards
+                                    .get_mut(dash_idx)
+                                    .and_then(|d| d.cards.get_mut(idx))
+                                {
+                                    if let CardKind::Gauge { severity, .. } = &mut card.kind {
+                                        *severity = Some(new_sev);
+                                    }
+                                }
+                                if let Some(ed) = self.editor.as_mut() {
+                                    ed.dirty = true;
+                                }
+                            }
+                        }
+                        Err(_) => {
+                            self.last_error = Some("invalid number — enter a numeric value".into());
+                        }
+                    },
+                    _ => {}
+                }
+                return;
+            }
+            // ---- Statistics add-flow ----
+            EditorMode::StatsPickMetric {
+                instance,
+                entity,
+                friendly_name,
+                selected,
+            } => {
+                const METRICS: [crate::dashboard::StatsMetric; 5] = [
+                    crate::dashboard::StatsMetric::Avg,
+                    crate::dashboard::StatsMetric::Min,
+                    crate::dashboard::StatsMetric::Max,
+                    crate::dashboard::StatsMetric::Sum,
+                    crate::dashboard::StatsMetric::Count,
+                ];
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Up if *selected > 0 => *selected -= 1,
+                    KeyCode::Down if *selected + 1 < METRICS.len() => *selected += 1,
+                    KeyCode::Char('1') => *selected = 0,
+                    KeyCode::Char('2') => *selected = 1,
+                    KeyCode::Char('3') => *selected = 2,
+                    KeyCode::Char('4') => *selected = 3,
+                    KeyCode::Char('5') => *selected = 4,
+                    KeyCode::Enter => {
+                        let metric = METRICS[*selected];
+                        let inst = instance.clone();
+                        let ent = entity.clone();
+                        let fname = friendly_name.clone();
+                        editor.mode = EditorMode::StatsEditWindowAdd {
+                            instance: inst,
+                            entity: ent,
+                            friendly_name: fname,
+                            metric,
+                            buf: "1h".into(),
+                        };
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::StatsEditWindowAdd {
+                instance,
+                entity,
+                friendly_name,
+                metric,
+                buf,
+            } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        buf.pop();
+                    }
+                    KeyCode::Char(c) => buf.push(c),
+                    KeyCode::Enter => {
+                        let window = {
+                            let s = buf.trim().to_string();
+                            if s.is_empty() {
+                                "1h".into()
+                            } else {
+                                s
+                            }
+                        };
+                        let inst = instance.clone();
+                        let ent = entity.clone();
+                        let fname = friendly_name.clone();
+                        let m = *metric;
+                        editor.mode = EditorMode::StatsEditUnitAdd {
+                            instance: inst,
+                            entity: ent,
+                            friendly_name: fname,
+                            metric: m,
+                            window,
+                            buf: String::new(),
+                        };
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::StatsEditUnitAdd {
+                instance,
+                entity,
+                friendly_name,
+                metric,
+                window,
+                buf,
+            } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        buf.pop();
+                    }
+                    KeyCode::Char(c) => buf.push(c),
+                    KeyCode::Enter => {
+                        let unit_raw = buf.trim().to_string();
+                        let unit = if unit_raw.is_empty() {
+                            None
+                        } else {
+                            Some(unit_raw)
+                        };
+                        let inst = instance.clone();
+                        let ent = entity.clone();
+                        let fname = friendly_name.clone();
+                        let m = *metric;
+                        let win = window.clone();
+                        editor.mode = EditorMode::StatsEditTitleAdd {
+                            instance: inst,
+                            entity: ent,
+                            friendly_name: fname,
+                            metric: m,
+                            window: win,
+                            unit,
+                            buf: String::new(),
+                        };
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::StatsEditTitleAdd {
+                instance,
+                entity,
+                friendly_name,
+                metric,
+                window,
+                unit,
+                buf,
+            } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        buf.pop();
+                    }
+                    KeyCode::Char(c) => buf.push(c),
+                    KeyCode::Enter => {
+                        let title_raw = buf.trim().to_string();
+                        let title = if title_raw.is_empty() {
+                            if friendly_name.is_empty() {
+                                None
+                            } else {
+                                Some(friendly_name.clone())
+                            }
+                        } else {
+                            Some(title_raw)
+                        };
+                        let kind = CardKind::Statistics {
+                            instance: instance.clone(),
+                            entity: entity.clone(),
+                            window: window.clone(),
+                            metric: *metric,
+                            unit: unit.clone(),
+                            title,
+                        };
+                        editor.mode = EditorMode::Browse;
+                        if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.snapshot(dash);
+                                ed.add_card(dash, kind);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            // ---- Statistics context-menu flows ----
+            EditorMode::StatsEditMetric { card_idx, selected } => {
+                const METRICS: [crate::dashboard::StatsMetric; 5] = [
+                    crate::dashboard::StatsMetric::Avg,
+                    crate::dashboard::StatsMetric::Min,
+                    crate::dashboard::StatsMetric::Max,
+                    crate::dashboard::StatsMetric::Sum,
+                    crate::dashboard::StatsMetric::Count,
+                ];
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Up if *selected > 0 => *selected -= 1,
+                    KeyCode::Down if *selected + 1 < METRICS.len() => *selected += 1,
+                    KeyCode::Char('1') => *selected = 0,
+                    KeyCode::Char('2') => *selected = 1,
+                    KeyCode::Char('3') => *selected = 2,
+                    KeyCode::Char('4') => *selected = 3,
+                    KeyCode::Char('5') => *selected = 4,
+                    KeyCode::Enter => {
+                        let idx = *card_idx;
+                        let new_metric = METRICS[*selected];
+                        editor.mode = EditorMode::Browse;
+                        if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.snapshot(dash);
+                            }
+                            if let Some(card) = self
+                                .dashboards
+                                .get_mut(dash_idx)
+                                .and_then(|d| d.cards.get_mut(idx))
+                            {
+                                if let CardKind::Statistics { metric, .. } = &mut card.kind {
+                                    *metric = new_metric;
+                                }
+                            }
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.dirty = true;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::StatsEditWindow { card_idx, buf } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        buf.pop();
+                    }
+                    KeyCode::Char(c) => buf.push(c),
+                    KeyCode::Enter => {
+                        let idx = *card_idx;
+                        let new_window = {
+                            let s = buf.trim().to_string();
+                            if s.is_empty() {
+                                "1h".into()
+                            } else {
+                                s
+                            }
+                        };
+                        editor.mode = EditorMode::Browse;
+                        if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.snapshot(dash);
+                            }
+                            if let Some(card) = self
+                                .dashboards
+                                .get_mut(dash_idx)
+                                .and_then(|d| d.cards.get_mut(idx))
+                            {
+                                if let CardKind::Statistics { window, .. } = &mut card.kind {
+                                    *window = new_window;
+                                }
+                            }
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.dirty = true;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::StatsEditUnit { card_idx, buf } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        buf.pop();
+                    }
+                    KeyCode::Char(c) => buf.push(c),
+                    KeyCode::Enter => {
+                        let idx = *card_idx;
+                        let unit_raw = buf.trim().to_string();
+                        let new_unit = if unit_raw.is_empty() {
+                            None
+                        } else {
+                            Some(unit_raw)
+                        };
+                        editor.mode = EditorMode::Browse;
+                        if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.snapshot(dash);
+                            }
+                            if let Some(card) = self
+                                .dashboards
+                                .get_mut(dash_idx)
+                                .and_then(|d| d.cards.get_mut(idx))
+                            {
+                                if let CardKind::Statistics { unit, .. } = &mut card.kind {
+                                    *unit = new_unit;
+                                }
+                            }
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.dirty = true;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            // ---- Clock add-flow ----
+            EditorMode::ClockAddTitle { title_buffer } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        title_buffer.pop();
+                    }
+                    KeyCode::Char(c) => title_buffer.push(c),
+                    KeyCode::Enter => {
+                        let title = {
+                            let t = title_buffer.trim().to_string();
+                            if t.is_empty() {
+                                None
+                            } else {
+                                Some(t)
+                            }
+                        };
+                        editor.mode = EditorMode::ClockAddFormat {
+                            title,
+                            format_buffer: "%H:%M:%S".into(),
+                        };
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::ClockAddFormat {
+                title,
+                format_buffer,
+            } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        format_buffer.pop();
+                    }
+                    KeyCode::Char(c) => format_buffer.push(c),
+                    KeyCode::Enter => {
+                        let fmt = format_buffer.trim().to_string();
+                        let fmt = if fmt.is_empty() {
+                            "%H:%M:%S".into()
+                        } else {
+                            fmt
+                        };
+                        editor.mode = EditorMode::ClockAddTimezone {
+                            title: title.clone(),
+                            format: fmt,
+                            tz_buffer: String::new(),
+                        };
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::ClockAddTimezone {
+                title,
+                format,
+                tz_buffer,
+            } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        tz_buffer.pop();
+                    }
+                    KeyCode::Char(c) => tz_buffer.push(c),
+                    KeyCode::Enter => {
+                        let tz_raw = tz_buffer.trim().to_string();
+                        let timezone = if tz_raw.is_empty() {
+                            None
+                        } else {
+                            Some(tz_raw)
+                        };
+                        let kind = CardKind::Clock {
+                            format: format.clone(),
+                            timezone,
+                            title: title.clone(),
+                        };
+                        editor.mode = EditorMode::Browse;
+                        if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.snapshot(dash);
+                                ed.add_card(dash, kind);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            // ---- Clock context-menu flows ----
+            EditorMode::ClockEditFormat { card_idx, buf } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        buf.pop();
+                    }
+                    KeyCode::Char(c) => buf.push(c),
+                    KeyCode::Enter => {
+                        let idx = *card_idx;
+                        let new_fmt = {
+                            let s = buf.trim().to_string();
+                            if s.is_empty() {
+                                "%H:%M:%S".into()
+                            } else {
+                                s
+                            }
+                        };
+                        editor.mode = EditorMode::Browse;
+                        if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.snapshot(dash);
+                            }
+                            if let Some(card) = self
+                                .dashboards
+                                .get_mut(dash_idx)
+                                .and_then(|d| d.cards.get_mut(idx))
+                            {
+                                if let CardKind::Clock { format, .. } = &mut card.kind {
+                                    *format = new_fmt;
+                                }
+                            }
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.dirty = true;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::ClockEditTimezone { card_idx, buf } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        buf.pop();
+                    }
+                    KeyCode::Char(c) => buf.push(c),
+                    KeyCode::Enter => {
+                        let idx = *card_idx;
+                        let tz_raw = buf.trim().to_string();
+                        let new_tz = if tz_raw.is_empty() {
+                            None
+                        } else {
+                            Some(tz_raw)
+                        };
+                        editor.mode = EditorMode::Browse;
+                        if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.snapshot(dash);
+                            }
+                            if let Some(card) = self
+                                .dashboards
+                                .get_mut(dash_idx)
+                                .and_then(|d| d.cards.get_mut(idx))
+                            {
+                                if let CardKind::Clock { timezone, .. } = &mut card.kind {
+                                    *timezone = new_tz;
+                                }
+                            }
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.dirty = true;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            // ---- Image add-flow ----
+            EditorMode::ImagePickSourceKind { selected } => {
+                let commit_kind: Option<bool> = match k.code {
+                    KeyCode::Esc => {
+                        editor.image_pending_is_camera = None;
+                        editor.mode = EditorMode::Browse;
+                        return;
+                    }
+                    KeyCode::Up | KeyCode::Char('k') if *selected > 0 => {
+                        *selected -= 1;
+                        None
+                    }
+                    KeyCode::Down | KeyCode::Char('j') if *selected < 1 => {
+                        *selected += 1;
+                        None
+                    }
+                    KeyCode::Enter => Some(*selected == 1),
+                    KeyCode::Char('1') => Some(false),
+                    KeyCode::Char('2') => Some(true),
+                    _ => None,
+                };
+                if let Some(is_camera) = commit_kind {
+                    editor.image_pending_is_camera = Some(is_camera);
+                    editor.mode = EditorMode::PickingInstance {
+                        card_type: CardTypeStub::Image,
+                        selected: 0,
+                    };
+                }
+                return;
+            }
+            EditorMode::ImageEditRefreshSeconds {
+                instance,
+                entity,
+                friendly_name,
+                is_camera,
+                buf,
+            } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        buf.pop();
+                    }
+                    KeyCode::Char(c) if c.is_ascii_digit() => buf.push(c),
+                    KeyCode::Enter => {
+                        let secs_raw = buf.trim().to_string();
+                        let refresh_seconds = secs_raw.parse::<u32>().ok().filter(|&s| s > 0);
+                        editor.mode = EditorMode::ImageEditTitleAdd {
+                            instance: instance.clone(),
+                            entity: entity.clone(),
+                            friendly_name: friendly_name.clone(),
+                            is_camera: *is_camera,
+                            refresh_seconds,
+                            buf: String::new(),
+                        };
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::ImageEditTitleAdd {
+                instance,
+                entity,
+                friendly_name,
+                is_camera,
+                refresh_seconds,
+                buf,
+            } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        buf.pop();
+                    }
+                    KeyCode::Char(c) => buf.push(c),
+                    KeyCode::Enter => {
+                        let title_raw = buf.trim().to_string();
+                        let title = if title_raw.is_empty() {
+                            if friendly_name.is_empty() {
+                                None
+                            } else {
+                                Some(friendly_name.clone())
+                            }
+                        } else {
+                            Some(title_raw)
+                        };
+                        let source = if *is_camera {
+                            crate::dashboard::ImageSource::Camera {
+                                entity: entity.clone(),
+                            }
+                        } else {
+                            crate::dashboard::ImageSource::ImageEntity {
+                                entity: entity.clone(),
+                            }
+                        };
+                        let kind = CardKind::Image {
+                            instance: instance.clone(),
+                            source,
+                            refresh_seconds: *refresh_seconds,
+                            title,
+                        };
+                        editor.mode = EditorMode::Browse;
+                        if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.snapshot(dash);
+                                ed.add_card(dash, kind);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            // ---- Weather add-flow ----
+            EditorMode::WxEditShowForecast {
+                instance,
+                entity,
+                friendly_name,
+                selected,
+            } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Up if *selected > 0 => *selected -= 1,
+                    KeyCode::Down if *selected < 1 => *selected += 1,
+                    KeyCode::Char('y') | KeyCode::Char('Y') => *selected = 0,
+                    KeyCode::Char('n') | KeyCode::Char('N') => *selected = 1,
+                    KeyCode::Enter => {
+                        let show = *selected == 0;
+                        let inst = instance.clone();
+                        let ent = entity.clone();
+                        let fname = friendly_name.clone();
+                        editor.mode = EditorMode::WxEditForecastDays {
+                            instance: inst,
+                            entity: ent,
+                            friendly_name: fname,
+                            show_forecast: show,
+                            buf: "3".into(),
+                        };
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::WxEditForecastDays {
+                instance,
+                entity,
+                friendly_name,
+                show_forecast,
+                buf,
+            } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        buf.pop();
+                    }
+                    KeyCode::Char(c) if c.is_ascii_digit() => buf.push(c),
+                    KeyCode::Enter => {
+                        let days: u8 = buf.trim().parse::<u8>().unwrap_or(3).clamp(1, 7);
+                        let inst = instance.clone();
+                        let ent = entity.clone();
+                        let fname = friendly_name.clone();
+                        let sf = *show_forecast;
+                        editor.mode = EditorMode::WxEditTitleAdd {
+                            instance: inst,
+                            entity: ent,
+                            friendly_name: fname,
+                            show_forecast: sf,
+                            forecast_days: days,
+                            buf: String::new(),
+                        };
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::WxEditTitleAdd {
+                instance,
+                entity,
+                friendly_name,
+                show_forecast,
+                forecast_days,
+                buf,
+            } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        buf.pop();
+                    }
+                    KeyCode::Char(c) => buf.push(c),
+                    KeyCode::Enter => {
+                        let title_raw = buf.trim().to_string();
+                        let title = if title_raw.is_empty() {
+                            if friendly_name.is_empty() {
+                                None
+                            } else {
+                                Some(friendly_name.clone())
+                            }
+                        } else {
+                            Some(title_raw)
+                        };
+                        let kind = CardKind::Weather {
+                            instance: instance.clone(),
+                            entity: entity.clone(),
+                            show_forecast: *show_forecast,
+                            forecast_days: *forecast_days,
+                            title,
+                        };
+                        editor.mode = EditorMode::Browse;
+                        if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.snapshot(dash);
+                                ed.add_card(dash, kind);
                             }
                         }
                     }
@@ -747,7 +2360,7 @@ impl App {
                 }
             }
             KeyCode::Char(' ') => editor.select_at_cursor(dash),
-            KeyCode::Char('a') => editor.mode = EditorMode::PickingType,
+            KeyCode::Char('a') => editor.mode = EditorMode::PickingType { selected: 0 },
             KeyCode::Char('m') | KeyCode::Char('M') => {
                 self.open_menu();
             }
@@ -848,12 +2461,15 @@ impl App {
                         crate::dashboard::CardKind::Entity { title, .. }
                         | crate::dashboard::CardKind::Toggle { title, .. }
                         | crate::dashboard::CardKind::Gauge { title, .. }
-                        | crate::dashboard::CardKind::Sparkline { title, .. }
+                        | crate::dashboard::CardKind::Graph { title, .. }
                         | crate::dashboard::CardKind::Text { title, .. }
                         | crate::dashboard::CardKind::EntityList { title, .. }
-                        | crate::dashboard::CardKind::FilteredEntityList { title, .. } => {
-                            title.clone()
-                        }
+                        | crate::dashboard::CardKind::FilteredEntityList { title, .. }
+                        | crate::dashboard::CardKind::Clock { title, .. }
+                        | crate::dashboard::CardKind::Statistics { title, .. }
+                        | crate::dashboard::CardKind::MediaPlayer { title, .. }
+                        | crate::dashboard::CardKind::Image { title, .. }
+                        | crate::dashboard::CardKind::Weather { title, .. } => title.clone(),
                     })
                     .unwrap_or_default();
                 if let Some(ed) = self.editor.as_mut() {
@@ -876,9 +2492,7 @@ impl App {
                     .get(dash_idx)
                     .and_then(|d| d.cards.get(idx))
                     .and_then(|c| match &c.kind {
-                        crate::dashboard::CardKind::Sparkline { window, .. } => {
-                            Some(window.clone())
-                        }
+                        crate::dashboard::CardKind::Graph { window, .. } => Some(window.clone()),
                         _ => None,
                     })
                     .unwrap_or_else(|| "1h".to_string());
@@ -887,6 +2501,36 @@ impl App {
                     ed.mode = EditorMode::EditingWindow {
                         card_idx: idx,
                         buffer: current,
+                    };
+                }
+            }
+            (A::SetColorOverride, C::Card(idx)) => {
+                let current_color = self
+                    .dashboards
+                    .get(dash_idx)
+                    .and_then(|d| d.cards.get(idx))
+                    .and_then(|c| c.color.clone())
+                    .unwrap_or_default();
+                if let Some(ed) = self.editor.as_mut() {
+                    ed.selected_card = Some(idx);
+                    ed.mode = EditorMode::EnterColorOverride {
+                        card_idx: idx,
+                        buf: current_color,
+                    };
+                }
+            }
+            (A::SetCardSize, C::Card(idx)) => {
+                let current_size = self
+                    .dashboards
+                    .get(dash_idx)
+                    .and_then(|d| d.cards.get(idx))
+                    .map(|c| c.size)
+                    .unwrap_or_default();
+                if let Some(ed) = self.editor.as_mut() {
+                    ed.selected_card = Some(idx);
+                    ed.mode = EditorMode::PickCardSize {
+                        card_idx: idx,
+                        current: current_size,
                     };
                 }
             }
@@ -904,6 +2548,7 @@ impl App {
                         query,
                         hide_state,
                         title,
+                        ..
                     } = &card.kind
                     {
                         existing = Some((
@@ -936,6 +2581,24 @@ impl App {
                     if let Some(card) = dash.cards.get_mut(idx) {
                         if let CardKind::FilteredEntityList { hide_state, .. } = &mut card.kind {
                             *hide_state = !*hide_state;
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.dirty = true;
+                            }
+                        }
+                    }
+                }
+            }
+            (A::ToggleHideWhenEmpty, C::Card(idx)) => {
+                if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                    if let Some(ed) = self.editor.as_mut() {
+                        ed.snapshot(dash);
+                    }
+                    if let Some(card) = dash.cards.get_mut(idx) {
+                        if let CardKind::FilteredEntityList {
+                            hide_when_empty, ..
+                        } = &mut card.kind
+                        {
+                            *hide_when_empty = !*hide_when_empty;
                             if let Some(ed) = self.editor.as_mut() {
                                 ed.dirty = true;
                             }
@@ -982,6 +2645,272 @@ impl App {
                     };
                 }
             }
+            (A::AddGraphSeries, C::Card(idx)) => {
+                if let Some(ed) = self.editor.as_mut() {
+                    ed.selected_card = Some(idx);
+                    ed.mode = EditorMode::GraphAddOneSeries {
+                        card_idx: idx,
+                        query: String::new(),
+                        selected: 0,
+                    };
+                }
+            }
+            (A::RemoveGraphSeries, C::Card(idx)) => {
+                if let Some(ed) = self.editor.as_mut() {
+                    ed.selected_card = Some(idx);
+                    ed.mode = EditorMode::GraphPickSeriesIndex {
+                        card_idx: idx,
+                        op: crate::dashboard::editor::SeriesIndexOp::Remove,
+                        selected: 0,
+                    };
+                }
+            }
+            (A::SetGraphSeriesColor, C::Card(idx)) => {
+                if let Some(ed) = self.editor.as_mut() {
+                    ed.selected_card = Some(idx);
+                    ed.mode = EditorMode::GraphPickSeriesIndex {
+                        card_idx: idx,
+                        op: crate::dashboard::editor::SeriesIndexOp::SetColor,
+                        selected: 0,
+                    };
+                }
+            }
+            (A::SetGraphSeriesLabel, C::Card(idx)) => {
+                if let Some(ed) = self.editor.as_mut() {
+                    ed.selected_card = Some(idx);
+                    ed.mode = EditorMode::GraphPickSeriesIndex {
+                        card_idx: idx,
+                        op: crate::dashboard::editor::SeriesIndexOp::SetLabel,
+                        selected: 0,
+                    };
+                }
+            }
+            (A::CycleGraphType, C::Card(idx)) => {
+                if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                    if let Some(ed) = self.editor.as_mut() {
+                        ed.snapshot(dash);
+                        ed.selected_card = Some(idx);
+                    }
+                    if let Some(card) = dash.cards.get_mut(idx) {
+                        if let crate::dashboard::CardKind::Graph { graph_type, .. } = &mut card.kind
+                        {
+                            *graph_type = match graph_type {
+                                crate::dashboard::GraphType::Line => {
+                                    crate::dashboard::GraphType::Bar
+                                }
+                                crate::dashboard::GraphType::Bar => {
+                                    crate::dashboard::GraphType::Pie
+                                }
+                                crate::dashboard::GraphType::Pie => {
+                                    crate::dashboard::GraphType::Line
+                                }
+                            };
+                        }
+                    }
+                    if let Some(ed) = self.editor.as_mut() {
+                        ed.dirty = true;
+                    }
+                }
+            }
+            (A::EditGraphWindow, C::Card(idx)) => {
+                let current = self
+                    .dashboards
+                    .get(dash_idx)
+                    .and_then(|d| d.cards.get(idx))
+                    .and_then(|c| match &c.kind {
+                        crate::dashboard::CardKind::Graph { window, .. } => Some(window.clone()),
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| "1h".to_string());
+                if let Some(ed) = self.editor.as_mut() {
+                    ed.selected_card = Some(idx);
+                    ed.mode = EditorMode::GraphEditWindow {
+                        card_idx: idx,
+                        buf: current,
+                    };
+                }
+            }
+            (A::EditGraphOrientation, C::Card(idx)) => {
+                let current_ori = self
+                    .dashboards
+                    .get(dash_idx)
+                    .and_then(|d| d.cards.get(idx))
+                    .and_then(|c| match &c.kind {
+                        crate::dashboard::CardKind::Graph { orientation, .. } => Some(*orientation),
+                        _ => None,
+                    })
+                    .unwrap_or_default();
+                if let Some(ed) = self.editor.as_mut() {
+                    ed.selected_card = Some(idx);
+                    ed.mode = EditorMode::GraphPickOrientation {
+                        card_idx: idx,
+                        current: current_ori,
+                    };
+                }
+            }
+            (A::EditSeverityThresholds, C::Card(idx)) => {
+                // Pre-populate buffer with existing green threshold if set.
+                let existing = self
+                    .dashboards
+                    .get(dash_idx)
+                    .and_then(|d| d.cards.get(idx))
+                    .and_then(|c| {
+                        if let CardKind::Gauge { severity, .. } = &c.kind {
+                            severity.as_ref().map(|s| (s.green, s.yellow, s.red))
+                        } else {
+                            None
+                        }
+                    });
+                let (green_str, accum) = match existing {
+                    Some((g, y, _)) => (
+                        g.to_string(),
+                        crate::dashboard::editor::SeverityAccum {
+                            green: g,
+                            yellow: y,
+                        },
+                    ),
+                    None => (
+                        String::new(),
+                        crate::dashboard::editor::SeverityAccum::default(),
+                    ),
+                };
+                if let Some(ed) = self.editor.as_mut() {
+                    ed.selected_card = Some(idx);
+                    ed.mode = EditorMode::EditSeverityGreen {
+                        card_idx: idx,
+                        buf: green_str,
+                        accum,
+                    };
+                }
+            }
+            (A::ToggleGaugeNeedle, C::Card(idx)) => {
+                if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                    if let Some(ed) = self.editor.as_mut() {
+                        ed.snapshot(dash);
+                    }
+                    if let Some(card) = dash.cards.get_mut(idx) {
+                        if let CardKind::Gauge { needle, .. } = &mut card.kind {
+                            *needle = !*needle;
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.dirty = true;
+                            }
+                        }
+                    }
+                }
+            }
+            (A::ClockEditFormat, C::Card(idx)) => {
+                let current = self
+                    .dashboards
+                    .get(dash_idx)
+                    .and_then(|d| d.cards.get(idx))
+                    .and_then(|c| {
+                        if let CardKind::Clock { format, .. } = &c.kind {
+                            Some(format.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_else(|| "%H:%M:%S".into());
+                if let Some(ed) = self.editor.as_mut() {
+                    ed.selected_card = Some(idx);
+                    ed.mode = EditorMode::ClockEditFormat {
+                        card_idx: idx,
+                        buf: current,
+                    };
+                }
+            }
+            (A::ClockEditTimezone, C::Card(idx)) => {
+                let current = self
+                    .dashboards
+                    .get(dash_idx)
+                    .and_then(|d| d.cards.get(idx))
+                    .and_then(|c| {
+                        if let CardKind::Clock { timezone, .. } = &c.kind {
+                            timezone.clone()
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_default();
+                if let Some(ed) = self.editor.as_mut() {
+                    ed.selected_card = Some(idx);
+                    ed.mode = EditorMode::ClockEditTimezone {
+                        card_idx: idx,
+                        buf: current,
+                    };
+                }
+            }
+            (A::StatsEditMetric, C::Card(idx)) => {
+                // Find the current metric index to pre-select it.
+                let current_selected = self
+                    .dashboards
+                    .get(dash_idx)
+                    .and_then(|d| d.cards.get(idx))
+                    .and_then(|c| {
+                        if let CardKind::Statistics { metric, .. } = &c.kind {
+                            use crate::dashboard::StatsMetric::*;
+                            Some(match metric {
+                                Avg => 0,
+                                Min => 1,
+                                Max => 2,
+                                Sum => 3,
+                                Count => 4,
+                            })
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or(0);
+                if let Some(ed) = self.editor.as_mut() {
+                    ed.selected_card = Some(idx);
+                    ed.mode = EditorMode::StatsEditMetric {
+                        card_idx: idx,
+                        selected: current_selected,
+                    };
+                }
+            }
+            (A::StatsEditWindow, C::Card(idx)) => {
+                let current = self
+                    .dashboards
+                    .get(dash_idx)
+                    .and_then(|d| d.cards.get(idx))
+                    .and_then(|c| {
+                        if let CardKind::Statistics { window, .. } = &c.kind {
+                            Some(window.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_else(|| "1h".into());
+                if let Some(ed) = self.editor.as_mut() {
+                    ed.selected_card = Some(idx);
+                    ed.mode = EditorMode::StatsEditWindow {
+                        card_idx: idx,
+                        buf: current,
+                    };
+                }
+            }
+            (A::StatsEditUnit, C::Card(idx)) => {
+                let current = self
+                    .dashboards
+                    .get(dash_idx)
+                    .and_then(|d| d.cards.get(idx))
+                    .and_then(|c| {
+                        if let CardKind::Statistics { unit, .. } = &c.kind {
+                            unit.clone()
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_default();
+                if let Some(ed) = self.editor.as_mut() {
+                    ed.selected_card = Some(idx);
+                    ed.mode = EditorMode::StatsEditUnit {
+                        card_idx: idx,
+                        buf: current,
+                    };
+                }
+            }
             _ => {
                 self.last_error = Some("menu action not valid in this context".into());
             }
@@ -1004,9 +2933,7 @@ impl App {
             CardKind::Entity { instance, .. } => (CardTypeStub::Entity, instance.clone(), None),
             CardKind::Toggle { instance, .. } => (CardTypeStub::Toggle, instance.clone(), None),
             CardKind::Gauge { instance, .. } => (CardTypeStub::Gauge, instance.clone(), None),
-            CardKind::Sparkline { instance, .. } => {
-                (CardTypeStub::Sparkline, instance.clone(), None)
-            }
+            CardKind::Graph { instance, .. } => (CardTypeStub::Graph, instance.clone(), None),
             CardKind::EntityList {
                 instance, entities, ..
             } => {
@@ -1038,6 +2965,21 @@ impl App {
                 );
                 return;
             }
+            CardKind::Clock { .. } => {
+                self.last_error = Some("clock cards have no entity to change".into());
+                return;
+            }
+            CardKind::Statistics { instance, .. } => {
+                (CardTypeStub::Statistics, instance.clone(), None)
+            }
+            CardKind::MediaPlayer { instance, .. } => {
+                (CardTypeStub::MediaPlayer, instance.clone(), None)
+            }
+            CardKind::Image { .. } => {
+                self.last_error = Some("image cards: use the YAML editor to change entity".into());
+                return;
+            }
+            CardKind::Weather { instance, .. } => (CardTypeStub::Weather, instance.clone(), None),
         };
         editor.edit_target = Some(idx);
         editor.mode = if let Some(picked) = prefill {
@@ -1069,6 +3011,27 @@ impl App {
             };
             return;
         }
+        // Clock has no instance or entity — go straight to title input.
+        if matches!(kind, CardTypeStub::Clock) {
+            editor.mode = EditorMode::ClockAddTitle {
+                title_buffer: String::new(),
+            };
+            return;
+        }
+        // Statistics: has instance + entity, then extra metric/window/unit steps.
+        // Falls through to the normal PickingInstance / PickingEntity flow below,
+        // but branches at PickingEntity::Enter to StatsPickMetric instead of EditingTitle.
+        // Graph has its own multi-step flow: type → instance → entities → config.
+        // Always route through GraphPickType first, regardless of instance count.
+        if matches!(kind, CardTypeStub::Graph) {
+            editor.mode = EditorMode::GraphPickType;
+            return;
+        }
+        // Image: pick source kind (image entity vs camera) first, then instance + entity.
+        if matches!(kind, CardTypeStub::Image) {
+            editor.mode = EditorMode::ImagePickSourceKind { selected: 0 };
+            return;
+        }
         let aliases: Vec<String> = self.instances.runtimes.keys().cloned().collect();
         match aliases.len() {
             0 => {
@@ -1084,6 +3047,82 @@ impl App {
                 editor.mode = EditorMode::PickingInstance {
                     card_type: kind,
                     selected: 0,
+                };
+            }
+        }
+    }
+
+    fn start_graph_after_type(&mut self, graph_type: crate::dashboard::GraphType) {
+        let aliases: Vec<String> = self.instances.runtimes.keys().cloned().collect();
+        let Some(editor) = self.editor.as_mut() else {
+            return;
+        };
+        match aliases.len() {
+            0 => {
+                self.last_error = Some("no instances connected".into());
+                editor.mode = EditorMode::Browse;
+            }
+            1 => {
+                let inst = aliases.into_iter().next().unwrap();
+                editor.mode = EditorMode::GraphAddEntities {
+                    instance: inst,
+                    graph_type,
+                    accumulated: Vec::new(),
+                    query: String::new(),
+                    selected: 0,
+                    asking_more: false,
+                };
+            }
+            _ => {
+                editor.mode = EditorMode::GraphPickInstance {
+                    graph_type,
+                    selected: 0,
+                };
+            }
+        }
+    }
+
+    fn advance_graph_to_config(
+        &mut self,
+        instance: String,
+        graph_type: crate::dashboard::GraphType,
+        series: Vec<crate::dashboard::GraphSeries>,
+    ) {
+        let Some(editor) = self.editor.as_mut() else {
+            return;
+        };
+        match graph_type {
+            crate::dashboard::GraphType::Line => {
+                editor.mode = EditorMode::GraphEditWindowAdd {
+                    instance,
+                    graph_type,
+                    series,
+                    window_buf: String::new(),
+                    title_buf: String::new(),
+                    title_stage: false,
+                };
+            }
+            crate::dashboard::GraphType::Bar => {
+                editor.mode = EditorMode::GraphPickOrientationAdd {
+                    instance,
+                    series,
+                    current: crate::dashboard::BarOrientation::default(),
+                    title_buf: String::new(),
+                    title_stage: false,
+                };
+            }
+            crate::dashboard::GraphType::Pie => {
+                // Pie: no extra config — just prompt for title then commit.
+                // Reuse GraphEditWindowAdd with empty window (we won't show a window prompt,
+                // but this avoids another mode variant). Instead use a dedicated commit path.
+                // Immediately go to title stage with a dummy window.
+                editor.mode = EditorMode::GraphEditWindowAdd {
+                    instance,
+                    graph_type,
+                    series,
+                    window_buf: "1h".to_string(),
+                    title_buf: String::new(),
+                    title_stage: true, // skip window prompt, go straight to title
                 };
             }
         }
@@ -1176,6 +3215,60 @@ impl App {
                 }
             }
         };
+    }
+
+    /// Returns `true` if the key was consumed by a MediaPlayer card action.
+    fn handle_key_media_player(&mut self, ch: char) -> bool {
+        let Screen::Dashboard {
+            idx, selected_card, ..
+        } = &self.screen
+        else {
+            return false;
+        };
+        let (idx, selected_card) = (*idx, *selected_card);
+        let Some(card) = self
+            .dashboards
+            .get(idx)
+            .and_then(|d| d.cards.get(selected_card))
+        else {
+            return false;
+        };
+        let CardKind::MediaPlayer {
+            instance, entity, ..
+        } = &card.kind
+        else {
+            return false;
+        };
+        let Some(service) = crate::actions::media_service_for_key(ch) else {
+            return false;
+        };
+        let instance = instance.clone();
+        let entity = entity.clone();
+        let service_data = if service == "volume_mute" {
+            let current_muted = self
+                .instances
+                .runtimes
+                .get(&instance)
+                .and_then(|rt| rt.states.get(&entity))
+                .and_then(|s| s.attributes.get("is_volume_muted"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            serde_json::json!({ "is_volume_muted": !current_muted })
+        } else {
+            serde_json::Value::Null
+        };
+        let cmd = crate::ha::HaCommand::CallService {
+            domain: "media_player".to_string(),
+            service: service.to_string(),
+            service_data,
+            target: serde_json::json!({ "entity_id": entity }),
+        };
+        if !self.instances.send(&instance, cmd) {
+            self.last_error = Some(format!("{instance}: no command channel"));
+        } else {
+            tracing::info!(%instance, %entity, %service, "media service call dispatched");
+        }
+        true
     }
 
     fn trigger_default_action(&mut self) {
@@ -1379,6 +3472,8 @@ impl App {
                 }
                 self.last_error = None;
                 self.fetch_sparkline_history(&instance);
+                self.fetch_image_cards(&instance);
+                self.fetch_weather_forecasts(&instance);
             }
             AppEvent::HaEntityUpdated { instance, state } => {
                 if let Some(rt) = self.instances.get_mut(&instance) {
@@ -1386,6 +3481,8 @@ impl App {
                     rt.last_update = Some(std::time::Instant::now());
                 }
                 self.record_history(&instance, &state.entity_id, &state.state);
+                // Re-fetch image/camera cards when their entity state changes.
+                self.refresh_image_card_if_needed(&instance, &state.entity_id.clone());
             }
             AppEvent::HaServiceError { instance, error } => {
                 self.last_error = Some(format!("{instance}: {error}"));
@@ -1402,25 +3499,227 @@ impl App {
                     .or_insert_with(|| RingBuf::new(HISTORY_CAP));
                 buf.fill_from(samples.into_iter().map(|(_, v)| v));
             }
+            AppEvent::HaImageBytes {
+                instance,
+                entity,
+                result,
+            } => {
+                let key = (instance.clone(), entity.clone());
+                self.image_inflight.remove(&key);
+                match result {
+                    Ok(bytes) => {
+                        tracing::info!(
+                            instance = %instance,
+                            entity = %entity,
+                            bytes = bytes.len(),
+                            "image fetch succeeded"
+                        );
+                        if let Some(picker) = &mut self.image_picker {
+                            match image::load_from_memory(&bytes) {
+                                Ok(img) => {
+                                    let (w, h) = (img.width(), img.height());
+                                    let protocol = picker.new_resize_protocol(img);
+                                    tracing::info!(
+                                        entity = %entity,
+                                        width = w,
+                                        height = h,
+                                        "image decoded + protocol built"
+                                    );
+                                    self.image_cache.insert(
+                                        key,
+                                        ImageCacheEntry {
+                                            protocol,
+                                            error: None,
+                                        },
+                                    );
+                                }
+                                Err(e) => {
+                                    tracing::warn!(entity = %entity, error = %e, "image decode failed");
+                                    // Keep any existing cached frame; only log the error.
+                                }
+                            }
+                        } else {
+                            tracing::warn!(entity = %entity, "no image_picker — cannot decode");
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(entity = %entity, error = %e, "image fetch failed");
+                        self.last_error = Some(format!("image fetch {entity}: {e}"));
+                    }
+                }
+            }
+            AppEvent::RefreshImageCard { instance, entity } => {
+                self.send_image_fetch(&instance, &entity.clone());
+            }
+            AppEvent::HaWeatherForecast {
+                instance,
+                entity,
+                forecast,
+            } => {
+                self.weather_forecasts.insert((instance, entity), forecast);
+            }
+            AppEvent::RefreshWeatherForecast { instance, entity } => {
+                let _ = self.instances.send(
+                    &instance,
+                    crate::ha::HaCommand::GetWeatherForecast {
+                        entity,
+                        kind: ForecastKind::Daily,
+                    },
+                );
+            }
         }
     }
 
-    fn fetch_sparkline_history(&mut self, instance: &Alias) {
-        // For each sparkline card on every dashboard matching this instance, request backfill.
-        let mut requests: Vec<(String, u32)> = Vec::new();
+    /// Trigger an image fetch for all Image cards on dashboards matching `instance`,
+    /// parallel to `fetch_sparkline_history`.
+    fn fetch_image_cards(&mut self, instance: &Alias) {
+        let mut entities: Vec<String> = Vec::new();
         for dash in &self.dashboards {
             for card in &dash.cards {
-                if let crate::dashboard::CardKind::Sparkline {
+                if let crate::dashboard::CardKind::Image {
                     instance: card_inst,
-                    entity,
-                    window,
+                    source,
                     ..
                 } = &card.kind
                 {
                     if card_inst == instance {
+                        let entity = match source {
+                            crate::dashboard::ImageSource::ImageEntity { entity } => entity.clone(),
+                            crate::dashboard::ImageSource::Camera { entity } => entity.clone(),
+                        };
+                        entities.push(entity);
+                    }
+                }
+            }
+        }
+        for entity in entities {
+            self.send_image_fetch(instance, &entity);
+        }
+    }
+
+    /// Request forecast for every Weather card on dashboards matching `instance`.
+    fn fetch_weather_forecasts(&mut self, instance: &Alias) {
+        let mut entities: Vec<String> = Vec::new();
+        for dash in &self.dashboards {
+            for card in &dash.cards {
+                if let crate::dashboard::CardKind::Weather {
+                    instance: card_inst,
+                    entity,
+                    ..
+                } = &card.kind
+                {
+                    if card_inst == instance {
+                        entities.push(entity.clone());
+                    }
+                }
+            }
+        }
+        for entity in entities {
+            let _ = self.instances.send(
+                instance,
+                crate::ha::HaCommand::GetWeatherForecast {
+                    entity,
+                    kind: ForecastKind::Daily,
+                },
+            );
+        }
+    }
+
+    /// Send a `FetchImageBytes` command if not already in-flight.
+    pub fn send_image_fetch(&mut self, instance: &Alias, entity: &EntityId) {
+        let key = (instance.clone(), entity.clone());
+        if self.image_inflight.contains(&key) {
+            return;
+        }
+        // Determine kind from the card definition.
+        let kind = self.image_fetch_kind_for(instance, entity);
+        let Some(kind) = kind else {
+            tracing::warn!(
+                instance = %instance,
+                entity = %entity,
+                "send_image_fetch: no Image card found for entity"
+            );
+            return;
+        };
+        tracing::info!(instance = %instance, entity = %entity, ?kind, "sending FetchImageBytes");
+        self.image_inflight.insert(key);
+        let sent = self.instances.send(
+            instance,
+            crate::ha::HaCommand::FetchImageBytes {
+                entity: entity.clone(),
+                kind,
+            },
+        );
+        if !sent {
+            tracing::warn!(
+                instance = %instance,
+                entity = %entity,
+                "FetchImageBytes send failed (instance channel closed)"
+            );
+        }
+    }
+
+    /// Look up whether an entity is an image or camera source across all dashboards.
+    fn image_fetch_kind_for(&self, instance: &Alias, entity: &EntityId) -> Option<ImageFetchKind> {
+        for dash in &self.dashboards {
+            for card in &dash.cards {
+                if let crate::dashboard::CardKind::Image {
+                    instance: card_inst,
+                    source,
+                    ..
+                } = &card.kind
+                {
+                    if card_inst != instance {
+                        continue;
+                    }
+                    match source {
+                        crate::dashboard::ImageSource::ImageEntity { entity: e } if e == entity => {
+                            return Some(ImageFetchKind::Image);
+                        }
+                        crate::dashboard::ImageSource::Camera { entity: e } if e == entity => {
+                            return Some(ImageFetchKind::Camera);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Re-fetch an image card if the updated entity is an image/camera source.
+    fn refresh_image_card_if_needed(&mut self, instance: &Alias, entity: &EntityId) {
+        if self.image_fetch_kind_for(instance, entity).is_some() {
+            self.send_image_fetch(instance, entity);
+        }
+    }
+
+    fn fetch_sparkline_history(&mut self, instance: &Alias) {
+        // For each graph/statistics card on every dashboard matching this instance, request backfill.
+        let mut requests: Vec<(String, u32)> = Vec::new();
+        for dash in &self.dashboards {
+            for card in &dash.cards {
+                match &card.kind {
+                    crate::dashboard::CardKind::Graph {
+                        instance: card_inst,
+                        window,
+                        ..
+                    } if card_inst == instance => {
+                        let hours = parse_window_hours(window);
+                        for eid in card.graph_entities() {
+                            requests.push((eid.clone(), hours));
+                        }
+                    }
+                    crate::dashboard::CardKind::Statistics {
+                        instance: card_inst,
+                        entity,
+                        window,
+                        ..
+                    } if card_inst == instance => {
                         let hours = parse_window_hours(window);
                         requests.push((entity.clone(), hours));
                     }
+                    _ => {}
                 }
             }
         }
@@ -1444,6 +3743,15 @@ pub struct EntityPick {
 }
 
 pub fn entity_search(instances: &InstanceRegistry, instance: &str, query: &str) -> Vec<EntityPick> {
+    entity_search_filtered(instances, instance, query, None)
+}
+
+pub fn entity_search_filtered(
+    instances: &InstanceRegistry,
+    instance: &str,
+    query: &str,
+    domain_prefix: Option<&str>,
+) -> Vec<EntityPick> {
     let Some(rt) = instances.runtimes.get(instance) else {
         return Vec::new();
     };
@@ -1464,6 +3772,11 @@ pub fn entity_search(instances: &InstanceRegistry, instance: &str, query: &str) 
             }
         })
         .filter(|p| {
+            if let Some(prefix) = domain_prefix {
+                if !p.entity_id.starts_with(prefix) {
+                    return false;
+                }
+            }
             if q.is_empty() {
                 return true;
             }
@@ -1510,6 +3823,15 @@ pub fn list_entities(
                 crate::dashboard::query::resolve(rt, query),
             ))
         }
+        _ => None,
+    }
+}
+
+pub fn domain_prefix_for_type(kind: CardTypeStub) -> Option<&'static str> {
+    match kind {
+        CardTypeStub::MediaPlayer => Some("media_player."),
+        CardTypeStub::Weather => Some("weather."),
+        // Image cards accept both `image.` and `camera.` entities — no single prefix filter.
         _ => None,
     }
 }
@@ -1562,12 +3884,17 @@ fn build_typed_card(
             min: 0.0,
             max: 100.0,
             unit: None,
+            severity: None,
+            needle: true,
             title,
         },
-        CardTypeStub::Sparkline => CardKind::Sparkline {
+        CardTypeStub::Graph => CardKind::Graph {
             instance,
-            entity,
+            entity: Some(entity),
+            entities: Vec::new(),
+            graph_type: crate::dashboard::GraphType::default(),
             window: "1h".into(),
+            orientation: crate::dashboard::BarOrientation::default(),
             title,
         },
         CardTypeStub::Text => CardKind::Text {
@@ -1582,6 +3909,23 @@ fn build_typed_card(
         CardTypeStub::FilteredEntityList => unreachable!(
             "FilteredEntityList is built via EditingFilterQuery flow, not build_typed_card"
         ),
+        CardTypeStub::Clock => {
+            unreachable!("Clock is built via ClockAddTitle flow, not build_typed_card")
+        }
+        CardTypeStub::Statistics => {
+            unreachable!("Statistics is built via StatsPickMetric flow, not build_typed_card")
+        }
+        CardTypeStub::Image => {
+            unreachable!("Image is built via ImagePickSourceKind flow, not build_typed_card")
+        }
+        CardTypeStub::Weather => {
+            unreachable!("Weather is built via WxEditShowForecast flow, not build_typed_card")
+        }
+        CardTypeStub::MediaPlayer => CardKind::MediaPlayer {
+            instance,
+            entity,
+            title,
+        },
     }
 }
 
@@ -1620,18 +3964,113 @@ fn build_card_kind(kind: CardTypeStub, buf: &str, default_alias: Option<&str>) -
             min: 0.0,
             max: 100.0,
             unit: None,
+            severity: None,
+            needle: true,
             title: None,
         },
-        CardTypeStub::Sparkline => CardKind::Sparkline {
+        CardTypeStub::Graph => CardKind::Graph {
+            instance,
+            entity: Some(entity),
+            entities: Vec::new(),
+            graph_type: crate::dashboard::GraphType::default(),
+            window: "1h".into(),
+            orientation: crate::dashboard::BarOrientation::default(),
+            title: None,
+        },
+        CardTypeStub::MediaPlayer => CardKind::MediaPlayer {
             instance,
             entity,
-            window: "1h".into(),
             title: None,
         },
-        CardTypeStub::Text | CardTypeStub::EntityList | CardTypeStub::FilteredEntityList => {
+        CardTypeStub::Text
+        | CardTypeStub::EntityList
+        | CardTypeStub::FilteredEntityList
+        | CardTypeStub::Clock
+        | CardTypeStub::Statistics
+        | CardTypeStub::Image
+        | CardTypeStub::Weather => {
             unreachable!()
         }
     })
+}
+
+/// Spawn one tokio task per Camera card that has `refresh_seconds` set.
+/// Each task sends `AppEvent::RefreshImageCard` on the given interval.
+pub fn spawn_camera_timers(dashboards: &[Dashboard], tx: &mpsc::UnboundedSender<AppEvent>) {
+    for dash in dashboards {
+        for card in &dash.cards {
+            if let crate::dashboard::CardKind::Image {
+                instance,
+                source: crate::dashboard::ImageSource::Camera { entity },
+                refresh_seconds: Some(secs),
+                ..
+            } = &card.kind
+            {
+                let instance = instance.clone();
+                let entity = entity.clone();
+                let secs = *secs;
+                let tx = tx.clone();
+                tokio::spawn(async move {
+                    let mut interval = tokio::time::interval(Duration::from_secs(secs as u64));
+                    interval.tick().await; // skip the immediate first tick
+                    loop {
+                        interval.tick().await;
+                        if tx
+                            .send(AppEvent::RefreshImageCard {
+                                instance: instance.clone(),
+                                entity: entity.clone(),
+                            })
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                });
+            }
+        }
+    }
+}
+
+/// Spawn a single tokio task that sends `RefreshWeatherForecast` every 30 minutes
+/// for every Weather card found across all dashboards.
+pub fn spawn_weather_timer(dashboards: &[Dashboard], tx: &mpsc::UnboundedSender<AppEvent>) {
+    // Collect unique (instance, entity) pairs from all Weather cards.
+    let mut pairs: Vec<(String, String)> = Vec::new();
+    for dash in dashboards {
+        for card in &dash.cards {
+            if let crate::dashboard::CardKind::Weather {
+                instance, entity, ..
+            } = &card.kind
+            {
+                let key = (instance.clone(), entity.clone());
+                if !pairs.contains(&key) {
+                    pairs.push(key);
+                }
+            }
+        }
+    }
+    if pairs.is_empty() {
+        return;
+    }
+    let tx = tx.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(30 * 60));
+        interval.tick().await; // skip the immediate first tick
+        loop {
+            interval.tick().await;
+            for (instance, entity) in &pairs {
+                if tx
+                    .send(AppEvent::RefreshWeatherForecast {
+                        instance: instance.clone(),
+                        entity: entity.clone(),
+                    })
+                    .is_err()
+                {
+                    return;
+                }
+            }
+        }
+    });
 }
 
 fn mouse_to_cell(area: Rect, dash: &Dashboard, mx: u16, my: u16) -> Option<(u16, u16)> {
@@ -1649,6 +4088,7 @@ fn mouse_to_cell(area: Rect, dash: &Dashboard, mx: u16, my: u16) -> Option<(u16,
 
 pub async fn run(
     mut terminal: Terminal<CrosstermBackend<std::io::Stdout>>,
+    picker: Option<ratatui_image::picker::Picker>,
     config_path: Option<PathBuf>,
     dashboards_path: Option<PathBuf>,
 ) -> Result<()> {
@@ -1656,6 +4096,7 @@ pub async fn run(
 
     let (tx, mut rx) = mpsc::unbounded_channel::<AppEvent>();
     let mut app = App::new(tx.clone());
+    app.image_picker = picker;
     app.dashboards_path = dashboards_path.clone();
 
     match config::load::load(config_path.as_deref()) {
@@ -1685,9 +4126,16 @@ pub async fn run(
     let mut term_events = EventStream::new();
     let mut tick = tokio::time::interval(Duration::from_millis(250));
 
+    // Picker was queried in main.rs before terminal entered alt-screen.
+
+    // Spawn interval refresh timers for Camera cards that have refresh_seconds set.
+    spawn_camera_timers(&app.dashboards, &tx);
+    // Spawn 30-minute refresh timer for Weather cards.
+    spawn_weather_timer(&app.dashboards, &tx);
+
     let initial = terminal.size().unwrap_or_default();
     app.last_terminal_size = (initial.width, initial.height);
-    terminal.draw(|f| ui::draw(f, &app))?;
+    terminal.draw(|f| ui::draw(f, &mut app))?;
 
     let result: Result<()> = async {
         loop {
@@ -1699,7 +4147,7 @@ pub async fn run(
             if app.should_quit {
                 break;
             }
-            terminal.draw(|f| ui::draw(f, &app))?;
+            terminal.draw(|f| ui::draw(f, &mut app))?;
         }
         Ok(())
     }

@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use color_eyre::eyre::Context;
 use color_eyre::Result;
 
-use crate::dashboard::DashboardFile;
+use crate::dashboard::{CardKind, DashboardFile};
 
 pub fn default_path() -> Option<PathBuf> {
     crate::util::paths::config_dir().map(|d| d.join("dashboards.yaml"))
@@ -20,8 +20,22 @@ pub fn load(explicit: Option<&Path>) -> Result<DashboardFile> {
         return Ok(DashboardFile { dashboards: vec![] });
     }
     let raw = std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
-    let file: DashboardFile =
+    let mut file: DashboardFile =
         serde_yaml::from_str(&raw).with_context(|| format!("parse {}", path.display()))?;
+    for (d_idx, d) in file.dashboards.iter_mut().enumerate() {
+        for (c_idx, c) in d.cards.iter_mut().enumerate() {
+            c.normalize();
+            if let CardKind::Graph { entities, .. } = &c.kind {
+                if entities.is_empty() {
+                    return Err(color_eyre::eyre::eyre!(
+                        "dashboard {} card {} graph has no entities",
+                        d_idx,
+                        c_idx
+                    ));
+                }
+            }
+        }
+    }
     Ok(file)
 }
 
@@ -38,7 +52,7 @@ pub fn save(file: &DashboardFile, path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dashboard::{Card, CardKind, Dashboard, Grid, Pos};
+    use crate::dashboard::{Card, CardKind, CardSize, Dashboard, Grid, Pos};
 
     #[test]
     fn round_trip_yaml() {
@@ -59,6 +73,8 @@ mod tests {
                         title: Some("Kitchen".into()),
                         ticker: false,
                     },
+                    color: None,
+                    size: CardSize::Normal,
                 }],
             }],
         };

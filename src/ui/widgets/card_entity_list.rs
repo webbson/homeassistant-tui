@@ -16,12 +16,13 @@ pub fn render(
     instance: &str,
     entities: &[String],
     runtime: Option<&InstanceRuntime>,
+    card_color: Option<&str>,
     theme: &Theme,
     selected: bool,
     sub_index: Option<usize>,
     hide_state: bool,
 ) {
-    let color = theme.instance_color(instance);
+    let color = crate::ui::theme::resolve_card_color(card_color, instance, theme);
     let mut block = Block::bordered()
         .title(format!(" {title} "))
         .border_style(Style::new().fg(color));
