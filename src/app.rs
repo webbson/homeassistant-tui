@@ -2515,6 +2515,8 @@ fn build_typed_card(
             min: 0.0,
             max: 100.0,
             unit: None,
+            severity: None,
+            needle: true,
             title,
         },
         CardTypeStub::Graph => CardKind::Graph {
@@ -2576,6 +2578,8 @@ fn build_card_kind(kind: CardTypeStub, buf: &str, default_alias: Option<&str>) -
             min: 0.0,
             max: 100.0,
             unit: None,
+            severity: None,
+            needle: true,
             title: None,
         },
         CardTypeStub::Graph => CardKind::Graph {

@@ -50,6 +50,17 @@ fn is_default_size(s: &CardSize) -> bool {
     *s == CardSize::Normal
 }
 
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct Severity {
+    pub green: f64,
+    pub yellow: f64,
+    pub red: f64,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Pos {
     pub col: u16,
@@ -106,9 +117,13 @@ pub enum CardKind {
         entity: EntityId,
         min: f64,
         max: f64,
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         unit: Option<String>,
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        severity: Option<Severity>,
+        #[serde(default = "default_true")]
+        needle: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         title: Option<String>,
     },
     #[serde(rename = "graph", alias = "sparkline")]
@@ -339,6 +354,54 @@ pos: { col: 0, row: 0, w: 6, h: 4 }
             assert_eq!(entities[1].label.as_deref(), Some("CPU 1"));
         } else {
             panic!("wrong variant");
+        }
+    }
+
+    #[test]
+    fn gauge_round_trip_with_severity() {
+        let yaml = r#"
+type: gauge
+instance: home
+entity: sensor.cpu
+min: 0
+max: 100
+unit: "%"
+severity: { green: 0, yellow: 60, red: 85 }
+needle: true
+pos: { col: 0, row: 0, w: 4, h: 4 }
+"#;
+        let card: Card = serde_yaml::from_str(yaml).unwrap();
+        if let CardKind::Gauge {
+            severity, needle, ..
+        } = &card.kind
+        {
+            assert!(severity.is_some());
+            assert!(*needle);
+        } else {
+            panic!("wrong variant")
+        }
+    }
+
+    #[test]
+    fn gauge_legacy_round_trip() {
+        let yaml = r#"
+type: gauge
+instance: home
+entity: sensor.cpu
+min: 0
+max: 100
+unit: "%"
+pos: { col: 0, row: 0, w: 4, h: 4 }
+"#;
+        let card: Card = serde_yaml::from_str(yaml).unwrap();
+        if let CardKind::Gauge {
+            severity, needle, ..
+        } = &card.kind
+        {
+            assert!(severity.is_none());
+            assert!(*needle, "needle defaults to true");
+        } else {
+            panic!("wrong variant")
         }
     }
 
