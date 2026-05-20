@@ -686,8 +686,10 @@ impl App {
                             if let Some(dash) = self.dashboards.get_mut(dash_idx) {
                                 if let Some(ed) = self.editor.as_mut() {
                                     ed.snapshot(dash);
-                                    dash.grid.cols = cols;
-                                    dash.grid.rows = rows;
+                                    if let crate::dashboard::DashboardLayout::Free { grid, .. } = &mut dash.layout {
+                                        grid.cols = cols;
+                                        grid.rows = rows;
+                                    }
                                     ed.dirty = true;
                                 }
                             }
@@ -2723,7 +2725,7 @@ impl App {
                 let (cols, rows) = self
                     .dashboards
                     .get(dash_idx)
-                    .map(|d| (d.grid.cols.to_string(), d.grid.rows.to_string()))
+                    .and_then(|d| d.free_grid().map(|g| (g.cols.to_string(), g.rows.to_string())))
                     .unwrap_or_else(|| ("12".into(), "24".into()));
                 if let Some(ed) = self.editor.as_mut() {
                     ed.mode = EditorMode::ResizingGrid {
@@ -3220,8 +3222,10 @@ impl App {
         let n = self.dashboards.len() + 1;
         let dash = crate::dashboard::Dashboard {
             name: format!("Dashboard {n}"),
-            grid: crate::dashboard::Grid { cols: 12, rows: 24 },
-            cards: Vec::new(),
+            layout: crate::dashboard::DashboardLayout::Free {
+                grid: crate::dashboard::Grid { cols: 12, rows: 24 },
+                cards: Vec::new(),
+            },
         };
         self.dashboards.push(dash);
         let idx = self.dashboards.len() - 1;
@@ -3612,7 +3616,7 @@ impl App {
     fn fetch_image_cards(&mut self, instance: &Alias) {
         let mut entities: Vec<String> = Vec::new();
         for dash in &self.dashboards {
-            for card in &dash.cards {
+            for card in dash.cards_iter() {
                 if let crate::dashboard::CardKind::Image {
                     instance: card_inst,
                     source,
@@ -3638,7 +3642,7 @@ impl App {
     fn fetch_weather_forecasts(&mut self, instance: &Alias) {
         let mut entities: Vec<String> = Vec::new();
         for dash in &self.dashboards {
-            for card in &dash.cards {
+            for card in dash.cards_iter() {
                 if let crate::dashboard::CardKind::Weather {
                     instance: card_inst,
                     entity,
@@ -3699,7 +3703,7 @@ impl App {
     /// Look up whether an entity is an image or camera source across all dashboards.
     fn image_fetch_kind_for(&self, instance: &Alias, entity: &EntityId) -> Option<ImageFetchKind> {
         for dash in &self.dashboards {
-            for card in &dash.cards {
+            for card in dash.cards_iter() {
                 if let crate::dashboard::CardKind::Image {
                     instance: card_inst,
                     source,
@@ -3735,7 +3739,7 @@ impl App {
         // For each graph/statistics card on every dashboard matching this instance, request backfill.
         let mut requests: Vec<(String, u32)> = Vec::new();
         for dash in &self.dashboards {
-            for card in &dash.cards {
+            for card in dash.cards_iter() {
                 match &card.kind {
                     crate::dashboard::CardKind::Graph {
                         instance: card_inst,
@@ -4035,7 +4039,7 @@ fn build_card_kind(kind: CardTypeStub, buf: &str, default_alias: Option<&str>) -
 /// Each task sends `AppEvent::RefreshImageCard` on the given interval.
 pub fn spawn_camera_timers(dashboards: &[Dashboard], tx: &mpsc::UnboundedSender<AppEvent>) {
     for dash in dashboards {
-        for card in &dash.cards {
+        for card in dash.cards_iter() {
             if let crate::dashboard::CardKind::Image {
                 instance,
                 source: crate::dashboard::ImageSource::Camera { entity },
@@ -4074,7 +4078,7 @@ pub fn spawn_weather_timer(dashboards: &[Dashboard], tx: &mpsc::UnboundedSender<
     // Collect unique (instance, entity) pairs from all Weather cards.
     let mut pairs: Vec<(String, String)> = Vec::new();
     for dash in dashboards {
-        for card in &dash.cards {
+        for card in dash.cards_iter() {
             if let crate::dashboard::CardKind::Weather {
                 instance, entity, ..
             } = &card.kind
@@ -4116,10 +4120,11 @@ fn mouse_to_cell(area: Rect, dash: &Dashboard, mx: u16, my: u16) -> Option<(u16,
     }
     let dx = mx - area.x;
     let dy = my - area.y;
-    let cell_w = (area.width as f32 / dash.grid.cols as f32).max(1.0);
-    let cell_h = (area.height as f32 / dash.grid.rows as f32).max(1.0);
-    let col = ((dx as f32 / cell_w) as u16).min(dash.grid.cols - 1);
-    let row = ((dy as f32 / cell_h) as u16).min(dash.grid.rows - 1);
+    let (cols, rows) = dash.free_grid().map(|g| (g.cols, g.rows)).unwrap_or((12, 24));
+    let cell_w = (area.width as f32 / cols as f32).max(1.0);
+    let cell_h = (area.height as f32 / rows as f32).max(1.0);
+    let col = ((dx as f32 / cell_w) as u16).min(cols - 1);
+    let row = ((dy as f32 / cell_h) as u16).min(rows - 1);
     Some((col, row))
 }
 

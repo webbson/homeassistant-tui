@@ -16,64 +16,255 @@ pub struct DashboardFile {
     pub dashboards: Vec<Dashboard>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Dashboard {
-    pub name: String,
-    pub grid: Grid,
-    pub cards: Vec<Card>,
+/// The layout strategy for a dashboard.
+#[derive(Debug, Clone)]
+pub enum DashboardLayout {
+    /// Free-canvas layout: cards have explicit (col, row, w, h) positions.
+    Free { grid: Grid, cards: Vec<Card> },
+    /// Stacked-column layout: rows of columns, cards fill column width.
+    Grid { rows: Vec<GridRow> },
 }
 
+/// A dashboard with a name and a layout (Free or Grid).
+/// Serializes as `{name, grid, cards}` for Free (backward-compat with existing YAML)
+/// and as `{name, type: grid, rows: [...]}` for Grid.
+#[derive(Debug, Clone)]
+pub struct Dashboard {
+    pub name: String,
+    pub layout: DashboardLayout,
+}
+
+// ── raw serde intermediate ──────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct DashboardRaw {
+    name: String,
+    #[serde(rename = "type", default)]
+    layout_type: Option<String>,
+    #[serde(default)]
+    grid: Option<Grid>,
+    #[serde(default)]
+    cards: Option<Vec<Card>>,
+    #[serde(default)]
+    rows: Option<Vec<GridRow>>,
+}
+
+impl<'de> Deserialize<'de> for Dashboard {
+    fn deserialize<D: Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
+        let raw = DashboardRaw::deserialize(de)?;
+        let layout = match (raw.layout_type.as_deref(), raw.grid, raw.cards, raw.rows) {
+            // Explicit `type: free` or inferred from having grid+cards and no rows
+            (None | Some("free"), Some(grid), cards_opt, None) => {
+                DashboardLayout::Free { grid, cards: cards_opt.unwrap_or_default() }
+            }
+            (Some("free"), _, _, Some(_)) => {
+                return Err(serde::de::Error::custom(
+                    "dashboard has `type: free` but also `rows` — remove one",
+                ));
+            }
+            // Explicit `type: grid`
+            (Some("grid"), grid_opt, cards_opt, rows_opt) => {
+                if grid_opt.is_some() || cards_opt.is_some() {
+                    return Err(serde::de::Error::custom(
+                        "dashboard has `type: grid` but also `grid`/`cards` fields — remove them",
+                    ));
+                }
+                DashboardLayout::Grid { rows: rows_opt.unwrap_or_default() }
+            }
+            // Inferred from rows presence
+            (None, None, None, Some(rows)) => DashboardLayout::Grid { rows },
+            // Conflicting free+grid signals
+            (None, Some(_), _, Some(_)) => {
+                return Err(serde::de::Error::custom(
+                    "ambiguous dashboard layout: has both `grid`/`cards` and `rows`; add `type: free` or `type: grid`",
+                ));
+            }
+            // Nothing useful
+            (None, None, None, None) => {
+                return Err(serde::de::Error::custom(
+                    "dashboard has neither `grid`/`cards` (free layout) nor `rows` (grid layout)",
+                ));
+            }
+            // None + has cards but no grid — partial free layout
+            (None, None, Some(_), None) => {
+                return Err(serde::de::Error::custom(
+                    "free dashboard has `cards` but no `grid`",
+                ));
+            }
+            (t, _, _, _) => {
+                return Err(serde::de::Error::custom(format!(
+                    "unrecognized dashboard type {:?}",
+                    t
+                )));
+            }
+        };
+        Ok(Dashboard { name: raw.name, layout })
+    }
+}
+
+impl Serialize for Dashboard {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        match &self.layout {
+            DashboardLayout::Free { grid, cards } => {
+                let mut m = s.serialize_map(Some(3))?;
+                m.serialize_entry("name", &self.name)?;
+                m.serialize_entry("grid", grid)?;
+                m.serialize_entry("cards", cards)?;
+                m.end()
+            }
+            DashboardLayout::Grid { rows } => {
+                let mut m = s.serialize_map(Some(3))?;
+                m.serialize_entry("name", &self.name)?;
+                m.serialize_entry("type", "grid")?;
+                m.serialize_entry("rows", rows)?;
+                m.end()
+            }
+        }
+    }
+}
+
+// ── Dashboard helpers ───────────────────────────────────────────────────────
+
 impl Dashboard {
-    /// Iterate all cards in the dashboard (flat order).
-    pub fn cards_iter(&self) -> impl Iterator<Item = &Card> {
-        self.cards.iter()
+    /// Return the free-canvas grid, or `None` for grid-layout dashboards.
+    pub fn free_grid(&self) -> Option<Grid> {
+        match &self.layout {
+            DashboardLayout::Free { grid, .. } => Some(*grid),
+            DashboardLayout::Grid { .. } => None,
+        }
     }
 
-    /// Iterate all cards mutably.
-    pub fn cards_iter_mut(&mut self) -> impl Iterator<Item = &mut Card> {
-        self.cards.iter_mut()
+    /// Return `true` if this is a free-canvas dashboard.
+    pub fn is_free(&self) -> bool {
+        matches!(self.layout, DashboardLayout::Free { .. })
+    }
+
+    /// Iterate all cards in flat order (free: by index; grid: row-major).
+    pub fn cards_iter(&self) -> Box<dyn Iterator<Item = &Card> + '_> {
+        match &self.layout {
+            DashboardLayout::Free { cards, .. } => Box::new(cards.iter()),
+            DashboardLayout::Grid { rows } => Box::new(
+                rows.iter()
+                    .flat_map(|r| r.columns.iter())
+                    .flat_map(|c| c.cards.iter()),
+            ),
+        }
+    }
+
+    /// Iterate all cards mutably in flat order.
+    pub fn cards_iter_mut(&mut self) -> Box<dyn Iterator<Item = &mut Card> + '_> {
+        match &mut self.layout {
+            DashboardLayout::Free { cards, .. } => Box::new(cards.iter_mut()),
+            DashboardLayout::Grid { rows } => Box::new(
+                rows.iter_mut()
+                    .flat_map(|r| r.columns.iter_mut())
+                    .flat_map(|c| c.cards.iter_mut()),
+            ),
+        }
     }
 
     /// Get card by flat index.
     pub fn card(&self, idx: usize) -> Option<&Card> {
-        self.cards.get(idx)
+        self.cards_iter().nth(idx)
     }
 
     /// Get card mutably by flat index.
     pub fn card_mut(&mut self, idx: usize) -> Option<&mut Card> {
-        self.cards.get_mut(idx)
+        self.cards_iter_mut().nth(idx)
     }
 
     /// Total card count.
     pub fn card_count(&self) -> usize {
-        self.cards.len()
+        self.cards_iter().count()
     }
 
     /// Get card by stable ID.
     pub fn card_by_id(&self, id: CardId) -> Option<&Card> {
-        self.cards.iter().find(|c| c.id == id)
+        self.cards_iter().find(|c| c.id == id)
     }
 
     /// Get card mutably by stable ID.
     pub fn card_by_id_mut(&mut self, id: CardId) -> Option<&mut Card> {
-        self.cards.iter_mut().find(|c| c.id == id)
+        self.cards_iter_mut().find(|c| c.id == id)
     }
 
     /// Resolve a `CardId` to its flat index.
     pub fn flat_idx_of(&self, id: CardId) -> Option<usize> {
-        self.cards.iter().position(|c| c.id == id)
+        self.cards_iter().position(|c| c.id == id)
     }
 
     /// Remove a card by stable ID; returns the removed card.
     pub fn remove_card_by_id(&mut self, id: CardId) -> Option<Card> {
-        let idx = self.flat_idx_of(id)?;
-        Some(self.cards.remove(idx))
+        match &mut self.layout {
+            DashboardLayout::Free { cards, .. } => {
+                let idx = cards.iter().position(|c| c.id == id)?;
+                Some(cards.remove(idx))
+            }
+            DashboardLayout::Grid { rows } => {
+                for row in rows {
+                    for col in &mut row.columns {
+                        if let Some(idx) = col.cards.iter().position(|c| c.id == id) {
+                            return Some(col.cards.remove(idx));
+                        }
+                    }
+                }
+                None
+            }
+        }
+    }
+
+    /// Append a card to a free-canvas dashboard. Panics if called on a grid dashboard.
+    pub fn push_card_free(&mut self, card: Card) {
+        let DashboardLayout::Free { cards, .. } = &mut self.layout else {
+            panic!("push_card_free called on grid-layout dashboard");
+        };
+        cards.push(card);
+    }
+
+    /// Append a card to a specific column of a grid-layout dashboard.
+    pub fn insert_card_grid(&mut self, row_idx: usize, col_idx: usize, card: Card) {
+        let DashboardLayout::Grid { rows } = &mut self.layout else {
+            panic!("insert_card_grid called on free-layout dashboard");
+        };
+        if let Some(row) = rows.get_mut(row_idx) {
+            if let Some(col) = row.columns.get_mut(col_idx) {
+                col.cards.push(card);
+            }
+        }
+    }
+
+    /// Locate a card's (row, col, pos_in_col) in a grid-layout dashboard.
+    pub fn locate_grid(&self, id: CardId) -> Option<(usize, usize, usize)> {
+        let DashboardLayout::Grid { rows } = &self.layout else {
+            return None;
+        };
+        for (ri, row) in rows.iter().enumerate() {
+            for (ci, col) in row.columns.iter().enumerate() {
+                if let Some(pi) = col.cards.iter().position(|c| c.id == id) {
+                    return Some((ri, ci, pi));
+                }
+            }
+        }
+        None
     }
 
     /// Compute the next unique `CardId` for this dashboard (max existing + 1).
     pub fn next_card_id(&self) -> CardId {
-        let max = self.cards.iter().map(|c| c.id.0).max().unwrap_or(0);
+        let max = self.cards_iter().map(|c| c.id.0).max().unwrap_or(0);
         CardId(max + 1)
+    }
+
+    /// Remove a free-canvas card by flat index. Returns the removed card.
+    pub fn remove_card_at_free(&mut self, idx: usize) -> Option<Card> {
+        let DashboardLayout::Free { cards, .. } = &mut self.layout else {
+            return None;
+        };
+        if idx < cards.len() {
+            Some(cards.remove(idx))
+        } else {
+            None
+        }
     }
 }
 

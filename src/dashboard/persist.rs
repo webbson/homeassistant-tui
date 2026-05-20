@@ -69,37 +69,39 @@ pub fn save(file: &DashboardFile, path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dashboard::{Card, CardId, CardKind, CardSize, Dashboard, Grid, Pos};
+    use crate::dashboard::{Card, CardId, CardKind, CardSize, Dashboard, DashboardLayout, Grid, Pos};
 
     #[test]
     fn round_trip_yaml() {
         let f = DashboardFile {
             dashboards: vec![Dashboard {
                 name: "Home".into(),
-                grid: Grid { cols: 12, rows: 8 },
-                cards: vec![Card {
-                    id: CardId::ZERO,
-                    pos: Pos {
-                        col: 0,
-                        row: 0,
-                        w: 3,
-                        h: 2,
-                    },
-                    kind: CardKind::Entity {
-                        instance: "home".into(),
-                        entity: "light.kitchen".into(),
-                        title: Some("Kitchen".into()),
-                        ticker: false,
-                    },
-                    color: None,
-                    size: CardSize::Normal,
-                }],
+                layout: DashboardLayout::Free {
+                    grid: Grid { cols: 12, rows: 8 },
+                    cards: vec![Card {
+                        id: CardId::ZERO,
+                        pos: Pos {
+                            col: 0,
+                            row: 0,
+                            w: 3,
+                            h: 2,
+                        },
+                        kind: CardKind::Entity {
+                            instance: "home".into(),
+                            entity: "light.kitchen".into(),
+                            title: Some("Kitchen".into()),
+                            ticker: false,
+                        },
+                        color: None,
+                        size: CardSize::Normal,
+                    }],
+                },
             }],
         };
         let yaml = serde_yaml::to_string(&f).unwrap();
         let back: DashboardFile = serde_yaml::from_str(&yaml).unwrap();
         assert_eq!(back.dashboards.len(), 1);
-        assert_eq!(back.dashboards[0].cards.len(), 1);
+        assert_eq!(back.dashboards[0].card_count(), 1);
     }
 
     #[test]
@@ -122,6 +124,66 @@ dashboards:
         pos: { col: 3, row: 0, w: 3, h: 3 }
 "#;
         let f: DashboardFile = serde_yaml::from_str(yaml).unwrap();
-        assert_eq!(f.dashboards[0].cards.len(), 2);
+        assert_eq!(f.dashboards[0].card_count(), 2);
+    }
+
+    #[test]
+    fn free_dashboard_serialize_omits_type_key() {
+        // Free dashboards must serialize without a `type:` key so existing
+        // user YAML files round-trip cleanly with no migration required.
+        let f = DashboardFile {
+            dashboards: vec![Dashboard {
+                name: "Test".into(),
+                layout: DashboardLayout::Free {
+                    grid: Grid { cols: 12, rows: 8 },
+                    cards: vec![],
+                },
+            }],
+        };
+        let yaml = serde_yaml::to_string(&f).unwrap();
+        assert!(!yaml.contains("type:"), "free dashboard must not emit type: key");
+        assert!(yaml.contains("grid:"), "free dashboard must emit grid:");
+        assert!(yaml.contains("cards:"), "free dashboard must emit cards:");
+        // Re-parse and verify structure preserved
+        let back: DashboardFile = serde_yaml::from_str(&yaml).unwrap();
+        assert_eq!(back.dashboards[0].name, "Test");
+        assert!(back.dashboards[0].is_free());
+    }
+
+    #[test]
+    fn grid_dashboard_roundtrip() {
+        use crate::dashboard::{GridColumn, GridRow, RowHeight};
+        let yaml = r#"
+dashboards:
+  - name: "Stacked"
+    type: grid
+    rows:
+      - height: 4
+        columns:
+          - cards: []
+          - cards: []
+      - height: auto
+        fill_height: true
+        columns:
+          - cards: []
+"#;
+        let f: DashboardFile = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(f.dashboards[0].name, "Stacked");
+        assert!(!f.dashboards[0].is_free());
+        let DashboardLayout::Grid { rows } = &f.dashboards[0].layout else {
+            panic!("expected grid layout");
+        };
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].height, RowHeight::Fixed(4));
+        assert_eq!(rows[1].height, RowHeight::Auto);
+        assert_eq!(rows[1].fill_height, Some(true));
+        // Serialize and re-parse
+        let back_yaml = serde_yaml::to_string(&f).unwrap();
+        assert!(back_yaml.contains("type: grid"));
+        let back: DashboardFile = serde_yaml::from_str(&back_yaml).unwrap();
+        let DashboardLayout::Grid { rows: back_rows } = &back.dashboards[0].layout else {
+            panic!("expected grid layout after roundtrip");
+        };
+        assert_eq!(back_rows.len(), 2);
     }
 }

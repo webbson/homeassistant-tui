@@ -29,7 +29,7 @@ pub fn draw(f: &mut Frame, area: Rect, app: &mut App) {
             editor.cursor_col,
             editor.cursor_row,
             editor.selected_card,
-            dash.grid,
+            dash.free_grid().unwrap_or(crate::dashboard::Grid { cols: 12, rows: 8 }),
             card_pos,
         )
     };
@@ -1521,8 +1521,7 @@ fn draw_graph_pick_series(
     selected: usize,
 ) {
     let entities: Vec<String> = dash
-        .cards
-        .get(card_idx)
+        .card(card_idx)
         .and_then(|c| {
             if let crate::dashboard::CardKind::Graph { entities, .. } = &c.kind {
                 Some(

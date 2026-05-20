@@ -6,7 +6,7 @@ use ratatui::Frame;
 
 use crate::app::App;
 use crate::dashboard::layout::cell_to_rect;
-use crate::dashboard::{CardKind, GraphType};
+use crate::dashboard::{CardKind, GraphType, Grid};
 use crate::ui::widgets;
 use crate::ui::widgets::card_graph::GraphRender;
 use crate::util::history::RingBuf;
@@ -30,7 +30,7 @@ pub fn draw(
         return;
     };
     for (i, card) in dash.cards_iter().enumerate() {
-        let rect = cell_to_rect(area, dash.grid, card.pos);
+        let rect = cell_to_rect(area, dash.free_grid().unwrap_or(Grid { cols: 12, rows: 8 }), card.pos);
         if rect.width < 3 || rect.height < 3 {
             continue;
         }

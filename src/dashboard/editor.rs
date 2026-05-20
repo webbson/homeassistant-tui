@@ -1,6 +1,6 @@
 use crate::dashboard::{
-    BarOrientation, Card, CardId, CardKind, CardSize, Dashboard, GraphSeries, GraphType, Pos,
-    StatsMetric,
+    BarOrientation, Card, CardId, CardKind, CardSize, Dashboard, DashboardLayout, GraphSeries,
+    GraphType, Grid, Pos, StatsMetric,
 };
 
 const MAX_UNDO: usize = 32;
@@ -638,8 +638,10 @@ impl EditorState {
     }
 
     pub fn move_cursor(&mut self, dx: i32, dy: i32, dash: &Dashboard) {
-        self.cursor_col = clamp_add(self.cursor_col, dx, dash.grid.cols.saturating_sub(1));
-        self.cursor_row = clamp_add(self.cursor_row, dy, dash.grid.rows.saturating_sub(1));
+        if let Some(grid) = dash.free_grid() {
+            self.cursor_col = clamp_add(self.cursor_col, dx, grid.cols.saturating_sub(1));
+            self.cursor_row = clamp_add(self.cursor_row, dy, grid.rows.saturating_sub(1));
+        }
     }
 
     pub fn select_at_cursor(&mut self, dash: &Dashboard) {
@@ -648,7 +650,7 @@ impl EditorState {
 
     pub fn resize_selected(&mut self, dw: i32, dh: i32, dash: &mut Dashboard) {
         let Some(i) = self.selected_card else { return };
-        let (grid_cols, grid_rows) = (dash.grid.cols, dash.grid.rows);
+        let (grid_cols, grid_rows) = dash.free_grid().map(|g| (g.cols, g.rows)).unwrap_or((12, 8));
         let Some(card) = dash.card_mut(i) else {
             return;
         };
@@ -664,7 +666,7 @@ impl EditorState {
         let Some(i) = self.selected_card else { return };
         let target_col = self.cursor_col;
         let target_row = self.cursor_row;
-        let (grid_cols, grid_rows) = (dash.grid.cols, dash.grid.rows);
+        let (grid_cols, grid_rows) = dash.free_grid().map(|g| (g.cols, g.rows)).unwrap_or((12, 8));
         let Some(card) = dash.card_mut(i) else {
             return;
         };
@@ -682,7 +684,7 @@ impl EditorState {
             return;
         };
         if i < dash.card_count() {
-            dash.cards.remove(i);
+            dash.remove_card_at_free(i);
             self.dirty = true;
         }
     }
@@ -696,19 +698,20 @@ impl EditorState {
                 return;
             }
         }
+        let (gcols, grows) = dash.free_grid().map(|g| (g.cols, g.rows)).unwrap_or((12, 8));
         let card = Card {
             id: dash.next_card_id(),
             pos: Pos {
                 col: self.cursor_col,
                 row: self.cursor_row,
-                w: 3.min(dash.grid.cols.saturating_sub(self.cursor_col).max(1)),
-                h: 2.min(dash.grid.rows.saturating_sub(self.cursor_row).max(1)),
+                w: 3.min(gcols.saturating_sub(self.cursor_col).max(1)),
+                h: 2.min(grows.saturating_sub(self.cursor_row).max(1)),
             },
             kind,
             color: None,
             size: CardSize::Normal,
         };
-        dash.cards.push(card);
+        dash.push_card_free(card);
         self.selected_card = Some(dash.card_count() - 1);
         self.dirty = true;
     }
@@ -753,8 +756,12 @@ fn clamp_dim(v: u16, delta: i32, headroom: u16) -> u16 {
 }
 
 pub fn card_at(dash: &Dashboard, col: u16, row: u16) -> Option<usize> {
+    if dash.free_grid().is_none() {
+        return None;
+    }
     // Iterate in reverse so newest (drawn last) wins.
-    for (i, c) in dash.cards.iter().enumerate().rev() {
+    let cards: Vec<_> = dash.cards_iter().enumerate().collect();
+    for (i, c) in cards.into_iter().rev() {
         if col >= c.pos.col
             && col < c.pos.col + c.pos.w
             && row >= c.pos.row
@@ -769,44 +776,46 @@ pub fn card_at(dash: &Dashboard, col: u16, row: u16) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dashboard::{Grid, Pos};
+    use crate::dashboard::Pos;
 
     fn make_dash() -> Dashboard {
         Dashboard {
             name: "t".into(),
-            grid: Grid { cols: 12, rows: 8 },
-            cards: vec![
-                Card {
-                    id: CardId(1),
-                    pos: Pos {
-                        col: 0,
-                        row: 0,
-                        w: 3,
-                        h: 2,
+            layout: DashboardLayout::Free {
+                grid: Grid { cols: 12, rows: 8 },
+                cards: vec![
+                    Card {
+                        id: CardId(1),
+                        pos: Pos {
+                            col: 0,
+                            row: 0,
+                            w: 3,
+                            h: 2,
+                        },
+                        kind: CardKind::Text {
+                            markdown: "a".into(),
+                            title: None,
+                        },
+                        color: None,
+                        size: CardSize::Normal,
                     },
-                    kind: CardKind::Text {
-                        markdown: "a".into(),
-                        title: None,
+                    Card {
+                        id: CardId(2),
+                        pos: Pos {
+                            col: 4,
+                            row: 0,
+                            w: 2,
+                            h: 2,
+                        },
+                        kind: CardKind::Text {
+                            markdown: "b".into(),
+                            title: None,
+                        },
+                        color: None,
+                        size: CardSize::Normal,
                     },
-                    color: None,
-                    size: CardSize::Normal,
-                },
-                Card {
-                    id: CardId(2),
-                    pos: Pos {
-                        col: 4,
-                        row: 0,
-                        w: 2,
-                        h: 2,
-                    },
-                    kind: CardKind::Text {
-                        markdown: "b".into(),
-                        title: None,
-                    },
-                    color: None,
-                    size: CardSize::Normal,
-                },
-            ],
+                ],
+            },
         }
     }
 
@@ -835,7 +844,7 @@ mod tests {
         let mut e = EditorState::new(0, None);
         e.selected_card = Some(1);
         e.delete_selected(&mut d);
-        assert_eq!(d.cards.len(), 1);
+        assert_eq!(d.card_count(), 1);
     }
 
     #[test]
@@ -843,9 +852,9 @@ mod tests {
         let mut d = make_dash();
         let mut e = EditorState::new(0, None);
         e.snapshot(&d);
-        d.cards.pop();
-        assert_eq!(d.cards.len(), 1);
+        d.remove_card_at_free(d.card_count() - 1);
+        assert_eq!(d.card_count(), 1);
         e.undo(&mut d);
-        assert_eq!(d.cards.len(), 2);
+        assert_eq!(d.card_count(), 2);
     }
 }
