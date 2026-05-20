@@ -391,7 +391,13 @@ pub struct Card {
     pub id: CardId,
     #[serde(flatten)]
     pub kind: CardKind,
-    pub pos: Pos,
+    /// Present on free-layout cards; absent on grid-layout cards.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pos: Option<Pos>,
+    /// Optional explicit height (terminal rows) for grid-layout cards.
+    /// Overrides the per-kind natural height heuristic.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height: Option<u16>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
     #[serde(default, skip_serializing_if = "is_default_size")]

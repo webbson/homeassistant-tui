@@ -23,7 +23,7 @@ pub fn draw(f: &mut Frame, area: Rect, app: &mut App) {
         let card_pos = editor
             .selected_card
             .and_then(|i| dash.card(i))
-            .map(|c| c.pos);
+            .and_then(|c| c.pos);
         (
             editor.dash_idx,
             editor.cursor_col,

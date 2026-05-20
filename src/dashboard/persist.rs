@@ -80,12 +80,13 @@ mod tests {
                     grid: Grid { cols: 12, rows: 8 },
                     cards: vec![Card {
                         id: CardId::ZERO,
-                        pos: Pos {
+                        pos: Some(Pos {
                             col: 0,
                             row: 0,
                             w: 3,
                             h: 2,
-                        },
+                        }),
+                        height: None,
                         kind: CardKind::Entity {
                             instance: "home".into(),
                             entity: "light.kitchen".into(),

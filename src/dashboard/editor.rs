@@ -655,10 +655,11 @@ impl EditorState {
             return;
         };
         self.snapshot_inner(card);
-        let new_w = clamp_dim(card.pos.w, dw, grid_cols - card.pos.col);
-        let new_h = clamp_dim(card.pos.h, dh, grid_rows - card.pos.row);
-        card.pos.w = new_w.max(1);
-        card.pos.h = new_h.max(1);
+        let Some(pos) = card.pos.as_mut() else { return; };
+        let new_w = clamp_dim(pos.w, dw, grid_cols - pos.col);
+        let new_h = clamp_dim(pos.h, dh, grid_rows - pos.row);
+        pos.w = new_w.max(1);
+        pos.h = new_h.max(1);
         self.dirty = true;
     }
 
@@ -670,11 +671,12 @@ impl EditorState {
         let Some(card) = dash.card_mut(i) else {
             return;
         };
-        let new_col = target_col.min(grid_cols.saturating_sub(card.pos.w));
-        let new_row = target_row.min(grid_rows.saturating_sub(card.pos.h));
-        if card.pos.col != new_col || card.pos.row != new_row {
-            card.pos.col = new_col;
-            card.pos.row = new_row;
+        let Some(pos) = card.pos.as_mut() else { return; };
+        let new_col = target_col.min(grid_cols.saturating_sub(pos.w));
+        let new_row = target_row.min(grid_rows.saturating_sub(pos.h));
+        if pos.col != new_col || pos.row != new_row {
+            pos.col = new_col;
+            pos.row = new_row;
             self.dirty = true;
         }
     }
@@ -701,12 +703,13 @@ impl EditorState {
         let (gcols, grows) = dash.free_grid().map(|g| (g.cols, g.rows)).unwrap_or((12, 8));
         let card = Card {
             id: dash.next_card_id(),
-            pos: Pos {
+            pos: Some(Pos {
                 col: self.cursor_col,
                 row: self.cursor_row,
                 w: 3.min(gcols.saturating_sub(self.cursor_col).max(1)),
                 h: 2.min(grows.saturating_sub(self.cursor_row).max(1)),
-            },
+            }),
+            height: None,
             kind,
             color: None,
             size: CardSize::Normal,
@@ -762,12 +765,14 @@ pub fn card_at(dash: &Dashboard, col: u16, row: u16) -> Option<usize> {
     // Iterate in reverse so newest (drawn last) wins.
     let cards: Vec<_> = dash.cards_iter().enumerate().collect();
     for (i, c) in cards.into_iter().rev() {
-        if col >= c.pos.col
-            && col < c.pos.col + c.pos.w
-            && row >= c.pos.row
-            && row < c.pos.row + c.pos.h
-        {
-            return Some(i);
+        if let Some(pos) = c.pos {
+            if col >= pos.col
+                && col < pos.col + pos.w
+                && row >= pos.row
+                && row < pos.row + pos.h
+            {
+                return Some(i);
+            }
         }
     }
     None
@@ -786,12 +791,13 @@ mod tests {
                 cards: vec![
                     Card {
                         id: CardId(1),
-                        pos: Pos {
+                        pos: Some(Pos {
                             col: 0,
                             row: 0,
                             w: 3,
                             h: 2,
-                        },
+                        }),
+                        height: None,
                         kind: CardKind::Text {
                             markdown: "a".into(),
                             title: None,
@@ -801,12 +807,13 @@ mod tests {
                     },
                     Card {
                         id: CardId(2),
-                        pos: Pos {
+                        pos: Some(Pos {
                             col: 4,
                             row: 0,
                             w: 2,
                             h: 2,
-                        },
+                        }),
+                        height: None,
                         kind: CardKind::Text {
                             markdown: "b".into(),
                             title: None,

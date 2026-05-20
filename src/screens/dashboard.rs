@@ -30,7 +30,8 @@ pub fn draw(
         return;
     };
     for (i, card) in dash.cards_iter().enumerate() {
-        let rect = cell_to_rect(area, dash.free_grid().unwrap_or(Grid { cols: 12, rows: 8 }), card.pos);
+        let Some(pos) = card.pos else { continue; };
+        let rect = cell_to_rect(area, dash.free_grid().unwrap_or(Grid { cols: 12, rows: 8 }), pos);
         if rect.width < 3 || rect.height < 3 {
             continue;
         }

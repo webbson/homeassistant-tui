@@ -53,12 +53,13 @@ fn welcome_dashboard_file() -> DashboardFile {
                         markdown: WELCOME_MARKDOWN.into(),
                         title: Some("Setup".into()),
                     },
-                    pos: Pos {
+                    pos: Some(Pos {
                         col: 1,
                         row: 1,
                         w: 10,
                         h: 5,
-                    },
+                    }),
+                    height: None,
                     color: None,
                     size: CardSize::Normal,
                 }],
