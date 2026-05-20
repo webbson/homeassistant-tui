@@ -227,6 +227,7 @@ fn parse_history(result: &Value, entity_id: &str) -> Vec<(chrono::DateTime<Utc>,
         .collect()
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_cmd(
     cmd: HaCommand,
     id_counter: &mut u64,

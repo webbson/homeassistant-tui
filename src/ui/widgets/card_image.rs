@@ -7,6 +7,7 @@ use ratatui_image::StatefulImage;
 
 use crate::ui::theme::{resolve_card_color, Theme};
 
+#[allow(clippy::too_many_arguments)]
 pub fn render(
     f: &mut Frame,
     area: Rect,

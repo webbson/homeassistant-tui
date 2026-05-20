@@ -252,13 +252,11 @@ impl Card {
             CardKind::MediaPlayer { title, entity, .. } => {
                 title.as_deref().unwrap_or(entity.as_str())
             }
-            CardKind::Image { title, source, .. } => {
-                title.as_deref().unwrap_or_else(|| match source {
-                    ImageSource::ImageEntity { entity } | ImageSource::Camera { entity } => {
-                        entity.as_str()
-                    }
-                })
-            }
+            CardKind::Image { title, source, .. } => title.as_deref().unwrap_or(match source {
+                ImageSource::ImageEntity { entity } | ImageSource::Camera { entity } => {
+                    entity.as_str()
+                }
+            }),
         }
     }
 
