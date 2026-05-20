@@ -119,6 +119,45 @@ fn default_window() -> String {
     "1h".into()
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn card_serde_round_trip_with_size_and_color() {
+        let yaml = r##"
+type: entity
+instance: home
+entity: light.kitchen
+pos: { col: 0, row: 0, w: 4, h: 2 }
+color: "#ff8800"
+size: large
+"##;
+        let card: Card = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(card.color.as_deref(), Some("#ff8800"));
+        assert_eq!(card.size, CardSize::Large);
+        let back = serde_yaml::to_string(&card).unwrap();
+        assert!(back.contains("size: large"));
+        assert!(back.contains("color: \"#ff8800\"") || back.contains("color: '#ff8800'"));
+    }
+
+    #[test]
+    fn card_serde_omits_defaults() {
+        let yaml = r#"
+type: entity
+instance: home
+entity: light.kitchen
+pos: { col: 0, row: 0, w: 4, h: 2 }
+"#;
+        let card: Card = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(card.color, None);
+        assert_eq!(card.size, CardSize::Normal);
+        let back = serde_yaml::to_string(&card).unwrap();
+        assert!(!back.contains("size:"));
+        assert!(!back.contains("color:"));
+    }
+}
+
 impl Card {
     pub fn title(&self) -> &str {
         match &self.kind {

@@ -87,6 +87,7 @@ fn render_card(
                 selected,
                 *ticker,
                 app.ticker_offset,
+                card.size,
             );
         }
         CardKind::Toggle {
@@ -106,6 +107,7 @@ fn render_card(
                 card.color.as_deref(),
                 &app.theme,
                 selected,
+                card.size,
             );
         }
         CardKind::Gauge {

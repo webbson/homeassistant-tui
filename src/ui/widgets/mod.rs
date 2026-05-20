@@ -1,3 +1,4 @@
+pub mod big_text;
 pub mod card_entity;
 pub mod card_entity_list;
 pub mod card_gauge;

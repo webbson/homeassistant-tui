@@ -5,6 +5,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph};
 use ratatui::Frame;
 
+use crate::dashboard::CardSize;
 use crate::ha::EntityState;
 use crate::ui::theme::Theme;
 
@@ -18,6 +19,7 @@ pub fn render(
     card_color: Option<&str>,
     theme: &Theme,
     selected: bool,
+    size: CardSize,
 ) {
     let color = crate::ui::theme::resolve_card_color(card_color, instance, theme);
     let mut block = Block::bordered()
@@ -32,6 +34,21 @@ pub fn render(
         Some(other) => (other, Color::Yellow),
         None => ("—", Color::DarkGray),
     };
+
+    // Inner area (inside the 1-char border on each side).
+    let inner = Rect {
+        x: area.x + 1,
+        y: area.y + 1,
+        width: area.width.saturating_sub(2),
+        height: area.height.saturating_sub(2),
+    };
+
+    if size == CardSize::Large && state.is_some() && super::big_text::fits(inner) {
+        f.render_widget(block, area);
+        super::big_text::render_big(f, inner, &format!("[{label}]"), label_color);
+        return;
+    }
+
     let line = Line::from(vec![
         Span::styled(format!("[{label}]"), Style::new().fg(label_color).bold()),
         Span::raw("  "),
