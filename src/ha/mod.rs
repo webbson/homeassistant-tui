@@ -9,6 +9,8 @@ use indexmap::IndexMap;
 use serde_json::Value;
 use std::time::Instant;
 
+use chrono::{DateTime, Utc};
+
 use crate::config::Alias;
 
 pub type EntityId = String;
@@ -61,6 +63,25 @@ pub enum ImageFetchKind {
     Camera,
 }
 
+#[derive(Debug, Clone, Copy)]
+#[allow(dead_code)] // Hourly included for completeness; only Daily is wired up in UI
+pub enum ForecastKind {
+    Daily,
+    Hourly,
+}
+
+#[derive(Debug, Clone)]
+pub struct ForecastDay {
+    pub datetime: DateTime<Utc>,
+    pub condition: String,
+    pub temperature: f64,
+    pub templow: Option<f64>,
+    #[allow(dead_code)]
+    pub humidity: Option<f64>,
+    #[allow(dead_code)]
+    pub wind_speed: Option<f64>,
+}
+
 #[derive(Debug, Clone)]
 pub enum HaCommand {
     CallService {
@@ -75,5 +96,10 @@ pub enum HaCommand {
     FetchImageBytes {
         entity: EntityId,
         kind: ImageFetchKind,
+    },
+    /// Request a weather forecast via `weather.get_forecasts` service call.
+    GetWeatherForecast {
+        entity: EntityId,
+        kind: ForecastKind,
     },
 }

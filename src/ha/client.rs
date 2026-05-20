@@ -12,8 +12,12 @@ use tracing::{debug, info, warn};
 
 use crate::config::{Alias, InstanceConfig};
 use crate::event::AppEvent;
-use crate::ha::protocol::{ClientMsg, RawState, ServerMsg, StateChangedData};
-use crate::ha::{ConnStatus, EntityId, EntityState, HaCommand, ImageFetchKind};
+use crate::ha::protocol::{
+    weather_get_forecasts_payload, ClientMsg, RawState, ServerMsg, StateChangedData,
+};
+use crate::ha::{
+    ConnStatus, EntityId, EntityState, ForecastDay, ForecastKind, HaCommand, ImageFetchKind,
+};
 
 pub fn spawn(
     inst: InstanceConfig,
@@ -113,12 +117,14 @@ async fn connect_once(
 
     // Track id -> entity_id for pending history requests
     let mut pending_history: HashMap<u64, EntityId> = HashMap::new();
+    // Track id -> (entity_id, kind) for pending weather forecast requests
+    let mut pending_weather: HashMap<u64, (EntityId, ForecastKind)> = HashMap::new();
 
     loop {
         tokio::select! {
             msg = read_msg(&mut stream) => {
                 let msg = msg?;
-                handle_server_msg(msg, get_id, &inst.alias, tx_app, &mut pending_history);
+                handle_server_msg(msg, get_id, &inst.alias, tx_app, &mut pending_history, &mut pending_weather);
             }
             cmd = rx_cmd.recv() => {
                 let Some(cmd) = cmd else { return Ok(()); };
@@ -127,6 +133,7 @@ async fn connect_once(
                     &mut id_counter,
                     &mut sink,
                     &mut pending_history,
+                    &mut pending_weather,
                     &ws_url,
                     &token,
                     &inst.alias,
@@ -144,6 +151,7 @@ fn handle_server_msg(
     alias: &Alias,
     tx_app: &mpsc::UnboundedSender<AppEvent>,
     pending_history: &mut HashMap<u64, EntityId>,
+    pending_weather: &mut HashMap<u64, (EntityId, ForecastKind)>,
 ) {
     match msg {
         ServerMsg::Result {
@@ -179,6 +187,20 @@ fn handle_server_msg(
                 samples,
             });
         }
+        ServerMsg::Result {
+            id,
+            success: true,
+            result,
+            ..
+        } if pending_weather.contains_key(&id) => {
+            let (entity_id, _kind) = pending_weather.remove(&id).unwrap();
+            let forecast = parse_weather_forecast(&result, &entity_id);
+            let _ = tx_app.send(AppEvent::HaWeatherForecast {
+                instance: alias.clone(),
+                entity: entity_id,
+                forecast,
+            });
+        }
         ServerMsg::Event { event, .. } if event.event_type == "state_changed" => {
             if let Ok(data) = serde_json::from_value::<StateChangedData>(event.data) {
                 if let Some(new) = data.new_state {
@@ -196,6 +218,7 @@ fn handle_server_msg(
             ..
         } => {
             pending_history.remove(&id);
+            pending_weather.remove(&id);
             warn!(alias = %alias, id, ?error, "ha service/result error");
             let _ = tx_app.send(AppEvent::HaServiceError {
                 instance: alias.clone(),
@@ -204,6 +227,49 @@ fn handle_server_msg(
         }
         _ => debug!(alias = %alias, "ignored msg"),
     }
+}
+
+/// Parse HA `weather.get_forecasts` service_response for one entity.
+/// Result shape: { "response": { "<entity_id>": { "forecast": [...] } } }
+/// Treats missing/null/malformed response as empty — never panics.
+fn parse_weather_forecast(result: &Value, entity_id: &str) -> Vec<ForecastDay> {
+    #[derive(serde::Deserialize)]
+    struct RawForecastItem {
+        datetime: String,
+        condition: String,
+        temperature: f64,
+        templow: Option<f64>,
+        humidity: Option<f64>,
+        wind_speed: Option<f64>,
+    }
+
+    let arr = result
+        .get("response")
+        .and_then(|r| r.get(entity_id))
+        .and_then(|e| e.get("forecast"))
+        .and_then(|f| f.as_array());
+
+    let arr = match arr {
+        Some(a) => a,
+        None => return Vec::new(),
+    };
+
+    arr.iter()
+        .filter_map(|v| {
+            let item: RawForecastItem = serde_json::from_value(v.clone()).ok()?;
+            let dt = chrono::DateTime::parse_from_rfc3339(&item.datetime)
+                .map(|d| d.with_timezone(&Utc))
+                .ok()?;
+            Some(ForecastDay {
+                datetime: dt,
+                condition: item.condition,
+                temperature: item.temperature,
+                templow: item.templow,
+                humidity: item.humidity,
+                wind_speed: item.wind_speed,
+            })
+        })
+        .collect()
 }
 
 /// Parse HA history/history_during_period result for a single entity.
@@ -233,6 +299,7 @@ async fn handle_cmd(
     id_counter: &mut u64,
     sink: &mut (impl SinkExt<Message, Error = tokio_tungstenite::tungstenite::Error> + Unpin),
     pending_history: &mut HashMap<u64, EntityId>,
+    pending_weather: &mut HashMap<u64, (EntityId, ForecastKind)>,
     ws_url: &str,
     token: &str,
     alias: &Alias,
@@ -300,6 +367,13 @@ async fn handle_cmd(
                     result: bytes_res,
                 });
             });
+        }
+        HaCommand::GetWeatherForecast { entity, kind } => {
+            let id = next_id(id_counter);
+            pending_weather.insert(id, (entity.clone(), kind));
+            let payload = weather_get_forecasts_payload(id, &entity, kind);
+            let json = serde_json::to_string(&payload)?;
+            sink.send(Message::Text(json)).await?;
         }
     }
     Ok(())

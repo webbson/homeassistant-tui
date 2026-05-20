@@ -18,7 +18,9 @@ use crate::config::{self, Alias, Config};
 use crate::dashboard::editor::{CardTypeStub, EditorMode, EditorState};
 use crate::dashboard::{self, CardKind, Dashboard};
 use crate::event::AppEvent;
-use crate::ha::{client, EntityId, ImageFetchKind, InstanceRegistry, InstanceRuntime};
+use crate::ha::{
+    client, EntityId, ForecastDay, ForecastKind, ImageFetchKind, InstanceRegistry, InstanceRuntime,
+};
 use crate::screens::Screen;
 use crate::ui;
 use crate::ui::theme::Theme;
@@ -44,6 +46,8 @@ pub struct App {
     pub last_error: Option<String>,
     #[allow(dead_code)]
     pub tx: mpsc::UnboundedSender<AppEvent>,
+    /// Weather forecast cache keyed by (instance, entity).
+    pub weather_forecasts: HashMap<(Alias, EntityId), Vec<ForecastDay>>,
     /// Decoded image cache keyed by (instance, entity).
     pub image_cache: HashMap<(Alias, EntityId), ImageCacheEntry>,
     /// Entities currently being fetched — prevents duplicate in-flight requests.
@@ -83,6 +87,7 @@ impl App {
             status_msg: None,
             last_error: None,
             tx,
+            weather_forecasts: HashMap::new(),
             image_cache: HashMap::new(),
             image_inflight: HashSet::new(),
             image_picker: None,
@@ -2323,7 +2328,8 @@ impl App {
                         | crate::dashboard::CardKind::Clock { title, .. }
                         | crate::dashboard::CardKind::Statistics { title, .. }
                         | crate::dashboard::CardKind::MediaPlayer { title, .. }
-                        | crate::dashboard::CardKind::Image { title, .. } => title.clone(),
+                        | crate::dashboard::CardKind::Image { title, .. }
+                        | crate::dashboard::CardKind::Weather { title, .. } => title.clone(),
                     })
                     .unwrap_or_default();
                 if let Some(ed) = self.editor.as_mut() {
@@ -2833,6 +2839,7 @@ impl App {
                 self.last_error = Some("image cards: use the YAML editor to change entity".into());
                 return;
             }
+            CardKind::Weather { instance, .. } => (CardTypeStub::Weather, instance.clone(), None),
         };
         editor.edit_target = Some(idx);
         editor.mode = if let Some(picked) = prefill {
@@ -3326,6 +3333,7 @@ impl App {
                 self.last_error = None;
                 self.fetch_sparkline_history(&instance);
                 self.fetch_image_cards(&instance);
+                self.fetch_weather_forecasts(&instance);
             }
             AppEvent::HaEntityUpdated { instance, state } => {
                 if let Some(rt) = self.instances.get_mut(&instance) {
@@ -3394,6 +3402,22 @@ impl App {
             AppEvent::RefreshImageCard { instance, entity } => {
                 self.send_image_fetch(&instance, &entity.clone());
             }
+            AppEvent::HaWeatherForecast {
+                instance,
+                entity,
+                forecast,
+            } => {
+                self.weather_forecasts.insert((instance, entity), forecast);
+            }
+            AppEvent::RefreshWeatherForecast { instance, entity } => {
+                let _ = self.instances.send(
+                    &instance,
+                    crate::ha::HaCommand::GetWeatherForecast {
+                        entity,
+                        kind: ForecastKind::Daily,
+                    },
+                );
+            }
         }
     }
 
@@ -3421,6 +3445,34 @@ impl App {
         }
         for entity in entities {
             self.send_image_fetch(instance, &entity);
+        }
+    }
+
+    /// Request forecast for every Weather card on dashboards matching `instance`.
+    fn fetch_weather_forecasts(&mut self, instance: &Alias) {
+        let mut entities: Vec<String> = Vec::new();
+        for dash in &self.dashboards {
+            for card in &dash.cards {
+                if let crate::dashboard::CardKind::Weather {
+                    instance: card_inst,
+                    entity,
+                    ..
+                } = &card.kind
+                {
+                    if card_inst == instance {
+                        entities.push(entity.clone());
+                    }
+                }
+            }
+        }
+        for entity in entities {
+            let _ = self.instances.send(
+                instance,
+                crate::ha::HaCommand::GetWeatherForecast {
+                    entity,
+                    kind: ForecastKind::Daily,
+                },
+            );
         }
     }
 
@@ -3701,6 +3753,9 @@ fn build_typed_card(
         CardTypeStub::Image => {
             unreachable!("Image is built via ImagePickSourceKind flow, not build_typed_card")
         }
+        CardTypeStub::Weather => {
+            unreachable!("Weather is built via WxEditShowForecast flow, not build_typed_card")
+        }
         CardTypeStub::MediaPlayer => CardKind::MediaPlayer {
             instance,
             entity,
@@ -3767,7 +3822,8 @@ fn build_card_kind(kind: CardTypeStub, buf: &str, default_alias: Option<&str>) -
         | CardTypeStub::FilteredEntityList
         | CardTypeStub::Clock
         | CardTypeStub::Statistics
-        | CardTypeStub::Image => {
+        | CardTypeStub::Image
+        | CardTypeStub::Weather => {
             unreachable!()
         }
     })
@@ -3808,6 +3864,48 @@ pub fn spawn_camera_timers(dashboards: &[Dashboard], tx: &mpsc::UnboundedSender<
             }
         }
     }
+}
+
+/// Spawn a single tokio task that sends `RefreshWeatherForecast` every 30 minutes
+/// for every Weather card found across all dashboards.
+pub fn spawn_weather_timer(dashboards: &[Dashboard], tx: &mpsc::UnboundedSender<AppEvent>) {
+    // Collect unique (instance, entity) pairs from all Weather cards.
+    let mut pairs: Vec<(String, String)> = Vec::new();
+    for dash in dashboards {
+        for card in &dash.cards {
+            if let crate::dashboard::CardKind::Weather {
+                instance, entity, ..
+            } = &card.kind
+            {
+                let key = (instance.clone(), entity.clone());
+                if !pairs.contains(&key) {
+                    pairs.push(key);
+                }
+            }
+        }
+    }
+    if pairs.is_empty() {
+        return;
+    }
+    let tx = tx.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(30 * 60));
+        interval.tick().await; // skip the immediate first tick
+        loop {
+            interval.tick().await;
+            for (instance, entity) in &pairs {
+                if tx
+                    .send(AppEvent::RefreshWeatherForecast {
+                        instance: instance.clone(),
+                        entity: entity.clone(),
+                    })
+                    .is_err()
+                {
+                    return;
+                }
+            }
+        }
+    });
 }
 
 fn mouse_to_cell(area: Rect, dash: &Dashboard, mx: u16, my: u16) -> Option<(u16, u16)> {
@@ -3866,6 +3964,8 @@ pub async fn run(
 
     // Spawn interval refresh timers for Camera cards that have refresh_seconds set.
     spawn_camera_timers(&app.dashboards, &tx);
+    // Spawn 30-minute refresh timer for Weather cards.
+    spawn_weather_timer(&app.dashboards, &tx);
 
     let initial = terminal.size().unwrap_or_default();
     app.last_terminal_size = (initial.width, initial.height);

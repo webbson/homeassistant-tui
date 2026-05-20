@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 
 use crate::config::Alias;
-use crate::ha::{ConnStatus, EntityId, EntityState};
+use crate::ha::{ConnStatus, EntityId, EntityState, ForecastDay};
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -36,6 +36,15 @@ pub enum AppEvent {
         result: Result<Vec<u8>, String>,
     },
     RefreshImageCard {
+        instance: Alias,
+        entity: EntityId,
+    },
+    HaWeatherForecast {
+        instance: Alias,
+        entity: EntityId,
+        forecast: Vec<ForecastDay>,
+    },
+    RefreshWeatherForecast {
         instance: Alias,
         entity: EntityId,
     },
