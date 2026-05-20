@@ -697,6 +697,102 @@ impl App {
                 }
                 return;
             }
+            EditorMode::EnterColorOverride { card_idx, buf } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        buf.pop();
+                    }
+                    KeyCode::Char(c) => buf.push(c),
+                    KeyCode::Enter => {
+                        let idx = *card_idx;
+                        let trimmed = buf.trim().to_string();
+                        if trimmed.is_empty() {
+                            // Clear override
+                            editor.mode = EditorMode::Browse;
+                            if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                                if let Some(ed) = self.editor.as_mut() {
+                                    ed.snapshot(dash);
+                                }
+                                if let Some(card) = self
+                                    .dashboards
+                                    .get_mut(dash_idx)
+                                    .and_then(|d| d.cards.get_mut(idx))
+                                {
+                                    card.color = None;
+                                }
+                                if let Some(ed) = self.editor.as_mut() {
+                                    ed.dirty = true;
+                                }
+                            }
+                        } else if crate::ui::theme::parse_color(&trimmed).is_none() {
+                            self.last_error = Some(format!(
+                                "invalid color \"{trimmed}\" — use a named color or #rrggbb"
+                            ));
+                        } else {
+                            editor.mode = EditorMode::Browse;
+                            if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                                if let Some(ed) = self.editor.as_mut() {
+                                    ed.snapshot(dash);
+                                }
+                                if let Some(card) = self
+                                    .dashboards
+                                    .get_mut(dash_idx)
+                                    .and_then(|d| d.cards.get_mut(idx))
+                                {
+                                    card.color = Some(trimmed);
+                                }
+                                if let Some(ed) = self.editor.as_mut() {
+                                    ed.dirty = true;
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::PickCardSize { card_idx, current } => {
+                use crate::dashboard::CardSize;
+                const SIZES: [CardSize; 3] = [CardSize::Small, CardSize::Normal, CardSize::Large];
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        let pos = SIZES.iter().position(|s| s == current).unwrap_or(1);
+                        if pos > 0 {
+                            *current = SIZES[pos - 1];
+                        }
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        let pos = SIZES.iter().position(|s| s == current).unwrap_or(1);
+                        if pos + 1 < SIZES.len() {
+                            *current = SIZES[pos + 1];
+                        }
+                    }
+                    KeyCode::Enter => {
+                        let idx = *card_idx;
+                        let chosen = *current;
+                        editor.mode = EditorMode::Browse;
+                        if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.snapshot(dash);
+                            }
+                            if let Some(card) = self
+                                .dashboards
+                                .get_mut(dash_idx)
+                                .and_then(|d| d.cards.get_mut(idx))
+                            {
+                                card.size = chosen;
+                            }
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.dirty = true;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
             EditorMode::Browse => {}
         }
 
@@ -887,6 +983,36 @@ impl App {
                     ed.mode = EditorMode::EditingWindow {
                         card_idx: idx,
                         buffer: current,
+                    };
+                }
+            }
+            (A::SetColorOverride, C::Card(idx)) => {
+                let current_color = self
+                    .dashboards
+                    .get(dash_idx)
+                    .and_then(|d| d.cards.get(idx))
+                    .and_then(|c| c.color.clone())
+                    .unwrap_or_default();
+                if let Some(ed) = self.editor.as_mut() {
+                    ed.selected_card = Some(idx);
+                    ed.mode = EditorMode::EnterColorOverride {
+                        card_idx: idx,
+                        buf: current_color,
+                    };
+                }
+            }
+            (A::SetCardSize, C::Card(idx)) => {
+                let current_size = self
+                    .dashboards
+                    .get(dash_idx)
+                    .and_then(|d| d.cards.get(idx))
+                    .map(|c| c.size)
+                    .unwrap_or_default();
+                if let Some(ed) = self.editor.as_mut() {
+                    ed.selected_card = Some(idx);
+                    ed.mode = EditorMode::PickCardSize {
+                        card_idx: idx,
+                        current: current_size,
                     };
                 }
             }

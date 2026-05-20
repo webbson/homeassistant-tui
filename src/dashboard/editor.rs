@@ -99,6 +99,16 @@ pub enum EditorMode {
         items: Vec<MenuItem>,
         selected: usize,
     },
+    /// Enter a named color or #rrggbb for the selected card.
+    EnterColorOverride {
+        card_idx: usize,
+        buf: String,
+    },
+    /// Pick Small / Normal / Large for the selected card.
+    PickCardSize {
+        card_idx: usize,
+        current: CardSize,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -122,6 +132,8 @@ pub enum MenuAction {
     EditQuery,
     ToggleHideState,
     ToggleTicker,
+    SetColorOverride,
+    SetCardSize,
     DeleteCard,
     RenameDashboard,
     ResizeGrid,
@@ -173,6 +185,14 @@ pub fn card_menu_items(card: &Card) -> Vec<MenuItem> {
             label: "Toggle ticker mode",
         });
     }
+    items.push(MenuItem {
+        action: MenuAction::SetColorOverride,
+        label: "Color override",
+    });
+    items.push(MenuItem {
+        action: MenuAction::SetCardSize,
+        label: "Size",
+    });
     items.push(MenuItem {
         action: MenuAction::DeleteCard,
         label: "Delete card",

@@ -8,6 +8,7 @@ use ratatui::Frame;
 use crate::app::App;
 use crate::dashboard::editor::{CardTypeStub, EditorMode};
 use crate::dashboard::layout::cell_to_rect;
+use crate::dashboard::CardSize;
 
 pub fn draw(f: &mut Frame, area: Rect, app: &App) {
     let Some(editor) = app.editor.as_ref() else {
@@ -145,6 +146,8 @@ pub fn draw(f: &mut Frame, area: Rect, app: &App) {
             rows_buffer,
             focus_rows,
         } => draw_resize_grid(f, area, cols_buffer, rows_buffer, *focus_rows),
+        EditorMode::EnterColorOverride { buf, .. } => draw_color_override(f, area, buf),
+        EditorMode::PickCardSize { current, .. } => draw_pick_size(f, area, *current),
         EditorMode::Browse => {}
     }
 }
@@ -743,5 +746,51 @@ fn draw_confirm(f: &mut Frame, area: Rect, msg: &str) {
     f.render_widget(
         Paragraph::new(msg).block(Block::bordered().title(" Confirm ")),
         r,
+    );
+}
+
+fn draw_color_override(f: &mut Frame, area: Rect, buf: &str) {
+    let r = modal_rect(area, 64, 5);
+    f.render_widget(Clear, r);
+    let lines = vec![
+        Line::styled(
+            "Enter named color or #rrggbb · empty to clear · Esc cancel",
+            Style::new().dim(),
+        ),
+        Line::raw(""),
+        Line::from(vec![
+            Span::raw("> "),
+            Span::styled(buf.to_string(), Style::new().bold()),
+            Span::styled("_", Style::new().rapid_blink()),
+        ]),
+    ];
+    f.render_widget(
+        Paragraph::new(lines).block(Block::bordered().title(" Color override ")),
+        r,
+    );
+}
+
+fn draw_pick_size(f: &mut Frame, area: Rect, current: CardSize) {
+    const SIZES: [(CardSize, &str); 3] = [
+        (CardSize::Small, "Small"),
+        (CardSize::Normal, "Normal"),
+        (CardSize::Large, "Large"),
+    ];
+    let selected = SIZES.iter().position(|(s, _)| *s == current).unwrap_or(1);
+    let items: Vec<ListItem<'_>> = SIZES
+        .iter()
+        .map(|(_, label)| ListItem::new(Line::raw(label.to_string())))
+        .collect();
+    let mut state = ListState::default();
+    state.select(Some(selected));
+    let r = modal_rect(area, 32, 7);
+    f.render_widget(Clear, r);
+    f.render_stateful_widget(
+        List::new(items)
+            .block(Block::bordered().title(" Size (j/k · Enter · Esc) "))
+            .highlight_style(Style::new().reversed())
+            .highlight_symbol("▶ "),
+        r,
+        &mut state,
     );
 }
