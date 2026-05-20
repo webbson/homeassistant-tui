@@ -3643,21 +3643,20 @@ impl App {
         };
         tracing::info!(instance = %instance, entity = %entity, ?kind, "sending FetchImageBytes");
         self.image_inflight.insert(key);
-        let send_res = self.instances.send(
+        let sent = self.instances.send(
             instance,
             crate::ha::HaCommand::FetchImageBytes {
                 entity: entity.clone(),
                 kind,
             },
         );
-        if send_res.is_err() {
+        if !sent {
             tracing::warn!(
                 instance = %instance,
                 entity = %entity,
                 "FetchImageBytes send failed (instance channel closed)"
             );
         }
-        let _ = send_res;
     }
 
     /// Look up whether an entity is an image or camera source across all dashboards.
