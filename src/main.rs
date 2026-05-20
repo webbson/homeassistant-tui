@@ -50,8 +50,13 @@ fn main() -> Result<()> {
         .enable_all()
         .build()?;
 
+    // Query the terminal for image protocol + font size BEFORE switching to
+    // alt screen + raw mode — DCS responses don't round-trip reliably otherwise,
+    // which forces ratatui-image to fall back to pixelated halfblocks.
+    let picker = ratatui_image::picker::Picker::from_query_stdio().ok();
+
     let terminal = setup_terminal()?;
-    let result = rt.block_on(app::run(terminal, args.config, args.dashboards));
+    let result = rt.block_on(app::run(terminal, picker, args.config, args.dashboards));
     restore_terminal()?;
     result
 }

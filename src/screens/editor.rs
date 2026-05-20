@@ -406,7 +406,7 @@ pub fn draw(f: &mut Frame, area: Rect, app: &mut App) {
 fn draw_image_pick_source(f: &mut Frame, area: Rect, selected: usize) {
     let r = modal_rect(area, 44, 6);
     f.render_widget(Clear, r);
-    let block = Block::bordered().title(" New image card (1/4) ");
+    let block = Block::bordered().title(" New image card (1/4) — j/k + Enter, or 1/2 ");
     let inner = block.inner(r);
     f.render_widget(block, r);
     let items: [(&str, &str); 2] = [

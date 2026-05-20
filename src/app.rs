@@ -233,7 +233,14 @@ impl App {
                 query,
                 selected,
             } => {
-                let domain_prefix = domain_prefix_for_type(*card_type);
+                let domain_prefix = match *card_type {
+                    CardTypeStub::Image => match editor.image_pending_is_camera {
+                        Some(true) => Some("camera."),
+                        Some(false) => Some("image."),
+                        None => None,
+                    },
+                    other => domain_prefix_for_type(other),
+                };
                 let rows = entity_search_filtered(&self.instances, instance, query, domain_prefix);
                 match k.code {
                     KeyCode::Esc => editor.mode = EditorMode::Browse,
@@ -271,7 +278,9 @@ impl App {
                                     selected: 0,
                                 };
                             } else if ct == CardTypeStub::Image {
-                                let is_camera = eid.starts_with("camera.");
+                                let is_camera = editor
+                                    .image_pending_is_camera
+                                    .unwrap_or_else(|| eid.starts_with("camera."));
                                 if is_camera {
                                     editor.mode = EditorMode::ImageEditRefreshSeconds {
                                         instance: inst,
@@ -2086,25 +2095,31 @@ impl App {
             }
             // ---- Image add-flow ----
             EditorMode::ImagePickSourceKind { selected } => {
-                match k.code {
-                    KeyCode::Esc => editor.mode = EditorMode::Browse,
-                    KeyCode::Char('1') => {
-                        *selected = 0;
-                        // image entity — go directly to instance picker
-                        editor.mode = EditorMode::PickingInstance {
-                            card_type: CardTypeStub::Image,
-                            selected: 0,
-                        };
+                let commit_kind: Option<bool> = match k.code {
+                    KeyCode::Esc => {
+                        editor.image_pending_is_camera = None;
+                        editor.mode = EditorMode::Browse;
+                        return;
                     }
-                    KeyCode::Char('2') => {
-                        *selected = 1;
-                        // camera — go to instance picker
-                        editor.mode = EditorMode::PickingInstance {
-                            card_type: CardTypeStub::Image,
-                            selected: 0,
-                        };
+                    KeyCode::Up | KeyCode::Char('k') if *selected > 0 => {
+                        *selected -= 1;
+                        None
                     }
-                    _ => {}
+                    KeyCode::Down | KeyCode::Char('j') if *selected < 1 => {
+                        *selected += 1;
+                        None
+                    }
+                    KeyCode::Enter => Some(*selected == 1),
+                    KeyCode::Char('1') => Some(false),
+                    KeyCode::Char('2') => Some(true),
+                    _ => None,
+                };
+                if let Some(is_camera) = commit_kind {
+                    editor.image_pending_is_camera = Some(is_camera);
+                    editor.mode = EditorMode::PickingInstance {
+                        card_type: CardTypeStub::Image,
+                        selected: 0,
+                    };
                 }
                 return;
             }
@@ -4049,6 +4064,7 @@ fn mouse_to_cell(area: Rect, dash: &Dashboard, mx: u16, my: u16) -> Option<(u16,
 
 pub async fn run(
     mut terminal: Terminal<CrosstermBackend<std::io::Stdout>>,
+    picker: Option<ratatui_image::picker::Picker>,
     config_path: Option<PathBuf>,
     dashboards_path: Option<PathBuf>,
 ) -> Result<()> {
@@ -4056,6 +4072,7 @@ pub async fn run(
 
     let (tx, mut rx) = mpsc::unbounded_channel::<AppEvent>();
     let mut app = App::new(tx.clone());
+    app.image_picker = picker;
     app.dashboards_path = dashboards_path.clone();
 
     match config::load::load(config_path.as_deref()) {
@@ -4085,8 +4102,7 @@ pub async fn run(
     let mut term_events = EventStream::new();
     let mut tick = tokio::time::interval(Duration::from_millis(250));
 
-    // Init ratatui-image picker after terminal setup (must not run in tests).
-    app.image_picker = ratatui_image::picker::Picker::from_query_stdio().ok();
+    // Picker was queried in main.rs before terminal entered alt-screen.
 
     // Spawn interval refresh timers for Camera cards that have refresh_seconds set.
     spawn_camera_timers(&app.dashboards, &tx);

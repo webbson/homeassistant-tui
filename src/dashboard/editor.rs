@@ -17,6 +17,9 @@ pub struct EditorState {
     /// When `Some(idx)`, the in-progress picker/title flow replaces card[idx]
     /// instead of appending a new card.
     pub edit_target: Option<usize>,
+    /// During the Image add-flow, set after `ImagePickSourceKind` so the
+    /// downstream entity picker can filter to `image.*` or `camera.*` only.
+    pub image_pending_is_camera: Option<bool>,
 }
 
 #[derive(Debug, Clone)]
@@ -612,6 +615,7 @@ impl EditorState {
             dirty: false,
             source_path,
             edit_target: None,
+            image_pending_is_camera: None,
         }
     }
 
