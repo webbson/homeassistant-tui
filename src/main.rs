@@ -53,8 +53,27 @@ fn main() -> Result<()> {
     // Query the terminal for image protocol + font size BEFORE switching to
     // alt screen + raw mode — DCS responses don't round-trip reliably otherwise,
     // which forces ratatui-image to fall back to pixelated halfblocks.
+    // Set `HA_TUI_IMAGE_PROTO=halfblocks|sixel|kitty|iterm2` to override the
+    // auto-detected protocol (useful when a terminal advertises kitty but
+    // doesn't actually render it).
     let picker = match ratatui_image::picker::Picker::from_query_stdio() {
-        Ok(p) => {
+        Ok(mut p) => {
+            if let Ok(forced) = std::env::var("HA_TUI_IMAGE_PROTO") {
+                use ratatui_image::picker::ProtocolType;
+                let proto = match forced.to_ascii_lowercase().as_str() {
+                    "halfblocks" => Some(ProtocolType::Halfblocks),
+                    "sixel" => Some(ProtocolType::Sixel),
+                    "kitty" => Some(ProtocolType::Kitty),
+                    "iterm2" => Some(ProtocolType::Iterm2),
+                    other => {
+                        tracing::warn!(value = %other, "unknown HA_TUI_IMAGE_PROTO — ignored");
+                        None
+                    }
+                };
+                if let Some(proto) = proto {
+                    p.set_protocol_type(proto);
+                }
+            }
             tracing::info!(
                 protocol = ?p.protocol_type(),
                 font_size = ?p.font_size(),

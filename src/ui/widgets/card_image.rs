@@ -39,10 +39,11 @@ pub fn render(
         return;
     }
     if let Some(p) = protocol {
-        // Render image FIRST so the kitty/iterm2 placeholder cells aren't
-        // touched by the block's border draw. Then draw the block on top —
-        // Block::bordered only writes the edge cells, so the inner image
-        // cells stay intact.
+        tracing::trace!(
+            inner_w = inner.width,
+            inner_h = inner.height,
+            "rendering image stateful widget"
+        );
         f.render_stateful_widget(StatefulImage::default(), inner, p);
         f.render_widget(block, area);
     } else {
