@@ -120,23 +120,29 @@ fn render_card(
             min,
             max,
             unit,
+            severity,
+            needle,
             ..
         } => {
-            let s = app
+            let value = app
                 .instances
                 .runtimes
                 .get(instance)
-                .and_then(|rt| rt.states.get(entity));
+                .and_then(|rt| rt.states.get(entity))
+                .and_then(|s| s.state.parse::<f64>().ok());
             widgets::card_gauge::render(
                 f,
                 rect,
                 &title,
                 instance,
-                s,
+                value,
                 *min,
                 *max,
                 unit.as_deref(),
+                severity.as_ref(),
+                *needle,
                 card.color.as_deref(),
+                card.size,
                 &app.theme,
                 selected,
             );
