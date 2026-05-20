@@ -214,6 +214,16 @@ pub enum CardKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         title: Option<String>,
     },
+    Weather {
+        instance: Alias,
+        entity: EntityId,
+        #[serde(default = "default_true")]
+        show_forecast: bool,
+        #[serde(default = "default_forecast_days")]
+        forecast_days: u8,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+    },
 }
 
 fn default_window() -> String {
@@ -222,6 +232,10 @@ fn default_window() -> String {
 
 fn default_clock_format() -> String {
     "%H:%M:%S".into()
+}
+
+fn default_forecast_days() -> u8 {
+    3
 }
 
 impl Card {
@@ -257,6 +271,7 @@ impl Card {
                     entity.as_str()
                 }
             }),
+            CardKind::Weather { title, entity, .. } => title.as_deref().unwrap_or(entity.as_str()),
         }
     }
 
@@ -289,6 +304,9 @@ impl Card {
                 instance, entity, ..
             }
             | CardKind::MediaPlayer {
+                instance, entity, ..
+            }
+            | CardKind::Weather {
                 instance, entity, ..
             } => Some((instance, entity)),
             CardKind::Image {
@@ -663,5 +681,31 @@ pos: { col: 0, row: 0, w: 4, h: 3 }
         let back = serde_yaml::to_string(&card).unwrap();
         assert!(!back.contains("unit:"));
         assert!(!back.contains("title:"));
+    }
+
+    #[test]
+    fn weather_round_trip() {
+        let yaml = r#"
+type: weather
+instance: home
+entity: weather.home
+show_forecast: true
+forecast_days: 5
+pos: { col: 0, row: 0, w: 6, h: 4 }
+"#;
+        let card: Card = serde_yaml::from_str(yaml).unwrap();
+        if let CardKind::Weather {
+            entity,
+            show_forecast,
+            forecast_days,
+            ..
+        } = &card.kind
+        {
+            assert_eq!(entity.as_str(), "weather.home");
+            assert!(*show_forecast);
+            assert_eq!(*forecast_days, 5);
+        } else {
+            panic!("wrong variant")
+        }
     }
 }
