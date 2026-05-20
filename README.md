@@ -25,7 +25,7 @@ cargo install --path .
 
 ## Configure
 
-Copy the example files into your XDG config dir — `~/.config/ha-tui/` on both Linux and macOS:
+On first run, ha-tui auto-creates `~/.config/ha-tui/config.yaml` (from the bundled example) and `~/.config/ha-tui/dashboards.yaml` (a one-card Welcome dashboard) if they don't already exist. You only need to copy them manually if you want to set things up before launching:
 
 ```bash
 mkdir -p ~/.config/ha-tui
@@ -63,22 +63,22 @@ ha-tui --config /path/to/config.yaml --dashboards /path/to/dashboards.yaml
 
 | Key | Action |
 |---|---|
-| `q` / `Esc` | Quit |
-| `E` | Entity browser |
-| `i` | Instances screen |
+| `Esc` | Quit (or close current overlay/editor first) |
+| `E` | Entity search modal |
+| `i` | Instance list modal |
 | `1`..`9` | Jump to dashboard N |
 | `e` | Edit the currently shown dashboard |
 | `?` | Help overlay |
 
-### Entity browser
+### Entity search modal
 
 | Key | Action |
 |---|---|
-| `j`/`k` or `↓`/`↑` | Navigate |
-| `PageUp`/`PageDown` | Jump 10 |
-| `Home`/`End` | First / last |
+| type | Fuzzy filter on `entity_id` |
+| `↓`/`↑` or `PageUp`/`PageDown` | Navigate |
 | `f` | Cycle instance filter (all → first → next → …) |
 | `Enter` | Domain-default action (toggle lights/switches, turn_on scripts/scenes, etc.) |
+| `Esc` | Close modal |
 
 ### Dashboard editor
 

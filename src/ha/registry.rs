@@ -34,10 +34,6 @@ impl InstanceRegistry {
             false
         }
     }
-
-    pub fn total_entities(&self) -> usize {
-        self.runtimes.values().map(|r| r.states.len()).sum()
-    }
 }
 
 impl Default for InstanceRegistry {

@@ -21,7 +21,7 @@ use crate::event::AppEvent;
 use crate::ha::{
     client, EntityId, ForecastDay, ForecastKind, ImageFetchKind, InstanceRegistry, InstanceRuntime,
 };
-use crate::screens::Screen;
+use crate::screens::{Overlay, Screen};
 use crate::ui;
 use crate::ui::theme::Theme;
 use crate::util::history::RingBuf;
@@ -37,6 +37,8 @@ pub struct App {
     pub dashboards: Vec<Dashboard>,
     pub history: HashMap<(Alias, EntityId), RingBuf>,
     pub editor: Option<EditorState>,
+    pub overlay: Option<Overlay>,
+    pub update_available: Option<String>,
     pub dashboards_path: Option<PathBuf>,
     pub last_terminal_size: (u16, u16),
     pub mouse_drag: Option<MouseDrag>,
@@ -79,6 +81,8 @@ impl App {
             dashboards: Vec::new(),
             history: HashMap::new(),
             editor: None,
+            overlay: None,
+            update_available: None,
             dashboards_path: None,
             last_terminal_size: (0, 0),
             mouse_drag: None,
@@ -114,6 +118,10 @@ impl App {
             self.show_help = true;
             return;
         }
+        if self.overlay.is_some() {
+            self.handle_key_overlay(k);
+            return;
+        }
         if matches!(self.screen, Screen::Editor) {
             self.handle_key_editor(k);
             return;
@@ -126,7 +134,7 @@ impl App {
             }
         }
         match k.code {
-            KeyCode::Char('q') | KeyCode::Esc => self.should_quit = true,
+            KeyCode::Esc => self.should_quit = true,
             KeyCode::Up | KeyCode::Char('k') => self.move_selection(-1),
             KeyCode::Down | KeyCode::Char('j') => self.move_selection(1),
             KeyCode::PageUp => self.move_selection(-10),
@@ -135,15 +143,16 @@ impl App {
             KeyCode::Right | KeyCode::Char('l') => self.move_card_selection(1),
             KeyCode::Home => self.set_selection(0),
             KeyCode::End => self.set_selection(usize::MAX),
-            KeyCode::Char('i') => self.screen = Screen::Instances { selected: 0 },
-            KeyCode::Char('E') => {
-                self.screen = Screen::Entities {
-                    instance_filter: None,
-                    search: String::new(),
-                    selected: 0,
-                }
+            KeyCode::Char('i') => {
+                self.overlay = Some(Overlay::InstanceList { selected: 0 });
             }
-            KeyCode::Char('f') => self.cycle_instance_filter(),
+            KeyCode::Char('E') => {
+                self.overlay = Some(Overlay::EntitySearch {
+                    query: String::new(),
+                    selected: 0,
+                    instance_filter: None,
+                });
+            }
             KeyCode::Char('e') => self.enter_editor(),
             KeyCode::Char('n') => self.create_new_dashboard(),
             KeyCode::Char(c) if ('1'..='9').contains(&c) => {
@@ -158,6 +167,85 @@ impl App {
             }
             KeyCode::Enter => self.trigger_default_action(),
             _ => {}
+        }
+    }
+
+    fn handle_key_overlay(&mut self, k: KeyEvent) {
+        if matches!(k.code, KeyCode::Esc) {
+            self.overlay = None;
+            return;
+        }
+        let Some(overlay) = self.overlay.as_mut() else {
+            return;
+        };
+        match overlay {
+            Overlay::EntitySearch {
+                query,
+                selected,
+                instance_filter,
+            } => {
+                let total = crate::screens::entities::build_rows(
+                    self.instances.runtimes.values(),
+                    instance_filter.as_ref(),
+                    query,
+                )
+                .len();
+                match k.code {
+                    KeyCode::Backspace => {
+                        query.pop();
+                        *selected = 0;
+                    }
+                    KeyCode::Char('f') => {
+                        let aliases: Vec<Alias> = self.instances.runtimes.keys().cloned().collect();
+                        *instance_filter = match instance_filter.take() {
+                            None => aliases.first().cloned(),
+                            Some(cur) => {
+                                let pos = aliases.iter().position(|a| a == &cur);
+                                match pos {
+                                    Some(i) if i + 1 < aliases.len() => {
+                                        Some(aliases[i + 1].clone())
+                                    }
+                                    _ => None,
+                                }
+                            }
+                        };
+                        *selected = 0;
+                    }
+                    KeyCode::Char(c) => {
+                        query.push(c);
+                        *selected = 0;
+                    }
+                    KeyCode::Up if *selected > 0 => *selected -= 1,
+                    KeyCode::Down if *selected + 1 < total => *selected += 1,
+                    KeyCode::PageUp => *selected = selected.saturating_sub(10),
+                    KeyCode::PageDown if total > 0 => {
+                        *selected = (*selected + 10).min(total - 1);
+                    }
+                    KeyCode::Enter => {
+                        let rows = crate::screens::entities::build_rows(
+                            self.instances.runtimes.values(),
+                            instance_filter.as_ref(),
+                            query,
+                        );
+                        if let Some(row) = rows.get(*selected) {
+                            let alias = row.instance.clone();
+                            let entity_id = row.state.entity_id.clone();
+                            self.overlay = None;
+                            self.dispatch_default(&alias, &entity_id);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Overlay::InstanceList { selected } => {
+                let total = self.instances.runtimes.len();
+                match k.code {
+                    KeyCode::Up | KeyCode::Char('k') if *selected > 0 => *selected -= 1,
+                    KeyCode::Down | KeyCode::Char('j') if *selected + 1 < total => *selected += 1,
+                    KeyCode::Enter => self.overlay = None,
+                    _ => {}
+                }
+            }
         }
     }
 
@@ -3197,26 +3285,6 @@ impl App {
         }
     }
 
-    fn cycle_instance_filter(&mut self) {
-        let Screen::Entities {
-            instance_filter, ..
-        } = &mut self.screen
-        else {
-            return;
-        };
-        let aliases: Vec<Alias> = self.instances.runtimes.keys().cloned().collect();
-        *instance_filter = match instance_filter.take() {
-            None => aliases.first().cloned(),
-            Some(cur) => {
-                let pos = aliases.iter().position(|a| a == &cur);
-                match pos {
-                    Some(i) if i + 1 < aliases.len() => Some(aliases[i + 1].clone()),
-                    _ => None,
-                }
-            }
-        };
-    }
-
     /// Returns `true` if the key was consumed by a MediaPlayer card action.
     fn handle_key_media_player(&mut self, ch: char) -> bool {
         let Screen::Dashboard {
@@ -3272,52 +3340,34 @@ impl App {
     }
 
     fn trigger_default_action(&mut self) {
-        match &self.screen {
-            Screen::Entities {
-                instance_filter,
-                search,
-                selected,
-            } => {
-                let rows = crate::screens::entities::build_rows(
-                    self.instances.runtimes.values(),
-                    instance_filter.as_ref(),
-                    search,
-                );
-                let Some(row) = rows.get(*selected) else {
-                    return;
-                };
-                let alias = row.instance.clone();
-                let entity_id = row.state.entity_id.clone();
-                self.dispatch_default(&alias, &entity_id);
-            }
-            Screen::Dashboard {
-                idx,
-                selected_card,
-                sub_index,
-            } => {
-                let Some(dash) = self.dashboards.get(*idx) else {
-                    return;
-                };
-                let Some(card) = dash.cards.get(*selected_card) else {
-                    return;
-                };
-                // EntityList / FilteredEntityList: act on sub-selected entity.
-                if let Some((alias, entities)) = list_entities(card, &self.instances) {
-                    let Some(eid) = entities.get(*sub_index).cloned() else {
-                        return;
-                    };
-                    self.dispatch_default(&alias, &eid);
-                    return;
-                }
-                let Some((alias, entity)) = card.entity_ref() else {
-                    return;
-                };
-                let alias = alias.clone();
-                let entity = entity.clone();
-                self.dispatch_default(&alias, &entity);
-            }
-            Screen::Instances { .. } | Screen::Editor => {}
+        let Screen::Dashboard {
+            idx,
+            selected_card,
+            sub_index,
+        } = &self.screen
+        else {
+            return;
+        };
+        let Some(dash) = self.dashboards.get(*idx) else {
+            return;
+        };
+        let Some(card) = dash.cards.get(*selected_card) else {
+            return;
+        };
+        // EntityList / FilteredEntityList: act on sub-selected entity.
+        if let Some((alias, entities)) = list_entities(card, &self.instances) {
+            let Some(eid) = entities.get(*sub_index).cloned() else {
+                return;
+            };
+            self.dispatch_default(&alias, &eid);
+            return;
         }
+        let Some((alias, entity)) = card.entity_ref() else {
+            return;
+        };
+        let alias = alias.clone();
+        let entity = entity.clone();
+        self.dispatch_default(&alias, &entity);
     }
 
     fn dispatch_default(&mut self, alias: &Alias, entity_id: &EntityId) {
@@ -3364,15 +3414,12 @@ impl App {
         if total == 0 {
             return;
         }
-        let selected = match &mut self.screen {
-            Screen::Entities { selected, .. } => selected,
-            Screen::Instances { selected } => selected,
-            Screen::Dashboard { selected_card, .. } => selected_card,
-            Screen::Editor => return,
+        let Screen::Dashboard { selected_card, .. } = &mut self.screen else {
+            return;
         };
-        let cur = i64::try_from(*selected).unwrap_or(0);
+        let cur = i64::try_from(*selected_card).unwrap_or(0);
         let new = (cur + i64::from(delta)).clamp(0, total as i64 - 1);
-        *selected = new as usize;
+        *selected_card = new as usize;
     }
 
     fn move_card_selection(&mut self, delta: i32) {
@@ -3402,28 +3449,14 @@ impl App {
         if total == 0 {
             return;
         }
-        let selected = match &mut self.screen {
-            Screen::Entities { selected, .. } => selected,
-            Screen::Instances { selected } => selected,
-            Screen::Dashboard { selected_card, .. } => selected_card,
-            Screen::Editor => return,
+        let Screen::Dashboard { selected_card, .. } = &mut self.screen else {
+            return;
         };
-        *selected = n.min(total - 1);
+        *selected_card = n.min(total - 1);
     }
 
     fn current_row_count(&self) -> usize {
         match &self.screen {
-            Screen::Entities {
-                instance_filter,
-                search,
-                ..
-            } => crate::screens::entities::build_rows(
-                self.instances.runtimes.values(),
-                instance_filter.as_ref(),
-                search,
-            )
-            .len(),
-            Screen::Instances { .. } => self.instances.runtimes.len(),
             Screen::Dashboard { idx, .. } => self.dashboards.get(*idx).map_or(0, |d| d.cards.len()),
             Screen::Editor => 0,
         }
@@ -3566,6 +3599,10 @@ impl App {
                         kind: ForecastKind::Daily,
                     },
                 );
+            }
+            AppEvent::UpdateAvailable { version } => {
+                info!(version = %version, "newer ha-tui release available");
+                self.update_available = Some(version);
             }
         }
     }
@@ -4099,6 +4136,32 @@ pub async fn run(
     app.image_picker = picker;
     app.dashboards_path = dashboards_path.clone();
 
+    let effective_config = config_path
+        .clone()
+        .or_else(crate::config::load::default_config_path);
+    let effective_dashboards = dashboards_path
+        .clone()
+        .or_else(crate::dashboard::persist::default_path);
+    if let (Some(cfg_path), Some(dash_path)) = (&effective_config, &effective_dashboards) {
+        match crate::util::bootstrap::ensure_files(cfg_path, dash_path) {
+            Ok(report) => {
+                if report.config_created {
+                    app.status_msg = Some(format!(
+                        "created {} — edit it with your HA URL+token, then restart",
+                        cfg_path.display()
+                    ));
+                }
+                if report.dashboards_created && app.dashboards_path.is_none() {
+                    app.dashboards_path = Some(dash_path.clone());
+                }
+            }
+            Err(e) => {
+                error!(error = %e, "first-run bootstrap failed");
+                app.last_error = Some(format!("bootstrap: {e}"));
+            }
+        }
+    }
+
     match config::load::load(config_path.as_deref()) {
         Ok(cfg) => {
             app.theme = Theme::from_config(&cfg);
@@ -4136,6 +4199,16 @@ pub async fn run(
     let initial = terminal.size().unwrap_or_default();
     app.last_terminal_size = (initial.width, initial.height);
     terminal.draw(|f| ui::draw(f, &mut app))?;
+
+    // Best-effort async release check; never blocks startup.
+    let update_tx = tx.clone();
+    tokio::spawn(async move {
+        if let Some(version) =
+            crate::util::update_check::check_latest(env!("CARGO_PKG_VERSION")).await
+        {
+            let _ = update_tx.send(AppEvent::UpdateAvailable { version });
+        }
+    });
 
     let result: Result<()> = async {
         loop {

@@ -55,3 +55,4 @@ After each handled event, `terminal.draw(|f| ui::draw(f, &app))?`. `App` is muta
 - Run `cargo test` before declaring a task complete.
 - Don't add features, refactor, or introduce abstractions beyond what the task requires.
 - Don't write comments that explain *what* the code does — only *why* when non-obvious.
+- Keep `CHANGELOG.md` updated. Every user-visible change → bullet under `## [Unreleased]` in the same commit. The `release` skill cuts Unreleased into a versioned section at tag time.

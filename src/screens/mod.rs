@@ -1,20 +1,11 @@
 pub mod dashboard;
 pub mod editor;
 pub mod entities;
-pub mod instances;
 
 use crate::config::Alias;
 
 #[derive(Debug, Clone)]
 pub enum Screen {
-    Entities {
-        instance_filter: Option<Alias>,
-        search: String,
-        selected: usize,
-    },
-    Instances {
-        selected: usize,
-    },
     Dashboard {
         idx: usize,
         selected_card: usize,
@@ -25,10 +16,22 @@ pub enum Screen {
 
 impl Default for Screen {
     fn default() -> Self {
-        Self::Entities {
-            instance_filter: None,
-            search: String::new(),
-            selected: 0,
+        Self::Dashboard {
+            idx: 0,
+            selected_card: 0,
+            sub_index: 0,
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub enum Overlay {
+    EntitySearch {
+        query: String,
+        selected: usize,
+        instance_filter: Option<Alias>,
+    },
+    InstanceList {
+        selected: usize,
+    },
 }

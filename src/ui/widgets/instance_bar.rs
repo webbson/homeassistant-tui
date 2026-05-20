@@ -12,7 +12,10 @@ pub fn render<'a, I>(f: &mut Frame, area: Rect, runtimes: I, theme: &Theme)
 where
     I: Iterator<Item = &'a InstanceRuntime>,
 {
-    let mut spans: Vec<Span<'a>> = vec![Span::raw("ha-tui  ").bold()];
+    let mut spans: Vec<Span<'a>> = vec![
+        Span::raw(concat!("ha-tui:v", env!("CARGO_PKG_VERSION"))).bold(),
+        Span::raw("  "),
+    ];
     for rt in runtimes {
         let color = theme.instance_color(&rt.alias);
         let dot_color = match rt.status {

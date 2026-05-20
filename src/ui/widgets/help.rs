@@ -19,17 +19,17 @@ pub fn render(f: &mut Frame, area: Rect) {
     f.render_widget(Clear, r);
 
     let entries: Vec<(&str, &str)> = vec![
-        ("q / Esc", "quit"),
+        ("Esc", "quit (or close current overlay/editor)"),
         ("?", "toggle this help"),
-        ("E", "entity browser"),
-        ("i", "instances screen"),
+        ("E", "entity search modal"),
+        ("i", "instance list modal"),
         ("1..9", "jump to dashboard N"),
         ("n", "new dashboard (opens editor)"),
         ("e", "edit current dashboard"),
         ("", ""),
-        ("Entity browser", ""),
-        ("j/k ↑/↓", "navigate"),
-        ("PgUp/PgDn", "jump 10"),
+        ("Entity search", ""),
+        ("type", "fuzzy filter on entity_id"),
+        ("↑/↓ PgUp/PgDn", "navigate"),
         ("f", "cycle instance filter"),
         ("Enter", "default action (toggle, etc.)"),
         ("", ""),

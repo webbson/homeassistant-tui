@@ -13,7 +13,7 @@ use crate::dashboard::{BarOrientation, CardSize};
 
 pub fn draw(f: &mut Frame, area: Rect, app: &mut App) {
     // Extract the scalar values we need from editor+dash before the &mut dashboard draw.
-    let (dash_idx, dirty, dash_name, cursor_col, cursor_row, _selected_card, dash_grid, card_pos) = {
+    let (dash_idx, cursor_col, cursor_row, _selected_card, dash_grid, card_pos) = {
         let Some(editor) = app.editor.as_ref() else {
             return;
         };
@@ -26,8 +26,6 @@ pub fn draw(f: &mut Frame, area: Rect, app: &mut App) {
             .map(|c| c.pos);
         (
             editor.dash_idx,
-            editor.dirty,
-            dash.name.clone(),
             editor.cursor_col,
             editor.cursor_row,
             editor.selected_card,
@@ -36,37 +34,10 @@ pub fn draw(f: &mut Frame, area: Rect, app: &mut App) {
         )
     };
 
-    let bar_rect = Rect {
-        x: area.x,
-        y: area.y,
-        width: area.width,
-        height: 1,
-    };
-    let dirty_mark = if dirty { "*" } else { "" };
-    let title = Line::from(vec![
-        Span::styled(
-            format!("◆ editing: {}{}", dash_name, dirty_mark),
-            Style::new().bold(),
-        ),
-        Span::raw("    "),
-        Span::styled(
-            format!("cursor: {},{}", cursor_col, cursor_row),
-            Style::new().dim(),
-        ),
-    ]);
-    f.render_widget(Paragraph::new(title), bar_rect);
-
-    let body_rect = Rect {
-        x: area.x,
-        y: area.y + 1,
-        width: area.width,
-        height: area.height.saturating_sub(1),
-    };
-
-    crate::screens::dashboard::draw(f, body_rect, app, dash_idx, usize::MAX, None);
+    crate::screens::dashboard::draw(f, area, app, dash_idx, usize::MAX, None);
 
     let cur_rect = cell_to_rect(
-        body_rect,
+        area,
         dash_grid,
         crate::dashboard::Pos {
             col: cursor_col,
@@ -83,7 +54,7 @@ pub fn draw(f: &mut Frame, area: Rect, app: &mut App) {
     }
 
     if let Some(pos) = card_pos {
-        let r = cell_to_rect(body_rect, dash_grid, pos);
+        let r = cell_to_rect(area, dash_grid, pos);
         f.render_widget(
             Block::bordered().border_style(Style::new().fg(Color::Yellow).bold()),
             r,

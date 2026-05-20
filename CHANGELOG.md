@@ -7,6 +7,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 ## [Unreleased]
 
 ### Added
+- **First-run bootstrap** — missing `~/.config/ha-tui/config.yaml` is created from the bundled example; missing `dashboards.yaml` gets a one-card Welcome dashboard with setup instructions, so a fresh install lands on a usable screen.
+- **Entity / instance modals** — `E` and `i` now open a centered, searchable overlay on top of the current dashboard instead of switching to a full screen. `Esc` closes back.
+- **Update notifier** — on startup, asynchronously checks GitHub for a newer release of `webbson/homeassistant-tui` and shows a yellow `↑ vX.Y.Z` in the header when available. Failures are silent.
 - **Per-card overrides** on the `Card` wrapper: `color` (named or `#rrggbb`) and `size` (`small` / `normal` / `large`). `large` renders primary values via `tui-big-text` (centered).
 - **Clock card** — local or timezone-aware time with strftime format string.
 - **Statistics card** — rolling-window aggregate (avg / min / max / sum / count) of any numeric entity history.
@@ -16,6 +19,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - **FilteredEntityList `hide_when_empty`** — opt-in: card body skipped when zero matches, grid slot preserved; auto-reappears within ≤250ms when an entity starts matching.
 
 ### Changed
+- **Default screen is Dashboard** (was Entities). The Entities/Instances full-screen views were removed in favor of modal overlays.
+- **Dashboard header redesigned** — dashboard name is centered on the existing top row; the separate `◆ name` body row is gone. In edit mode the row gains a `✎ col,row` pen indicator on the right; the standalone `editing: …` banner row is removed.
+- **Footer trimmed** on the Dashboard screen — the `dashboard: name` prefix is dropped (now in the header) and the `q quit` hint is removed.
 - **Graph card** (replaces Sparkline) — multi-series + three render modes:
   - `line` (history-backed, existing behaviour, now N series with legend),
   - `bar` (current value per series, vertical or horizontal),
@@ -25,6 +31,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - **ratatui-image picker** queried before alt-screen entry so high-res protocol detection succeeds (was previously falling back to halfblocks because DCS responses don't round-trip through alt-screen).
 - **Card-type picker overlay** now sized to fit all 12 card types with j/k + Enter navigation; digit shortcuts `1`-`9` still work.
 - **`tui-big-text`** bumped from 0.7 → 0.8 for ratatui 0.30 compatibility; rendered values are centered horizontally and vertically.
+
+### Removed
+- **`q` quit binding** — `Esc` is the only way to quit. Inside an overlay or the editor, `Esc` first closes the overlay or exits the editor before quitting on a second press from the dashboard.
 
 ### Documentation
 - README rewritten to document all 12 card types, common card fields, terminal requirements, and the image protocol environment variable.

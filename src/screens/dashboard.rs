@@ -6,7 +6,7 @@ use ratatui::Frame;
 
 use crate::app::App;
 use crate::dashboard::layout::cell_to_rect;
-use crate::dashboard::{CardKind, Dashboard, GraphType};
+use crate::dashboard::{CardKind, GraphType};
 use crate::ui::widgets;
 use crate::ui::widgets::card_graph::GraphRender;
 use crate::util::history::RingBuf;
@@ -29,15 +29,8 @@ pub fn draw(
         );
         return;
     };
-    draw_title(f, area, &dash);
-    let inner = Rect {
-        x: area.x,
-        y: area.y + 1,
-        width: area.width,
-        height: area.height.saturating_sub(1),
-    };
     for (i, card) in dash.cards.iter().enumerate() {
-        let rect = cell_to_rect(inner, dash.grid, card.pos);
+        let rect = cell_to_rect(area, dash.grid, card.pos);
         if rect.width < 3 || rect.height < 3 {
             continue;
         }
@@ -45,19 +38,6 @@ pub fn draw(
         let sub = if sel { sub_index } else { None };
         render_card(f, rect, card, app, sel, sub, in_editor);
     }
-}
-
-fn draw_title(f: &mut Frame, area: Rect, dash: &Dashboard) {
-    let bar = Rect {
-        x: area.x,
-        y: area.y,
-        width: area.width,
-        height: 1,
-    };
-    f.render_widget(
-        Paragraph::new(format!("◆ {}", dash.name)).style(Style::new().bold().dim()),
-        bar,
-    );
 }
 
 fn render_card(

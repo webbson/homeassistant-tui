@@ -48,4 +48,7 @@ pub enum AppEvent {
         instance: Alias,
         entity: EntityId,
     },
+    UpdateAvailable {
+        version: String,
+    },
 }
