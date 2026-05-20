@@ -358,5 +358,35 @@ fn render_card(
                 selected,
             );
         }
+        CardKind::Weather {
+            instance,
+            entity,
+            show_forecast,
+            forecast_days,
+            ..
+        } => {
+            let state = app
+                .instances
+                .runtimes
+                .get(instance)
+                .and_then(|rt| rt.states.get(entity));
+            let forecast = app
+                .weather_forecasts
+                .get(&(instance.clone(), entity.clone()));
+            widgets::card_weather::render(
+                f,
+                rect,
+                &title,
+                instance,
+                state,
+                forecast,
+                *show_forecast,
+                *forecast_days,
+                card.color.as_deref(),
+                card.size,
+                &app.theme,
+                selected,
+            );
+        }
     }
 }

@@ -9,6 +9,7 @@ pub mod card_media_player;
 pub mod card_statistics;
 pub mod card_text;
 pub mod card_toggle;
+pub mod card_weather;
 pub mod entity_detail;
 pub mod entity_list;
 pub mod help;

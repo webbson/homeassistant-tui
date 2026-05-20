@@ -537,6 +537,7 @@ pub enum CardTypeStub {
     Statistics,
     MediaPlayer,
     Image,
+    Weather,
 }
 
 impl CardTypeStub {
@@ -552,6 +553,7 @@ impl CardTypeStub {
         CardTypeStub::Statistics,
         CardTypeStub::MediaPlayer,
         CardTypeStub::Image,
+        CardTypeStub::Weather,
     ];
     pub fn label(self) -> &'static str {
         match self {
@@ -566,6 +568,7 @@ impl CardTypeStub {
             CardTypeStub::Statistics => "statistics",
             CardTypeStub::MediaPlayer => "media player",
             CardTypeStub::Image => "image / camera",
+            CardTypeStub::Weather => "weather",
         }
     }
 }
@@ -691,7 +694,8 @@ impl EditorState {
             | CardKind::Clock { title, .. }
             | CardKind::Statistics { title, .. }
             | CardKind::MediaPlayer { title, .. }
-            | CardKind::Image { title, .. } => {
+            | CardKind::Image { title, .. }
+            | CardKind::Weather { title, .. } => {
                 *title = new_title;
             }
         }
