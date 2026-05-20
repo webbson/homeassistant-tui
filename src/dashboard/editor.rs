@@ -1,5 +1,5 @@
 use crate::dashboard::{
-    BarOrientation, Card, CardKind, CardSize, Dashboard, GraphSeries, GraphType, Pos,
+    BarOrientation, Card, CardKind, CardSize, Dashboard, GraphSeries, GraphType, Pos, StatsMetric,
 };
 
 const MAX_UNDO: usize = 32;
@@ -227,6 +227,57 @@ pub enum EditorMode {
         card_idx: usize,
         buf: String,
     },
+    // ---- Statistics add-flow ----
+    /// Step 3 (after entity pick): choose Avg/Min/Max/Sum/Count.
+    StatsPickMetric {
+        instance: String,
+        entity: String,
+        friendly_name: String,
+        selected: usize,
+    },
+    /// Step 4: enter window string (default "1h").
+    StatsEditWindowAdd {
+        instance: String,
+        entity: String,
+        friendly_name: String,
+        metric: StatsMetric,
+        buf: String,
+    },
+    /// Step 5: optional unit string.
+    StatsEditUnitAdd {
+        instance: String,
+        entity: String,
+        friendly_name: String,
+        metric: StatsMetric,
+        window: String,
+        buf: String,
+    },
+    /// Step 6: optional title.
+    StatsEditTitleAdd {
+        instance: String,
+        entity: String,
+        friendly_name: String,
+        metric: StatsMetric,
+        window: String,
+        unit: Option<String>,
+        buf: String,
+    },
+    // ---- Statistics context-menu flows ----
+    /// Edit the metric of an existing Statistics card.
+    StatsEditMetric {
+        card_idx: usize,
+        selected: usize,
+    },
+    /// Edit the window of an existing Statistics card.
+    StatsEditWindow {
+        card_idx: usize,
+        buf: String,
+    },
+    /// Edit the unit of an existing Statistics card.
+    StatsEditUnit {
+        card_idx: usize,
+        buf: String,
+    },
 }
 
 /// Accumulates the first two threshold values while collecting severity input.
@@ -285,6 +336,10 @@ pub enum MenuAction {
     // Clock-specific actions
     ClockEditFormat,
     ClockEditTimezone,
+    // Statistics-specific actions
+    StatsEditMetric,
+    StatsEditWindow,
+    StatsEditUnit,
 }
 
 #[derive(Debug, Clone)]
@@ -399,6 +454,20 @@ pub fn card_menu_items(card: &Card) -> Vec<MenuItem> {
             label: "Timezone",
         });
     }
+    if let CardKind::Statistics { .. } = &card.kind {
+        items.push(MenuItem {
+            action: MenuAction::StatsEditMetric,
+            label: "Metric",
+        });
+        items.push(MenuItem {
+            action: MenuAction::StatsEditWindow,
+            label: "Window",
+        });
+        items.push(MenuItem {
+            action: MenuAction::StatsEditUnit,
+            label: "Unit",
+        });
+    }
     if matches!(card.kind, CardKind::Entity { .. }) {
         items.push(MenuItem {
             action: MenuAction::ToggleTicker,
@@ -433,7 +502,7 @@ pub fn dashboard_menu_items() -> Vec<MenuItem> {
     ]
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CardTypeStub {
     Entity,
     Toggle,

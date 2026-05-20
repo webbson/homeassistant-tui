@@ -224,13 +224,22 @@ impl App {
                             let inst = instance.clone();
                             let eid = pick.entity_id.clone();
                             let fname = pick.friendly_name.clone();
-                            editor.mode = EditorMode::EditingTitle {
-                                card_type: ct,
-                                instance: inst,
-                                entity: eid,
-                                friendly_name: fname,
-                                title_buffer: String::new(),
-                            };
+                            if ct == CardTypeStub::Statistics {
+                                editor.mode = EditorMode::StatsPickMetric {
+                                    instance: inst,
+                                    entity: eid,
+                                    friendly_name: fname,
+                                    selected: 0,
+                                };
+                            } else {
+                                editor.mode = EditorMode::EditingTitle {
+                                    card_type: ct,
+                                    instance: inst,
+                                    entity: eid,
+                                    friendly_name: fname,
+                                    title_buffer: String::new(),
+                                };
+                            }
                         }
                     }
                     _ => {}
@@ -1554,6 +1563,293 @@ impl App {
                 }
                 return;
             }
+            // ---- Statistics add-flow ----
+            EditorMode::StatsPickMetric {
+                instance,
+                entity,
+                friendly_name,
+                selected,
+            } => {
+                const METRICS: [crate::dashboard::StatsMetric; 5] = [
+                    crate::dashboard::StatsMetric::Avg,
+                    crate::dashboard::StatsMetric::Min,
+                    crate::dashboard::StatsMetric::Max,
+                    crate::dashboard::StatsMetric::Sum,
+                    crate::dashboard::StatsMetric::Count,
+                ];
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Up if *selected > 0 => *selected -= 1,
+                    KeyCode::Down if *selected + 1 < METRICS.len() => *selected += 1,
+                    KeyCode::Char('1') => *selected = 0,
+                    KeyCode::Char('2') => *selected = 1,
+                    KeyCode::Char('3') => *selected = 2,
+                    KeyCode::Char('4') => *selected = 3,
+                    KeyCode::Char('5') => *selected = 4,
+                    KeyCode::Enter => {
+                        let metric = METRICS[*selected];
+                        let inst = instance.clone();
+                        let ent = entity.clone();
+                        let fname = friendly_name.clone();
+                        editor.mode = EditorMode::StatsEditWindowAdd {
+                            instance: inst,
+                            entity: ent,
+                            friendly_name: fname,
+                            metric,
+                            buf: "1h".into(),
+                        };
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::StatsEditWindowAdd {
+                instance,
+                entity,
+                friendly_name,
+                metric,
+                buf,
+            } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        buf.pop();
+                    }
+                    KeyCode::Char(c) => buf.push(c),
+                    KeyCode::Enter => {
+                        let window = {
+                            let s = buf.trim().to_string();
+                            if s.is_empty() {
+                                "1h".into()
+                            } else {
+                                s
+                            }
+                        };
+                        let inst = instance.clone();
+                        let ent = entity.clone();
+                        let fname = friendly_name.clone();
+                        let m = *metric;
+                        editor.mode = EditorMode::StatsEditUnitAdd {
+                            instance: inst,
+                            entity: ent,
+                            friendly_name: fname,
+                            metric: m,
+                            window,
+                            buf: String::new(),
+                        };
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::StatsEditUnitAdd {
+                instance,
+                entity,
+                friendly_name,
+                metric,
+                window,
+                buf,
+            } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        buf.pop();
+                    }
+                    KeyCode::Char(c) => buf.push(c),
+                    KeyCode::Enter => {
+                        let unit_raw = buf.trim().to_string();
+                        let unit = if unit_raw.is_empty() {
+                            None
+                        } else {
+                            Some(unit_raw)
+                        };
+                        let inst = instance.clone();
+                        let ent = entity.clone();
+                        let fname = friendly_name.clone();
+                        let m = *metric;
+                        let win = window.clone();
+                        editor.mode = EditorMode::StatsEditTitleAdd {
+                            instance: inst,
+                            entity: ent,
+                            friendly_name: fname,
+                            metric: m,
+                            window: win,
+                            unit,
+                            buf: String::new(),
+                        };
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::StatsEditTitleAdd {
+                instance,
+                entity,
+                friendly_name,
+                metric,
+                window,
+                unit,
+                buf,
+            } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        buf.pop();
+                    }
+                    KeyCode::Char(c) => buf.push(c),
+                    KeyCode::Enter => {
+                        let title_raw = buf.trim().to_string();
+                        let title = if title_raw.is_empty() {
+                            if friendly_name.is_empty() {
+                                None
+                            } else {
+                                Some(friendly_name.clone())
+                            }
+                        } else {
+                            Some(title_raw)
+                        };
+                        let kind = CardKind::Statistics {
+                            instance: instance.clone(),
+                            entity: entity.clone(),
+                            window: window.clone(),
+                            metric: *metric,
+                            unit: unit.clone(),
+                            title,
+                        };
+                        editor.mode = EditorMode::Browse;
+                        if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.snapshot(dash);
+                                ed.add_card(dash, kind);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            // ---- Statistics context-menu flows ----
+            EditorMode::StatsEditMetric { card_idx, selected } => {
+                const METRICS: [crate::dashboard::StatsMetric; 5] = [
+                    crate::dashboard::StatsMetric::Avg,
+                    crate::dashboard::StatsMetric::Min,
+                    crate::dashboard::StatsMetric::Max,
+                    crate::dashboard::StatsMetric::Sum,
+                    crate::dashboard::StatsMetric::Count,
+                ];
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Up if *selected > 0 => *selected -= 1,
+                    KeyCode::Down if *selected + 1 < METRICS.len() => *selected += 1,
+                    KeyCode::Char('1') => *selected = 0,
+                    KeyCode::Char('2') => *selected = 1,
+                    KeyCode::Char('3') => *selected = 2,
+                    KeyCode::Char('4') => *selected = 3,
+                    KeyCode::Char('5') => *selected = 4,
+                    KeyCode::Enter => {
+                        let idx = *card_idx;
+                        let new_metric = METRICS[*selected];
+                        editor.mode = EditorMode::Browse;
+                        if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.snapshot(dash);
+                            }
+                            if let Some(card) = self
+                                .dashboards
+                                .get_mut(dash_idx)
+                                .and_then(|d| d.cards.get_mut(idx))
+                            {
+                                if let CardKind::Statistics { metric, .. } = &mut card.kind {
+                                    *metric = new_metric;
+                                }
+                            }
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.dirty = true;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::StatsEditWindow { card_idx, buf } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        buf.pop();
+                    }
+                    KeyCode::Char(c) => buf.push(c),
+                    KeyCode::Enter => {
+                        let idx = *card_idx;
+                        let new_window = {
+                            let s = buf.trim().to_string();
+                            if s.is_empty() {
+                                "1h".into()
+                            } else {
+                                s
+                            }
+                        };
+                        editor.mode = EditorMode::Browse;
+                        if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.snapshot(dash);
+                            }
+                            if let Some(card) = self
+                                .dashboards
+                                .get_mut(dash_idx)
+                                .and_then(|d| d.cards.get_mut(idx))
+                            {
+                                if let CardKind::Statistics { window, .. } = &mut card.kind {
+                                    *window = new_window;
+                                }
+                            }
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.dirty = true;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::StatsEditUnit { card_idx, buf } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        buf.pop();
+                    }
+                    KeyCode::Char(c) => buf.push(c),
+                    KeyCode::Enter => {
+                        let idx = *card_idx;
+                        let unit_raw = buf.trim().to_string();
+                        let new_unit = if unit_raw.is_empty() {
+                            None
+                        } else {
+                            Some(unit_raw)
+                        };
+                        editor.mode = EditorMode::Browse;
+                        if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.snapshot(dash);
+                            }
+                            if let Some(card) = self
+                                .dashboards
+                                .get_mut(dash_idx)
+                                .and_then(|d| d.cards.get_mut(idx))
+                            {
+                                if let CardKind::Statistics { unit, .. } = &mut card.kind {
+                                    *unit = new_unit;
+                                }
+                            }
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.dirty = true;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
             // ---- Clock add-flow ----
             EditorMode::ClockAddTitle { title_buffer } => {
                 match k.code {
@@ -2248,6 +2544,77 @@ impl App {
                     };
                 }
             }
+            (A::StatsEditMetric, C::Card(idx)) => {
+                // Find the current metric index to pre-select it.
+                let current_selected = self
+                    .dashboards
+                    .get(dash_idx)
+                    .and_then(|d| d.cards.get(idx))
+                    .and_then(|c| {
+                        if let CardKind::Statistics { metric, .. } = &c.kind {
+                            use crate::dashboard::StatsMetric::*;
+                            Some(match metric {
+                                Avg => 0,
+                                Min => 1,
+                                Max => 2,
+                                Sum => 3,
+                                Count => 4,
+                            })
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or(0);
+                if let Some(ed) = self.editor.as_mut() {
+                    ed.selected_card = Some(idx);
+                    ed.mode = EditorMode::StatsEditMetric {
+                        card_idx: idx,
+                        selected: current_selected,
+                    };
+                }
+            }
+            (A::StatsEditWindow, C::Card(idx)) => {
+                let current = self
+                    .dashboards
+                    .get(dash_idx)
+                    .and_then(|d| d.cards.get(idx))
+                    .and_then(|c| {
+                        if let CardKind::Statistics { window, .. } = &c.kind {
+                            Some(window.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_else(|| "1h".into());
+                if let Some(ed) = self.editor.as_mut() {
+                    ed.selected_card = Some(idx);
+                    ed.mode = EditorMode::StatsEditWindow {
+                        card_idx: idx,
+                        buf: current,
+                    };
+                }
+            }
+            (A::StatsEditUnit, C::Card(idx)) => {
+                let current = self
+                    .dashboards
+                    .get(dash_idx)
+                    .and_then(|d| d.cards.get(idx))
+                    .and_then(|c| {
+                        if let CardKind::Statistics { unit, .. } = &c.kind {
+                            unit.clone()
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_default();
+                if let Some(ed) = self.editor.as_mut() {
+                    ed.selected_card = Some(idx);
+                    ed.mode = EditorMode::StatsEditUnit {
+                        card_idx: idx,
+                        buf: current,
+                    };
+                }
+            }
             _ => {
                 self.last_error = Some("menu action not valid in this context".into());
             }
@@ -2347,6 +2714,9 @@ impl App {
             };
             return;
         }
+        // Statistics: has instance + entity, then extra metric/window/unit steps.
+        // Falls through to the normal PickingInstance / PickingEntity flow below,
+        // but branches at PickingEntity::Enter to StatsPickMetric instead of EditingTitle.
         // Graph has its own multi-step flow: type → instance → entities → config.
         // Always route through GraphPickType first, regardless of instance count.
         if matches!(kind, CardTypeStub::Graph) {

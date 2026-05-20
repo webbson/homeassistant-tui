@@ -278,6 +278,59 @@ pub fn draw(f: &mut Frame, area: Rect, app: &App) {
                 buf,
             );
         }
+        // Statistics add-flow
+        EditorMode::StatsPickMetric { selected, .. } => {
+            draw_stats_pick_metric(f, area, *selected);
+        }
+        EditorMode::StatsEditWindowAdd { buf, .. } => {
+            draw_text_input(
+                f,
+                area,
+                " New statistics card (4/6) ",
+                "Window (e.g. 1h, 24h, 7d — Enter for 1h)",
+                buf,
+            );
+        }
+        EditorMode::StatsEditUnitAdd { buf, .. } => {
+            draw_text_input(
+                f,
+                area,
+                " New statistics card (5/6) ",
+                "Unit (e.g. °C, % — Enter to skip)",
+                buf,
+            );
+        }
+        EditorMode::StatsEditTitleAdd { buf, .. } => {
+            draw_text_input(
+                f,
+                area,
+                " New statistics card (6/6) ",
+                "Title (optional — Enter to use entity name)",
+                buf,
+            );
+        }
+        // Statistics context-menu flows
+        EditorMode::StatsEditMetric { selected, .. } => {
+            draw_stats_pick_metric(f, area, *selected);
+        }
+        EditorMode::StatsEditWindow { buf, .. } => {
+            draw_text_input(
+                f,
+                area,
+                " Edit statistics window ",
+                "Window (e.g. 1h, 24h, 7d — Enter for 1h)",
+                buf,
+            );
+        }
+        EditorMode::StatsEditUnit { buf, .. } => {
+            draw_text_input(
+                f,
+                area,
+                " Edit statistics unit ",
+                "Unit (e.g. °C, % — Enter to clear)",
+                buf,
+            );
+        }
         EditorMode::Browse => {}
     }
 }
@@ -1460,6 +1513,40 @@ fn draw_graph_pick_orientation(f: &mut Frame, area: Rect, current: BarOrientatio
     f.render_stateful_widget(
         List::new(items)
             .block(Block::bordered().title(" Bar orientation (j/k · Enter · Esc) "))
+            .highlight_style(Style::new().reversed())
+            .highlight_symbol("▶ "),
+        r,
+        &mut state,
+    );
+}
+
+// ── Statistics metric picker ──────────────────────────────────────────────────
+
+fn draw_stats_pick_metric(f: &mut Frame, area: Rect, selected: usize) {
+    const METRICS: [(&str, &str); 5] = [
+        ("1", "avg   — average value"),
+        ("2", "min   — minimum value"),
+        ("3", "max   — maximum value"),
+        ("4", "sum   — sum of values"),
+        ("5", "count — number of samples"),
+    ];
+    let items: Vec<ListItem<'_>> = METRICS
+        .iter()
+        .map(|(key, label)| {
+            ListItem::new(Line::from(vec![
+                Span::styled(format!(" {key} "), Style::new().reversed()),
+                Span::raw("  "),
+                Span::raw(*label),
+            ]))
+        })
+        .collect();
+    let mut state = ListState::default();
+    state.select(Some(selected.min(METRICS.len() - 1)));
+    let r = modal_rect(area, 44, 9);
+    f.render_widget(Clear, r);
+    f.render_stateful_widget(
+        List::new(items)
+            .block(Block::bordered().title(" Statistics — pick metric (j/k · Enter · Esc) "))
             .highlight_style(Style::new().reversed())
             .highlight_symbol("▶ "),
         r,
