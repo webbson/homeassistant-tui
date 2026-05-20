@@ -66,8 +66,8 @@ pub fn render_entity_search(
     // Split body into list (left) + detail (right) when wide enough.
     let split_detail = body.width >= 60;
     let (list_area, detail_area) = if split_detail {
-        let [l, r] =
-            Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).areas(body);
+        let [l, r] = Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
+            .areas(body);
         (l, Some(r))
     } else {
         (body, None)
