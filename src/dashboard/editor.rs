@@ -131,6 +131,7 @@ pub enum MenuAction {
     EditWindow,
     EditQuery,
     ToggleHideState,
+    ToggleHideWhenEmpty,
     ToggleTicker,
     SetColorOverride,
     SetCardSize,
@@ -169,7 +170,10 @@ pub fn card_menu_items(card: &Card) -> Vec<MenuItem> {
             label: "Set history window",
         });
     }
-    if matches!(card.kind, CardKind::FilteredEntityList { .. }) {
+    if let CardKind::FilteredEntityList {
+        hide_when_empty, ..
+    } = &card.kind
+    {
         items.push(MenuItem {
             action: MenuAction::EditQuery,
             label: "Edit filter query",
@@ -177,6 +181,15 @@ pub fn card_menu_items(card: &Card) -> Vec<MenuItem> {
         items.push(MenuItem {
             action: MenuAction::ToggleHideState,
             label: "Toggle hide state column",
+        });
+        let hwe_label: &'static str = if *hide_when_empty {
+            "Hide when empty: on"
+        } else {
+            "Hide when empty: off"
+        };
+        items.push(MenuItem {
+            action: MenuAction::ToggleHideWhenEmpty,
+            label: hwe_label,
         });
     }
     if matches!(card.kind, CardKind::Entity { .. }) {

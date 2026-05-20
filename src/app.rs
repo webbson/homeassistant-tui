@@ -1071,6 +1071,24 @@ impl App {
                     }
                 }
             }
+            (A::ToggleHideWhenEmpty, C::Card(idx)) => {
+                if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                    if let Some(ed) = self.editor.as_mut() {
+                        ed.snapshot(dash);
+                    }
+                    if let Some(card) = dash.cards.get_mut(idx) {
+                        if let CardKind::FilteredEntityList {
+                            hide_when_empty, ..
+                        } = &mut card.kind
+                        {
+                            *hide_when_empty = !*hide_when_empty;
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.dirty = true;
+                            }
+                        }
+                    }
+                }
+            }
             (A::ToggleTicker, C::Card(idx)) => {
                 if let Some(dash) = self.dashboards.get_mut(dash_idx) {
                     if let Some(ed) = self.editor.as_mut() {
