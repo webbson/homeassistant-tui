@@ -41,6 +41,38 @@ After each handled event, `terminal.draw(|f| ui::draw(f, &app))?`. `App` is muta
 
 **Hit testing**: ratatui has no built-in mouse hit-testing. Mouse events convert to grid cells via `app::mouse_to_cell`, which is enough for the editor (the only screen using the mouse so far). Mouse capture is enabled with `EnableMouseCapture` on startup and disabled on exit.
 
+**Two dashboard layout types** (`DashboardLayout` in `dashboard/mod.rs`):
+- `Free { grid, cards }` — original free-canvas layout. Cards have explicit `pos: { col, row, w, h }` on a `Grid { cols, rows }`. Editor uses cursor + mouse; `h/j/k/l` move the cursor.
+- `Grid { rows }` — structured layout. A vertical stack of `GridRow`s, each with `columns: Vec<GridColumn>`. Cards inside a column stack vertically at natural height; columns scroll when content overflows. No `pos` on cards.
+
+**Grid YAML schema** (additive; `Free` is the default when `layout:` is absent):
+```yaml
+- name: Stacked
+  layout:
+    type: grid
+    rows:
+      - height: 4          # fixed terminal rows
+        columns:
+          - cards: [{type: entity, instance: home, entity: light.kitchen}]
+          - cards: [{type: clock, format: "%H:%M:%S"}]
+      - height: auto       # splits leftover space with other auto rows
+        fill_height: true  # scale card heights to fill column (default for row's cols)
+        columns:
+          - cards: [...]
+          - fill_height: false  # per-column override
+            cards: [...]
+```
+
+**Grid editor navigation** (`EditorState` in `dashboard/editor.rs`):
+- `h/j/k/l` route through `Dashboard::neighbor()` — Up/Down stay within a column, Left/Right move between columns and wrap at row boundaries.
+- `R` focuses the current card's row (`GridFocus::Row`); `C` focuses the column (`GridFocus::Column`). `Esc` from Row/Column focus returns to Card focus.
+- `m` on Row focus → row menu (set height, toggle fill_height, add/remove/move column). `m` on Column focus → column menu. `m` on Card in grid → card menu with extra "Move up/down in column" items.
+- Structural operations (`grid_add_row`, `grid_move_row`, etc.) on `Dashboard` are wrapped by `with_selection_preserved` so `selected_card` stays stable across reordering.
+
+**Card preferred height** (`Card::preferred_height` in `dashboard/mod.rs`): static per-kind defaults. `card.height: Option<u16>` overrides. Used by `grid_layout()` in `dashboard/layout.rs` to compute per-column render heights.
+
+**Column scroll state**: `App::column_scroll: HashMap<(dash_idx, row_idx, col_idx), u16>`. Re-clamped to `max(0, content_height - col_height)` every render. `PageUp`/`PageDown` on the Dashboard screen scroll the focused column.
+
 ## Critical implementation details
 
 - **`Stylize` trait must be imported explicitly** (e.g. `use ratatui::style::Stylize;`) wherever `.bold()` / `.dim()` / `.fg(...)` chain calls are made. Rustc 1.95's `unused_imports` lint can wrongly flag it; ignore that specific warning — removing the import breaks the build.

@@ -1,12 +1,14 @@
+use std::collections::HashMap;
+
 use ratatui::layout::Rect;
 #[allow(unused_imports)]
 use ratatui::style::{Color, Style, Stylize};
-use ratatui::widgets::{Block, Paragraph};
+use ratatui::widgets::{Block, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState};
 use ratatui::Frame;
 
 use crate::app::App;
-use crate::dashboard::layout::cell_to_rect;
-use crate::dashboard::{CardKind, GraphType, Grid};
+use crate::dashboard::layout::{cell_to_rect, grid_layout};
+use crate::dashboard::{CardKind, DashboardLayout, GraphType};
 use crate::ui::widgets;
 use crate::ui::widgets::card_graph::GraphRender;
 use crate::util::history::RingBuf;
@@ -20,8 +22,7 @@ pub fn draw(
     sub_index: Option<usize>,
 ) {
     let in_editor = app.editor.is_some();
-    // Clone the dashboard so we can mutably borrow `app` inside `render_card` (needed for
-    // stateful image rendering via `&mut StatefulProtocol`).
+    // Clone the dashboard so we can mutably borrow `app` inside `render_card`.
     let Some(dash) = app.dashboards.get(idx).cloned() else {
         f.render_widget(
             Paragraph::new("no dashboard").block(Block::bordered()),
@@ -29,15 +30,90 @@ pub fn draw(
         );
         return;
     };
-    for (i, card) in dash.cards_iter().enumerate() {
-        let Some(pos) = card.pos else { continue; };
-        let rect = cell_to_rect(area, dash.free_grid().unwrap_or(Grid { cols: 12, rows: 8 }), pos);
-        if rect.width < 3 || rect.height < 3 {
-            continue;
+
+    match &dash.layout {
+        DashboardLayout::Free { grid, .. } => {
+            let grid = *grid;
+            for (i, card) in dash.cards_iter().enumerate() {
+                let Some(pos) = card.pos else { continue; };
+                let rect = cell_to_rect(area, grid, pos);
+                if rect.width < 3 || rect.height < 3 {
+                    continue;
+                }
+                let sel = i == selected_card;
+                let sub = if sel { sub_index } else { None };
+                render_card(f, rect, card, app, sel, sub, in_editor);
+            }
         }
-        let sel = i == selected_card;
-        let sub = if sel { sub_index } else { None };
-        render_card(f, rect, card, app, sel, sub, in_editor);
+        DashboardLayout::Grid { rows } => {
+            // Build col_scrolls from app state for this dashboard.
+            let col_scrolls: HashMap<(usize, usize), u16> = app
+                .column_scroll
+                .iter()
+                .filter(|((di, _, _), _)| *di == idx)
+                .map(|((_, ri, ci), &offset)| ((*ri, *ci), offset))
+                .collect();
+
+            // Compute per-card preferred heights using column widths from the layout.
+            let card_heights: Vec<u16> = {
+                let mut widths: Vec<u16> = Vec::new();
+                for row in rows.iter() {
+                    let n = row.columns.len() as u16;
+                    let base = if n > 0 { area.width / n } else { area.width };
+                    let rem = if n > 0 { area.width % n } else { 0 };
+                    for (ci, col) in row.columns.iter().enumerate() {
+                        let w = base + if ci == row.columns.len() - 1 { rem } else { 0 };
+                        for _ in &col.cards {
+                            widths.push(w);
+                        }
+                    }
+                }
+                dash.cards_iter()
+                    .zip(widths.iter())
+                    .map(|(c, &w)| c.preferred_height(w, None))
+                    .collect()
+            };
+
+            let (slots, col_infos) = grid_layout(rows, area, &col_scrolls, &card_heights);
+
+            // Re-clamp scroll offsets and render scrollbars.
+            for info in &col_infos {
+                let max_scroll = info.content_height.saturating_sub(info.rect.height);
+                let current = app
+                    .column_scroll
+                    .get(&(idx, info.row_idx, info.col_idx))
+                    .copied()
+                    .unwrap_or(0);
+                if current > max_scroll {
+                    app.column_scroll.insert((idx, info.row_idx, info.col_idx), max_scroll);
+                }
+
+                if info.needs_scrollbar && info.content_height > 0 {
+                    let scroll_pos = col_scrolls
+                        .get(&(info.row_idx, info.col_idx))
+                        .copied()
+                        .unwrap_or(0);
+                    let mut state = ScrollbarState::new(info.content_height as usize)
+                        .position(scroll_pos as usize);
+                    f.render_stateful_widget(
+                        Scrollbar::new(ScrollbarOrientation::VerticalRight),
+                        info.rect,
+                        &mut state,
+                    );
+                }
+            }
+
+            // Render visible card slots.
+            for slot in &slots {
+                let Some(card) = dash.cards_iter().nth(slot.flat_idx) else { continue };
+                if slot.rect.width < 3 || slot.rect.height < 2 {
+                    continue;
+                }
+                let sel = slot.flat_idx == selected_card;
+                let sub = if sel { sub_index } else { None };
+                render_card(f, slot.rect, card, app, sel, sub, in_editor);
+            }
+        }
     }
 }
 

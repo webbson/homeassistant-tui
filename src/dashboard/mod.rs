@@ -124,6 +124,15 @@ impl Serialize for Dashboard {
     }
 }
 
+/// Navigation direction for grid 2D traversal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NavDir {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
 // ── Dashboard helpers ───────────────────────────────────────────────────────
 
 impl Dashboard {
@@ -179,12 +188,12 @@ impl Dashboard {
         self.cards_iter().count()
     }
 
-    /// Get card by stable ID.
+    #[allow(dead_code)]
     pub fn card_by_id(&self, id: CardId) -> Option<&Card> {
         self.cards_iter().find(|c| c.id == id)
     }
 
-    /// Get card mutably by stable ID.
+    #[allow(dead_code)]
     pub fn card_by_id_mut(&mut self, id: CardId) -> Option<&mut Card> {
         self.cards_iter_mut().find(|c| c.id == id)
     }
@@ -194,7 +203,43 @@ impl Dashboard {
         self.cards_iter().position(|c| c.id == id)
     }
 
-    /// Remove a card by stable ID; returns the removed card.
+    /// Reverse of `flat_idx_from_grid`: flat index → (row, col, pos_in_col).
+    pub fn locate_grid_flat(&self, flat_idx: usize) -> Option<(usize, usize, usize)> {
+        let DashboardLayout::Grid { rows } = &self.layout else { return None; };
+        let mut f = 0usize;
+        for (ri, row) in rows.iter().enumerate() {
+            for (ci, col) in row.columns.iter().enumerate() {
+                if flat_idx >= f && flat_idx < f + col.cards.len() {
+                    return Some((ri, ci, flat_idx - f));
+                }
+                f += col.cards.len();
+            }
+        }
+        None
+    }
+
+    /// Compute the flat index for a (row, col, pos_in_col) triple in a grid layout.
+    pub fn flat_idx_from_grid(&self, row_idx: usize, col_idx: usize, pos_in_col: usize) -> Option<usize> {
+        let DashboardLayout::Grid { rows } = &self.layout else {
+            return None;
+        };
+        let mut f = 0usize;
+        for (ri, row) in rows.iter().enumerate() {
+            for (ci, col) in row.columns.iter().enumerate() {
+                if ri == row_idx && ci == col_idx {
+                    if pos_in_col < col.cards.len() {
+                        return Some(f + pos_in_col);
+                    } else {
+                        return None;
+                    }
+                }
+                f += col.cards.len();
+            }
+        }
+        None
+    }
+
+    #[allow(dead_code)]
     pub fn remove_card_by_id(&mut self, id: CardId) -> Option<Card> {
         match &mut self.layout {
             DashboardLayout::Free { cards, .. } => {
@@ -234,7 +279,7 @@ impl Dashboard {
         }
     }
 
-    /// Locate a card's (row, col, pos_in_col) in a grid-layout dashboard.
+    #[allow(dead_code)]
     pub fn locate_grid(&self, id: CardId) -> Option<(usize, usize, usize)> {
         let DashboardLayout::Grid { rows } = &self.layout else {
             return None;
@@ -256,6 +301,7 @@ impl Dashboard {
     }
 
     /// Remove a free-canvas card by flat index. Returns the removed card.
+    #[allow(dead_code)]
     pub fn remove_card_at_free(&mut self, idx: usize) -> Option<Card> {
         let DashboardLayout::Free { cards, .. } = &mut self.layout else {
             return None;
@@ -264,6 +310,228 @@ impl Dashboard {
             Some(cards.remove(idx))
         } else {
             None
+        }
+    }
+
+    /// Remove a card by flat index regardless of layout. Returns the removed card.
+    pub fn remove_card_at(&mut self, flat_idx: usize) -> Option<Card> {
+        match &mut self.layout {
+            DashboardLayout::Free { cards, .. } => {
+                if flat_idx < cards.len() {
+                    Some(cards.remove(flat_idx))
+                } else {
+                    None
+                }
+            }
+            DashboardLayout::Grid { rows } => {
+                let mut f = 0usize;
+                for row in rows.iter_mut() {
+                    for col in row.columns.iter_mut() {
+                        if flat_idx >= f && flat_idx < f + col.cards.len() {
+                            return Some(col.cards.remove(flat_idx - f));
+                        }
+                        f += col.cards.len();
+                    }
+                }
+                None
+            }
+        }
+    }
+
+    /// Append a new row to a grid-layout dashboard.
+    pub fn grid_add_row(&mut self, height: RowHeight, n_cols: usize) {
+        let DashboardLayout::Grid { rows } = &mut self.layout else { return; };
+        rows.push(GridRow {
+            height,
+            fill_height: None,
+            columns: (0..n_cols.max(1)).map(|_| GridColumn { fill_height: None, cards: vec![] }).collect(),
+        });
+    }
+
+    /// Remove a row by index. Returns false if index is out of range or last row.
+    pub fn grid_remove_row(&mut self, row_idx: usize) -> bool {
+        let DashboardLayout::Grid { rows } = &mut self.layout else { return false; };
+        if rows.len() <= 1 || row_idx >= rows.len() { return false; }
+        rows.remove(row_idx);
+        true
+    }
+
+    /// Swap two adjacent rows (move row_idx up or down).
+    pub fn grid_move_row(&mut self, row_idx: usize, up: bool) -> bool {
+        let DashboardLayout::Grid { rows } = &mut self.layout else { return false; };
+        let other = if up { row_idx.checked_sub(1) } else { row_idx.checked_add(1) };
+        let Some(other) = other else { return false; };
+        if other >= rows.len() { return false; }
+        rows.swap(row_idx, other);
+        true
+    }
+
+    /// Add a column to a row.
+    pub fn grid_add_column(&mut self, row_idx: usize) -> bool {
+        let DashboardLayout::Grid { rows } = &mut self.layout else { return false; };
+        let Some(row) = rows.get_mut(row_idx) else { return false; };
+        row.columns.push(GridColumn { fill_height: None, cards: vec![] });
+        true
+    }
+
+    /// Remove a column (and its cards) from a row.
+    pub fn grid_remove_column(&mut self, row_idx: usize, col_idx: usize) -> bool {
+        let DashboardLayout::Grid { rows } = &mut self.layout else { return false; };
+        let Some(row) = rows.get_mut(row_idx) else { return false; };
+        if row.columns.len() <= 1 || col_idx >= row.columns.len() { return false; }
+        row.columns.remove(col_idx);
+        true
+    }
+
+    /// Swap two adjacent columns within a row.
+    pub fn grid_move_column(&mut self, row_idx: usize, col_idx: usize, left: bool) -> bool {
+        let DashboardLayout::Grid { rows } = &mut self.layout else { return false; };
+        let Some(row) = rows.get_mut(row_idx) else { return false; };
+        let other = if left { col_idx.checked_sub(1) } else { col_idx.checked_add(1) };
+        let Some(other) = other else { return false; };
+        if other >= row.columns.len() { return false; }
+        row.columns.swap(col_idx, other);
+        true
+    }
+
+    /// Move a card up or down within its column.
+    pub fn grid_move_card_in_column(&mut self, row_idx: usize, col_idx: usize, pos: usize, up: bool) -> bool {
+        let DashboardLayout::Grid { rows } = &mut self.layout else { return false; };
+        let Some(row) = rows.get_mut(row_idx) else { return false; };
+        let Some(col) = row.columns.get_mut(col_idx) else { return false; };
+        let other = if up { pos.checked_sub(1) } else { pos.checked_add(1) };
+        let Some(other) = other else { return false; };
+        if other >= col.cards.len() { return false; }
+        col.cards.swap(pos, other);
+        true
+    }
+
+    /// Set the height of a grid row.
+    pub fn grid_set_row_height(&mut self, row_idx: usize, height: RowHeight) -> bool {
+        let DashboardLayout::Grid { rows } = &mut self.layout else { return false; };
+        let Some(row) = rows.get_mut(row_idx) else { return false; };
+        row.height = height;
+        true
+    }
+
+    /// Toggle the `fill_height` default for a row.
+    pub fn grid_toggle_row_fill_height(&mut self, row_idx: usize) -> bool {
+        let DashboardLayout::Grid { rows } = &mut self.layout else { return false; };
+        let Some(row) = rows.get_mut(row_idx) else { return false; };
+        let current = row.fill_height.unwrap_or(false);
+        row.fill_height = Some(!current);
+        true
+    }
+
+    /// Toggle `fill_height` for a specific column.
+    pub fn grid_toggle_column_fill_height(&mut self, row_idx: usize, col_idx: usize) -> bool {
+        let DashboardLayout::Grid { rows } = &mut self.layout else { return false; };
+        let Some(row) = rows.get_mut(row_idx) else { return false; };
+        let Some(col) = row.columns.get_mut(col_idx) else { return false; };
+        let current = col.fill_height.unwrap_or(false);
+        col.fill_height = Some(!current);
+        true
+    }
+
+    /// Return the flat index of the neighboring card in a grid layout.
+    /// Returns `None` if the selection is already at the boundary or the layout is Free.
+    pub fn neighbor(&self, flat_idx: usize, dir: NavDir) -> Option<usize> {
+        let DashboardLayout::Grid { rows } = &self.layout else {
+            return None;
+        };
+
+        // Locate (ri, ci, pos_in_col, col_flat_start) for flat_idx.
+        let mut f = 0usize;
+        let mut ri0 = 0;
+        let mut ci0 = 0;
+        let mut pos0 = 0;
+        let mut col_start0 = 0;
+        let mut found = false;
+        'outer: for (ri, row) in rows.iter().enumerate() {
+            for (ci, col) in row.columns.iter().enumerate() {
+                if flat_idx >= f && flat_idx < f + col.cards.len() {
+                    ri0 = ri;
+                    ci0 = ci;
+                    pos0 = flat_idx - f;
+                    col_start0 = f;
+                    found = true;
+                    break 'outer;
+                }
+                f += col.cards.len();
+            }
+        }
+        if !found {
+            return None;
+        }
+
+        let col_flat_start = |target_ri: usize, target_ci: usize| -> Option<usize> {
+            let mut s = 0usize;
+            for (i, row) in rows.iter().enumerate() {
+                if i == target_ri {
+                    for (j, col) in row.columns.iter().enumerate() {
+                        if j == target_ci {
+                            return Some(s);
+                        }
+                        s += col.cards.len();
+                    }
+                    return None;
+                }
+                for col in &row.columns {
+                    s += col.cards.len();
+                }
+            }
+            None
+        };
+
+        match dir {
+            NavDir::Up => {
+                if pos0 == 0 {
+                    None
+                } else {
+                    Some(col_start0 + pos0 - 1)
+                }
+            }
+            NavDir::Down => {
+                let col_len = rows[ri0].columns[ci0].cards.len();
+                if pos0 + 1 >= col_len {
+                    None
+                } else {
+                    Some(col_start0 + pos0 + 1)
+                }
+            }
+            NavDir::Left => {
+                let (tri, tci) = if ci0 > 0 {
+                    (ri0, ci0 - 1)
+                } else if ri0 > 0 {
+                    let prev_ri = ri0 - 1;
+                    let last_ci = rows[prev_ri].columns.len().checked_sub(1)?;
+                    (prev_ri, last_ci)
+                } else {
+                    return None;
+                };
+                let start = col_flat_start(tri, tci)?;
+                let col_len = rows[tri].columns[tci].cards.len();
+                if col_len == 0 {
+                    return None;
+                }
+                Some(start + pos0.min(col_len - 1))
+            }
+            NavDir::Right => {
+                let row_cols = rows[ri0].columns.len();
+                let (tri, tci) = if ci0 + 1 < row_cols {
+                    (ri0, ci0 + 1)
+                } else if ri0 + 1 < rows.len() {
+                    (ri0 + 1, 0)
+                } else {
+                    return None;
+                };
+                let start = col_flat_start(tri, tci)?;
+                let col_len = rows[tri].columns[tci].cards.len();
+                if col_len == 0 {
+                    return None;
+                }
+                Some(start + pos0.min(col_len - 1))
+            }
         }
     }
 }
@@ -357,12 +625,6 @@ impl GridRow {
 
 // ── Dashboard layout ────────────────────────────────────────────────────────
 
-/// Discriminant used in the custom `Dashboard` serde impl.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum LayoutKind {
-    Free,
-    Grid,
-}
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -696,6 +958,47 @@ impl Card {
                 }
             }
             _ => Vec::new(),
+        }
+    }
+
+    /// Compute the preferred terminal-row height for a grid-layout column.
+    /// `available_width` is the column width in terminal columns (for text-wrap).
+    /// `filtered_entity_count` is the resolved entity count for FilteredEntityList (None = unknown).
+    ///
+    /// If `self.height` is set it always wins. Otherwise falls back to per-kind static defaults,
+    /// with Text/EntityList/FilteredEntityList scaling with content.
+    pub fn preferred_height(&self, available_width: u16, filtered_entity_count: Option<usize>) -> u16 {
+        if let Some(h) = self.height {
+            return h;
+        }
+        let inner_w = (available_width.saturating_sub(2)).max(1) as usize;
+        match &self.kind {
+            CardKind::Entity { .. } | CardKind::Toggle { .. } => 3,
+            CardKind::Gauge { .. } => 5,
+            CardKind::Clock { .. } => 3,
+            CardKind::Statistics { .. } => 4,
+            CardKind::MediaPlayer { .. } => 6,
+            CardKind::Weather { show_forecast, .. } => {
+                if *show_forecast { 12 } else { 6 }
+            }
+            CardKind::Image { .. } => 10,
+            CardKind::Graph { .. } => 10,
+            CardKind::Text { markdown, .. } => {
+                // Count visual lines including soft-wrapping.
+                let lines: u16 = markdown
+                    .split('\n')
+                    .map(|l| {
+                        let chars = l.chars().count().max(1);
+                        ((chars + inner_w - 1) / inner_w) as u16
+                    })
+                    .sum();
+                lines.max(1) + 2 // +2 for border
+            }
+            CardKind::EntityList { entities, .. } => (entities.len() as u16).saturating_add(2),
+            CardKind::FilteredEntityList { .. } => {
+                let count = filtered_entity_count.unwrap_or(4);
+                (count as u16).saturating_add(2).max(4)
+            }
         }
     }
 
@@ -1065,5 +1368,143 @@ pos: { col: 0, row: 0, w: 6, h: 4 }
         } else {
             panic!("wrong variant")
         }
+    }
+
+    fn make_grid_dashboard(col_card_counts: &[&[usize]]) -> Dashboard {
+        // col_card_counts: one slice per row, each element = number of cards in that column.
+        let mut next_id = 1u64;
+        let rows: Vec<GridRow> = col_card_counts
+            .iter()
+            .map(|cols| GridRow {
+                height: RowHeight::Fixed(10),
+                fill_height: None,
+                columns: cols
+                    .iter()
+                    .map(|&n| GridColumn {
+                        fill_height: None,
+                        cards: (0..n)
+                            .map(|_| {
+                                let id = CardId(next_id);
+                                next_id += 1;
+                                Card {
+                                    id,
+                                    kind: CardKind::Text {
+                                        markdown: String::new(),
+                                        title: None,
+                                    },
+                                    pos: None,
+                                    height: None,
+                                    color: None,
+                                    size: CardSize::Normal,
+                                }
+                            })
+                            .collect(),
+                    })
+                    .collect(),
+            })
+            .collect();
+        Dashboard { name: "test".into(), layout: DashboardLayout::Grid { rows } }
+    }
+
+    #[test]
+    fn neighbor_up_down_within_column() {
+        // 1 row, 1 col, 3 cards (flat 0/1/2)
+        let dash = make_grid_dashboard(&[&[3]]);
+        assert_eq!(dash.neighbor(0, NavDir::Up), None, "top of col stays");
+        assert_eq!(dash.neighbor(0, NavDir::Down), Some(1));
+        assert_eq!(dash.neighbor(1, NavDir::Up), Some(0));
+        assert_eq!(dash.neighbor(2, NavDir::Down), None, "bottom of col stays");
+    }
+
+    #[test]
+    fn neighbor_left_right_between_columns() {
+        // 1 row, 3 cols of 2 cards each: flat 0-1 / 2-3 / 4-5
+        let dash = make_grid_dashboard(&[&[2, 2, 2]]);
+        assert_eq!(dash.neighbor(0, NavDir::Left), None, "leftmost col stays");
+        assert_eq!(dash.neighbor(0, NavDir::Right), Some(2), "go to col 1 pos 0");
+        assert_eq!(dash.neighbor(3, NavDir::Left), Some(1), "col 1 pos 1 → col 0 pos 1");
+        // col 2 flat 4-5; neighbor Right from last col → None
+        assert_eq!(dash.neighbor(4, NavDir::Right), None);
+    }
+
+    #[test]
+    fn neighbor_wraps_row_boundary() {
+        // 2 rows: row0 has 1 col of 2 cards; row1 has 1 col of 2 cards
+        // flat: 0-1 (row0 col0), 2-3 (row1 col0)
+        let dash = make_grid_dashboard(&[&[2], &[2]]);
+        // Left from row0 col0 → None (first row)
+        assert_eq!(dash.neighbor(0, NavDir::Left), None);
+        // Right from row0 col0 → row1 col0 pos0 = flat 2
+        assert_eq!(dash.neighbor(0, NavDir::Right), Some(2));
+        // Left from row1 col0 → row0 col0 pos0 = flat 0
+        assert_eq!(dash.neighbor(2, NavDir::Left), Some(0));
+        // Right from row1 col0 → None (last row)
+        assert_eq!(dash.neighbor(2, NavDir::Right), None);
+    }
+
+    #[test]
+    fn flat_idx_roundtrip() {
+        // 2 rows: row0 has 2 cols (1 card each), row1 has 1 col (2 cards)
+        // flat order: 0 (r0c0p0), 1 (r0c1p0), 2 (r1c0p0), 3 (r1c0p1)
+        let dash = make_grid_dashboard(&[&[1, 1], &[2]]);
+        assert_eq!(dash.flat_idx_from_grid(0, 0, 0), Some(0));
+        assert_eq!(dash.flat_idx_from_grid(0, 1, 0), Some(1));
+        assert_eq!(dash.flat_idx_from_grid(1, 0, 0), Some(2));
+        assert_eq!(dash.flat_idx_from_grid(1, 0, 1), Some(3));
+        assert_eq!(dash.flat_idx_from_grid(1, 0, 2), None); // out of range
+
+        assert_eq!(dash.locate_grid_flat(0), Some((0, 0, 0)));
+        assert_eq!(dash.locate_grid_flat(1), Some((0, 1, 0)));
+        assert_eq!(dash.locate_grid_flat(2), Some((1, 0, 0)));
+        assert_eq!(dash.locate_grid_flat(3), Some((1, 0, 1)));
+        assert_eq!(dash.locate_grid_flat(4), None);
+    }
+
+    #[test]
+    fn grid_structural_ops() {
+        let mut dash = make_grid_dashboard(&[&[2, 1]]);
+        // Save the id of flat 0 to verify selection stability.
+        let id0 = dash.cards_iter().next().unwrap().id;
+
+        // Move row down: still only 1 row, should be a no-op.
+        assert!(!dash.grid_move_row(0, false));
+
+        // Add a second row.
+        dash.grid_add_row(RowHeight::Auto, 2);
+        if let DashboardLayout::Grid { rows } = &dash.layout {
+            assert_eq!(rows.len(), 2);
+        }
+
+        // Add column to row 0.
+        dash.grid_add_column(0);
+        if let DashboardLayout::Grid { rows } = &dash.layout {
+            assert_eq!(rows[0].columns.len(), 3);
+        }
+
+        // Remove column from row 0 (must leave ≥1 column).
+        assert!(dash.grid_remove_column(0, 2));
+        if let DashboardLayout::Grid { rows } = &dash.layout {
+            assert_eq!(rows[0].columns.len(), 2);
+        }
+
+        // Move card in column: card 0 and 1 are both in col 0 of row 0.
+        // Swap them (move card at pos 0 down).
+        let before_id = dash.flat_idx_of(id0).unwrap();
+        assert_eq!(before_id, 0);
+        dash.grid_move_card_in_column(0, 0, 0, false); // move pos-0 down → pos-1
+        // id0 should now be at flat index 1.
+        assert_eq!(dash.flat_idx_of(id0), Some(1));
+    }
+
+    #[test]
+    fn selection_preserved_through_row_move() {
+        let mut dash = make_grid_dashboard(&[&[1], &[1]]);
+        // flat 0 = row0, flat 1 = row1
+        let id_row0 = dash.cards_iter().next().unwrap().id;
+
+        // Move row 0 down: row0 → row1 position.
+        dash.grid_move_row(0, false);
+        // Card that was at flat 0 should now be at flat 1.
+        assert_eq!(dash.flat_idx_of(id_row0), Some(1));
     }
 }
