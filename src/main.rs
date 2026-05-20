@@ -53,7 +53,20 @@ fn main() -> Result<()> {
     // Query the terminal for image protocol + font size BEFORE switching to
     // alt screen + raw mode — DCS responses don't round-trip reliably otherwise,
     // which forces ratatui-image to fall back to pixelated halfblocks.
-    let picker = ratatui_image::picker::Picker::from_query_stdio().ok();
+    let picker = match ratatui_image::picker::Picker::from_query_stdio() {
+        Ok(p) => {
+            tracing::info!(
+                protocol = ?p.protocol_type(),
+                font_size = ?p.font_size(),
+                "image picker initialised"
+            );
+            Some(p)
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "image picker query failed — falling back to halfblocks");
+            None
+        }
+    };
 
     let terminal = setup_terminal()?;
     let result = rt.block_on(app::run(terminal, picker, args.config, args.dashboards));
