@@ -3,7 +3,7 @@ use std::path::Path;
 use color_eyre::eyre::Context;
 use color_eyre::Result;
 
-use crate::dashboard::{Card, CardKind, CardSize, Dashboard, DashboardFile, Grid, Pos};
+use crate::dashboard::{Card, CardId, CardKind, CardSize, Dashboard, DashboardFile, DashboardLayout, Grid, Pos};
 
 const EXAMPLE_CONFIG: &str = include_str!("../../config/config.example.yaml");
 
@@ -45,21 +45,25 @@ fn welcome_dashboard_file() -> DashboardFile {
     DashboardFile {
         dashboards: vec![Dashboard {
             name: "Welcome".into(),
-            grid: Grid { cols: 12, rows: 8 },
-            cards: vec![Card {
-                kind: CardKind::Text {
-                    markdown: WELCOME_MARKDOWN.into(),
-                    title: Some("Setup".into()),
-                },
-                pos: Pos {
-                    col: 1,
-                    row: 1,
-                    w: 10,
-                    h: 5,
-                },
-                color: None,
-                size: CardSize::Normal,
-            }],
+            layout: DashboardLayout::Free {
+                grid: Grid { cols: 12, rows: 8 },
+                cards: vec![Card {
+                    id: CardId::ZERO,
+                    kind: CardKind::Text {
+                        markdown: WELCOME_MARKDOWN.into(),
+                        title: Some("Setup".into()),
+                    },
+                    pos: Some(Pos {
+                        col: 1,
+                        row: 1,
+                        w: 10,
+                        h: 5,
+                    }),
+                    height: None,
+                    color: None,
+                    size: CardSize::Normal,
+                }],
+            },
         }],
     }
 }
@@ -101,6 +105,6 @@ mod tests {
         let back: DashboardFile = serde_yaml::from_str(&yaml).unwrap();
         assert_eq!(back.dashboards.len(), 1);
         assert_eq!(back.dashboards[0].name, "Welcome");
-        assert_eq!(back.dashboards[0].cards.len(), 1);
+        assert_eq!(back.dashboards[0].card_count(), 1);
     }
 }

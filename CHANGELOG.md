@@ -7,6 +7,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 ## [Unreleased]
 
 ### Added
+- **Grid layout** — new `layout: type: grid` dashboard type. Dashboards are a vertical stack of rows; each row has one or more columns of cards. Cards stack vertically at natural height; columns scroll when content overflows. Rows support `height: <n>` (fixed terminal rows) or `height: auto` (shares remaining space). Columns and rows support `fill_height` to scale card heights proportionally to fill the column.
+- **Grid editor** — full structural editing in the grid layout: add/remove/reorder rows and columns, move cards up/down within a column, set row heights from the menu. `R` focuses the row menu, `C` the column menu, `Esc` returns to card focus. Row/column menus accessible via `m`.
+- **Cross-dashboard move/copy** — `Move to dashboard…` and `Copy to dashboard…` in the card menu for both Free and Grid dashboards. Grid targets prompt for destination row and column.
+- **Stable `CardId`** — cards carry a persistent numeric ID assigned at load. Selection is stable across structural mutations (reordering rows/columns does not change which card is highlighted).
 
 ### Changed
 

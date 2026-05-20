@@ -1,73 +1,73 @@
-use ratatui::layout::Rect;
+use std::collections::HashMap;
+
+use ratatui::layout::{Constraint, Layout, Rect};
 #[allow(unused_imports)]
 use ratatui::style::{Color, Style, Stylize};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Clear, List, ListItem, ListState, Paragraph};
+use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph};
 use ratatui::Frame;
 
 use crate::app::App;
-use crate::dashboard::editor::SeverityAccum;
-use crate::dashboard::editor::{CardTypeStub, EditorMode, SeriesIndexOp};
-use crate::dashboard::layout::cell_to_rect;
+use crate::dashboard::editor::{GridFocus, SeverityAccum};
+use crate::dashboard::editor::{CardTypeStub, EditorMode, SeriesIndexOp, TransferOp};
+use crate::dashboard::DashboardLayout;
+use crate::dashboard::layout::{cell_to_rect, grid_layout};
 use crate::dashboard::{BarOrientation, CardSize};
 
 pub fn draw(f: &mut Frame, area: Rect, app: &mut App) {
-    // Extract the scalar values we need from editor+dash before the &mut dashboard draw.
-    let (dash_idx, cursor_col, cursor_row, _selected_card, dash_grid, card_pos) = {
-        let Some(editor) = app.editor.as_ref() else {
-            return;
+    // Reserve the last line for the editor help bar.
+    let chunks = Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).split(area);
+    let main_area = chunks[0];
+    let help_area = chunks[1];
+
+    // Detect layout type before the mutable dashboard draw.
+    let (dash_idx, is_grid, cursor_col, cursor_row, dash_grid, card_pos, grid_focus, selected_card) = {
+        let Some(editor) = app.editor.as_ref() else { return; };
+        let Some(dash) = app.dashboards.get(editor.dash_idx) else { return; };
+        let is_grid = matches!(&dash.layout, DashboardLayout::Grid { .. });
+        let card_pos = if !is_grid {
+            editor.selected_card.and_then(|i| dash.card(i)).and_then(|c| c.pos)
+        } else {
+            None
         };
-        let Some(dash) = app.dashboards.get(editor.dash_idx) else {
-            return;
-        };
-        let card_pos = editor
-            .selected_card
-            .and_then(|i| dash.cards.get(i))
-            .map(|c| c.pos);
         (
             editor.dash_idx,
+            is_grid,
             editor.cursor_col,
             editor.cursor_row,
-            editor.selected_card,
-            dash.grid,
+            dash.free_grid().unwrap_or(crate::dashboard::Grid { cols: 12, rows: 8 }),
             card_pos,
+            editor.grid_focus,
+            editor.selected_card,
         )
     };
 
-    crate::screens::dashboard::draw(f, area, app, dash_idx, usize::MAX, None);
+    crate::screens::dashboard::draw(f, main_area, app, dash_idx, usize::MAX, None);
 
-    let cur_rect = cell_to_rect(
-        area,
-        dash_grid,
-        crate::dashboard::Pos {
-            col: cursor_col,
-            row: cursor_row,
-            w: 1,
-            h: 1,
-        },
-    );
-    if cur_rect.width > 0 && cur_rect.height > 0 {
-        f.render_widget(
-            Block::new().style(Style::new().bg(Color::DarkGray)),
-            cur_rect,
+    if is_grid {
+        draw_grid_editor_overlay(f, main_area, app, dash_idx, grid_focus, selected_card);
+    } else {
+        // Free-canvas: cursor highlight + selected card border.
+        let cur_rect = cell_to_rect(
+            main_area,
+            dash_grid,
+            crate::dashboard::Pos { col: cursor_col, row: cursor_row, w: 1, h: 1 },
         );
+        if cur_rect.width > 0 && cur_rect.height > 0 {
+            f.render_widget(Block::new().style(Style::new().bg(Color::DarkGray)), cur_rect);
+        }
+        if let Some(pos) = card_pos {
+            let r = cell_to_rect(main_area, dash_grid, pos);
+            f.render_widget(Block::bordered().border_style(Style::new().fg(Color::Yellow).bold()), r);
+        }
     }
 
-    if let Some(pos) = card_pos {
-        let r = cell_to_rect(area, dash_grid, pos);
-        f.render_widget(
-            Block::bordered().border_style(Style::new().fg(Color::Yellow).bold()),
-            r,
-        );
-    }
+    // Help bar.
+    draw_editor_help_line(f, help_area, app, is_grid);
 
     // Re-borrow editor and dash after the &mut dashboard draw.
-    let Some(editor) = app.editor.as_ref() else {
-        return;
-    };
-    let Some(dash) = app.dashboards.get(editor.dash_idx) else {
-        return;
-    };
+    let Some(editor) = app.editor.as_ref() else { return; };
+    let Some(dash) = app.dashboards.get(editor.dash_idx) else { return; };
 
     match &editor.mode {
         EditorMode::PickingType { selected } => draw_palette(f, area, *selected),
@@ -370,8 +370,65 @@ pub fn draw(f: &mut Frame, area: Rect, app: &mut App) {
                 buf,
             );
         }
+        // Cross-dashboard transfer flows
+        EditorMode::PickingTargetDashboard { op, selected, .. } => {
+            draw_dashboard_picker(f, area, app, *selected, *op, "Pick target dashboard");
+        }
+        EditorMode::PickingTargetGridRow { target_dash, selected, .. } => {
+            draw_grid_row_picker(f, area, app, *target_dash, *selected);
+        }
+        EditorMode::PickingTargetGridColumn { target_dash, target_row, selected, .. } => {
+            draw_grid_col_picker(f, area, app, *target_dash, *target_row, *selected);
+        }
+        EditorMode::PickingNewDashboardLayout { selected } => {
+            draw_new_dashboard_layout_picker(f, area, *selected);
+        }
+        EditorMode::ConfirmDeleteDashboard => {
+            draw_confirm(f, area, "Delete this dashboard? (y/n)");
+        }
+        EditorMode::PickingNewRowHeight { buf } => {
+            draw_text_input(f, area, "Add row (1/2)", "Enter height: integer or \"auto\"", buf);
+        }
+        EditorMode::PickingNewRowColumnCount { buf, .. } => {
+            draw_text_input(f, area, "Add row (2/2)", "Number of columns", buf);
+        }
+        EditorMode::EditingRowHeight { buf, row_idx } => {
+            draw_text_input(f, area, &format!("Row {} height", row_idx + 1), "integer or \"auto\"", buf);
+        }
+        EditorMode::ConfirmRemoveRow { row_idx } => {
+            draw_confirm(f, area, &format!("Remove row {}? (y/n)", row_idx + 1));
+        }
+        EditorMode::ConfirmRemoveColumn { row_idx, col_idx } => {
+            draw_confirm(f, area, &format!("Remove col {} from row {}? (y/n)", col_idx + 1, row_idx + 1));
+        }
         EditorMode::Browse => {}
     }
+}
+
+fn draw_new_dashboard_layout_picker(f: &mut Frame, area: Rect, selected: usize) {
+    let r = modal_rect(area, 52, 8);
+    f.render_widget(Clear, r);
+    let block = Block::bordered().title(" New dashboard — pick layout (j/k + Enter, or 1/2) ");
+    let inner = block.inner(r);
+    f.render_widget(block, r);
+    let items: [(&str, &str, &str); 2] = [
+        ("1", "Free canvas", "place cards at any (col, row, w, h) position"),
+        ("2", "Grid layout", "stacked rows of columns, cards fill column width"),
+    ];
+    let list_items: Vec<ListItem> = items
+        .iter()
+        .enumerate()
+        .map(|(i, (key, name, desc))| {
+            let style = if i == selected {
+                Style::new().bold().fg(Color::Yellow)
+            } else {
+                Style::new()
+            };
+            ListItem::new(format!("[{key}] {name} — {desc}")).style(style)
+        })
+        .collect();
+    let list = List::new(list_items);
+    f.render_widget(list, inner);
 }
 
 fn draw_image_pick_source(f: &mut Frame, area: Rect, selected: usize) {
@@ -424,6 +481,155 @@ fn draw_wx_show_forecast(f: &mut Frame, area: Rect, selected: usize) {
         .collect();
     let list = List::new(list_items);
     f.render_widget(list, inner);
+}
+
+fn draw_grid_editor_overlay(
+    f: &mut Frame,
+    area: Rect,
+    app: &App,
+    dash_idx: usize,
+    grid_focus: Option<GridFocus>,
+    selected_flat: Option<usize>,
+) {
+    let Some(dash) = app.dashboards.get(dash_idx) else { return; };
+    let DashboardLayout::Grid { rows } = &dash.layout else { return; };
+
+    // Build col_scrolls like the dashboard renderer does.
+    let col_scrolls: HashMap<(usize, usize), u16> = app
+        .column_scroll
+        .iter()
+        .filter(|((di, _, _), _)| *di == dash_idx)
+        .map(|((_, ri, ci), &offset)| ((*ri, *ci), offset))
+        .collect();
+
+    // Use zero heights — we only need col_infos for layout positions.
+    let card_count = dash.card_count();
+    let card_heights: Vec<u16> = vec![4; card_count];
+    let (_slots, col_infos) = grid_layout(rows, area, &col_scrolls, &card_heights);
+
+    for info in &col_infos {
+        let (border_color, title_color) = match grid_focus {
+            Some(GridFocus::Row { row }) if row == info.row_idx => {
+                (Color::Yellow, Color::Yellow)
+            }
+            Some(GridFocus::Column { row, col })
+                if row == info.row_idx && col == info.col_idx =>
+            {
+                (Color::Cyan, Color::Cyan)
+            }
+            Some(GridFocus::Card { row, col, .. })
+                if row == info.row_idx && col == info.col_idx =>
+            {
+                (Color::Blue, Color::Blue)
+            }
+            _ => (Color::White, Color::White),
+        };
+
+        let row = rows.get(info.row_idx);
+        let col = row.and_then(|r| r.columns.get(info.col_idx));
+        let card_n = col.map(|c| c.cards.len()).unwrap_or(0);
+        let title = format!(
+            " R{} C{} ({} card{}) ",
+            info.row_idx + 1,
+            info.col_idx + 1,
+            card_n,
+            if card_n == 1 { "" } else { "s" }
+        );
+
+        let is_inactive = matches!(grid_focus, None)
+            || matches!(
+                grid_focus,
+                Some(GridFocus::Card { row, col, .. }) | Some(GridFocus::Column { row, col })
+                    if row != info.row_idx || col != info.col_idx
+            )
+            || matches!(
+                grid_focus,
+                Some(GridFocus::Row { row }) if row != info.row_idx
+            );
+        let block = Block::new()
+            .borders(Borders::ALL)
+            .border_style(if is_inactive {
+                Style::new().fg(border_color).dim()
+            } else {
+                Style::new().fg(border_color)
+            })
+            .title(Span::styled(
+                title,
+                if is_inactive {
+                    Style::new().fg(title_color).dim()
+                } else {
+                    Style::new().fg(title_color)
+                },
+            ));
+        f.render_widget(block, info.rect);
+    }
+
+    // Highlight the selected card with a yellow border on top of everything.
+    if let Some(flat) = selected_flat {
+        // Find which col_info contains this card, then compute its rect within the slot.
+        let loc = dash.locate_grid_flat(flat);
+        if let Some((ri, ci, _)) = loc {
+            if let Some(info) = col_infos.iter().find(|c| c.row_idx == ri && c.col_idx == ci) {
+                // Re-run grid_layout with real heights to get the card slot rect.
+                let n_cols = rows.get(ri).map(|r| r.columns.len() as u16).unwrap_or(1);
+                let col_w = if n_cols > 0 { area.width / n_cols } else { area.width };
+                let real_heights: Vec<u16> = dash
+                    .cards_iter()
+                    .map(|c| c.preferred_height(col_w, None))
+                    .collect();
+                let (slots, _) = grid_layout(rows, area, &col_scrolls, &real_heights);
+                if let Some(slot) = slots.iter().find(|s| s.flat_idx == flat) {
+                    f.render_widget(
+                        Block::bordered().border_style(Style::new().fg(Color::Yellow).bold()),
+                        slot.rect,
+                    );
+                }
+                // Also highlight the focused column border in a brighter shade.
+                let _ = info; // already drawn above
+            }
+        }
+    }
+}
+
+fn draw_editor_help_line(f: &mut Frame, area: Rect, app: &App, is_grid: bool) {
+    let Some(editor) = app.editor.as_ref() else { return; };
+
+    let focus_str: String = if is_grid {
+        match editor.grid_focus {
+            Some(GridFocus::Card { row, col, pos_in_col }) => {
+                format!("Row {} · Col {} · Card {}  ", row + 1, col + 1, pos_in_col + 1)
+            }
+            Some(GridFocus::Column { row, col }) => {
+                format!("Row {} · Col {} [column focus]  ", row + 1, col + 1)
+            }
+            Some(GridFocus::Row { row }) => {
+                format!("Row {} [row focus]  ", row + 1)
+            }
+            None => {
+                if app.dashboards.get(editor.dash_idx).map(|d| d.card_count()).unwrap_or(0) == 0 {
+                    "Empty grid — ".to_string()
+                } else {
+                    String::new()
+                }
+            }
+        }
+    } else {
+        String::new()
+    };
+
+    let keys = if is_grid {
+        "a=add  m=menu  j/k=up/dn  h/l=left/right  R=row focus  C=col focus  u=undo  s=save  Esc=exit"
+    } else {
+        "a=add  m=menu  hjkl=move cursor  Space=select  Enter=drop  H/L/K/J=resize  u=undo  s=save  Esc=exit"
+    };
+
+    let dirty = if editor.dirty { " [unsaved]" } else { "" };
+    let line = Line::from(vec![
+        Span::styled(&focus_str, Style::new().fg(Color::Cyan).bold()),
+        Span::styled(keys, Style::new().fg(Color::DarkGray)),
+        Span::styled(dirty, Style::new().fg(Color::Yellow)),
+    ]);
+    f.render_widget(Paragraph::new(line).style(Style::new().bg(Color::Black)), area);
 }
 
 fn modal_rect(parent: Rect, w: u16, h: u16) -> Rect {
@@ -691,10 +897,10 @@ fn draw_menu(
     selected: usize,
 ) {
     let title = match context {
-        crate::dashboard::editor::MenuContext::Card(idx) => {
-            format!(" Card #{} settings ", idx + 1)
-        }
+        crate::dashboard::editor::MenuContext::Card(idx) => format!(" Card #{} settings ", idx + 1),
         crate::dashboard::editor::MenuContext::Dashboard => " Dashboard settings ".to_string(),
+        crate::dashboard::editor::MenuContext::Row(r) => format!(" Row {} settings ", r + 1),
+        crate::dashboard::editor::MenuContext::GridColumn(r, c) => format!(" Row {} col {} settings ", r + 1, c + 1),
     };
     let h = (items.len() as u16 + 4).min(area.height.saturating_sub(4));
     let r = modal_rect(area, 44, h.max(6));
@@ -1424,7 +1630,7 @@ fn draw_graph_add_one_series(
         .editor
         .as_ref()
         .and_then(|ed| app.dashboards.get(ed.dash_idx))
-        .and_then(|d| d.cards.get(card_idx))
+        .and_then(|d| d.card(card_idx))
         .and_then(|c| {
             if let crate::dashboard::CardKind::Graph { instance, .. } = &c.kind {
                 Some(instance.clone())
@@ -1521,8 +1727,7 @@ fn draw_graph_pick_series(
     selected: usize,
 ) {
     let entities: Vec<String> = dash
-        .cards
-        .get(card_idx)
+        .card(card_idx)
         .and_then(|c| {
             if let crate::dashboard::CardKind::Graph { entities, .. } = &c.kind {
                 Some(
@@ -1662,6 +1867,119 @@ fn draw_stats_pick_metric(f: &mut Frame, area: Rect, selected: usize) {
     f.render_stateful_widget(
         List::new(items)
             .block(Block::bordered().title(" Statistics — pick metric (j/k · Enter · Esc) "))
+            .highlight_style(Style::new().reversed())
+            .highlight_symbol("▶ "),
+        r,
+        &mut state,
+    );
+}
+
+fn draw_dashboard_picker(
+    f: &mut Frame,
+    area: Rect,
+    app: &App,
+    selected: usize,
+    op: TransferOp,
+    title: &str,
+) {
+    let _ = op;
+    let r = modal_rect(area, 50, 14);
+    f.render_widget(Clear, r);
+    let items: Vec<ListItem<'_>> = app
+        .dashboards
+        .iter()
+        .enumerate()
+        .map(|(i, d)| {
+            let label = format!("  {}  {}", i + 1, d.name);
+            ListItem::new(label)
+        })
+        .collect();
+    let mut state = ListState::default();
+    if !items.is_empty() {
+        state.select(Some(selected.min(items.len() - 1)));
+    }
+    let header = format!(" {} (j/k · Enter · Esc) ", title);
+    f.render_stateful_widget(
+        List::new(items)
+            .block(Block::bordered().title(header.as_str()))
+            .highlight_style(Style::new().reversed())
+            .highlight_symbol("▶ "),
+        r,
+        &mut state,
+    );
+}
+
+fn draw_grid_row_picker(
+    f: &mut Frame,
+    area: Rect,
+    app: &App,
+    target_dash: usize,
+    selected: usize,
+) {
+    let r = modal_rect(area, 50, 14);
+    f.render_widget(Clear, r);
+    let items: Vec<ListItem<'_>> = app
+        .dashboards
+        .get(target_dash)
+        .and_then(|d| if let DashboardLayout::Grid { rows } = &d.layout { Some(rows) } else { None })
+        .map(|rows| {
+            rows.iter()
+                .enumerate()
+                .map(|(i, row)| {
+                    let h = match row.height {
+                        crate::dashboard::RowHeight::Fixed(n) => format!("{}r", n),
+                        crate::dashboard::RowHeight::Auto => "auto".into(),
+                    };
+                    ListItem::new(format!("  Row {}  [{} cols, height {}]", i + 1, row.columns.len(), h))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let mut state = ListState::default();
+    if !items.is_empty() {
+        state.select(Some(selected.min(items.len() - 1)));
+    }
+    f.render_stateful_widget(
+        List::new(items)
+            .block(Block::bordered().title(" Pick row (j/k · Enter · Esc) "))
+            .highlight_style(Style::new().reversed())
+            .highlight_symbol("▶ "),
+        r,
+        &mut state,
+    );
+}
+
+fn draw_grid_col_picker(
+    f: &mut Frame,
+    area: Rect,
+    app: &App,
+    target_dash: usize,
+    target_row: usize,
+    selected: usize,
+) {
+    let r = modal_rect(area, 50, 14);
+    f.render_widget(Clear, r);
+    let items: Vec<ListItem<'_>> = app
+        .dashboards
+        .get(target_dash)
+        .and_then(|d| if let DashboardLayout::Grid { rows } = &d.layout { rows.get(target_row) } else { None })
+        .map(|row| {
+            row.columns
+                .iter()
+                .enumerate()
+                .map(|(i, col)| {
+                    ListItem::new(format!("  Col {}  [{} card(s)]", i + 1, col.cards.len()))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let mut state = ListState::default();
+    if !items.is_empty() {
+        state.select(Some(selected.min(items.len() - 1)));
+    }
+    f.render_stateful_widget(
+        List::new(items)
+            .block(Block::bordered().title(" Pick column (j/k · Enter · Esc) "))
             .highlight_style(Style::new().reversed())
             .highlight_symbol("▶ "),
         r,

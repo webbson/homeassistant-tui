@@ -56,6 +56,8 @@ pub struct App {
     pub image_inflight: HashSet<(Alias, EntityId)>,
     /// ratatui-image protocol picker; None when terminal doesn't support graphics.
     pub image_picker: Option<ratatui_image::picker::Picker>,
+    /// Per-column scroll offsets for grid dashboards: (dash_idx, row_idx, col_idx) → rows scrolled.
+    pub column_scroll: HashMap<(usize, usize, usize), u16>,
 }
 
 pub struct ImageCacheEntry {
@@ -95,6 +97,7 @@ impl App {
             image_cache: HashMap::new(),
             image_inflight: HashSet::new(),
             image_picker: None,
+            column_scroll: HashMap::new(),
         }
     }
 
@@ -137,8 +140,16 @@ impl App {
             KeyCode::Esc => self.should_quit = true,
             KeyCode::Up | KeyCode::Char('k') => self.move_selection(-1),
             KeyCode::Down | KeyCode::Char('j') => self.move_selection(1),
-            KeyCode::PageUp => self.move_selection(-10),
-            KeyCode::PageDown => self.move_selection(10),
+            KeyCode::PageUp => {
+                if !self.scroll_grid_column(-1) {
+                    self.move_selection(-10);
+                }
+            }
+            KeyCode::PageDown => {
+                if !self.scroll_grid_column(1) {
+                    self.move_selection(10);
+                }
+            }
             KeyCode::Left | KeyCode::Char('h') => self.move_card_selection(-1),
             KeyCode::Right | KeyCode::Char('l') => self.move_card_selection(1),
             KeyCode::Home => self.set_selection(0),
@@ -686,8 +697,10 @@ impl App {
                             if let Some(dash) = self.dashboards.get_mut(dash_idx) {
                                 if let Some(ed) = self.editor.as_mut() {
                                     ed.snapshot(dash);
-                                    dash.grid.cols = cols;
-                                    dash.grid.rows = rows;
+                                    if let crate::dashboard::DashboardLayout::Free { grid, .. } = &mut dash.layout {
+                                        grid.cols = cols;
+                                        grid.rows = rows;
+                                    }
                                     ed.dirty = true;
                                 }
                             }
@@ -810,7 +823,7 @@ impl App {
                         if !new_window.is_empty() {
                             let mut entity_to_refetch: Option<(String, String, u32)> = None;
                             if let Some(dash) = self.dashboards.get_mut(dash_idx) {
-                                if let Some(card) = dash.cards.get_mut(idx) {
+                                if let Some(card) = dash.card_mut(idx) {
                                     if let crate::dashboard::CardKind::Graph {
                                         instance,
                                         entities,
@@ -898,7 +911,7 @@ impl App {
                                 if let Some(card) = self
                                     .dashboards
                                     .get_mut(dash_idx)
-                                    .and_then(|d| d.cards.get_mut(idx))
+                                    .and_then(|d| d.card_mut(idx))
                                 {
                                     card.color = None;
                                 }
@@ -919,7 +932,7 @@ impl App {
                                 if let Some(card) = self
                                     .dashboards
                                     .get_mut(dash_idx)
-                                    .and_then(|d| d.cards.get_mut(idx))
+                                    .and_then(|d| d.card_mut(idx))
                                 {
                                     card.color = Some(trimmed);
                                 }
@@ -961,7 +974,7 @@ impl App {
                             if let Some(card) = self
                                 .dashboards
                                 .get_mut(dash_idx)
-                                .and_then(|d| d.cards.get_mut(idx))
+                                .and_then(|d| d.card_mut(idx))
                             {
                                 card.size = chosen;
                             }
@@ -1249,7 +1262,7 @@ impl App {
                 let instance = self
                     .dashboards
                     .get(dash_idx)
-                    .and_then(|d| d.cards.get(*card_idx))
+                    .and_then(|d| d.card(*card_idx))
                     .and_then(|c| {
                         if let crate::dashboard::CardKind::Graph { instance, .. } = &c.kind {
                             Some(instance.clone())
@@ -1285,7 +1298,7 @@ impl App {
                                 if let Some(card) = self
                                     .dashboards
                                     .get_mut(dash_idx)
-                                    .and_then(|d| d.cards.get_mut(idx))
+                                    .and_then(|d| d.card_mut(idx))
                                 {
                                     if let crate::dashboard::CardKind::Graph { entities, .. } =
                                         &mut card.kind
@@ -1315,7 +1328,7 @@ impl App {
                 let count = self
                     .dashboards
                     .get(dash_idx)
-                    .and_then(|d| d.cards.get(*card_idx))
+                    .and_then(|d| d.card(*card_idx))
                     .map(|c| {
                         if let crate::dashboard::CardKind::Graph { entities, .. } = &c.kind {
                             entities.len()
@@ -1342,7 +1355,7 @@ impl App {
                                     if let Some(card) = self
                                         .dashboards
                                         .get_mut(dash_idx)
-                                        .and_then(|d| d.cards.get_mut(idx))
+                                        .and_then(|d| d.card_mut(idx))
                                     {
                                         if let crate::dashboard::CardKind::Graph {
                                             entities, ..
@@ -1362,7 +1375,7 @@ impl App {
                                 let cur = self
                                     .dashboards
                                     .get(dash_idx)
-                                    .and_then(|d| d.cards.get(idx))
+                                    .and_then(|d| d.card(idx))
                                     .and_then(|c| {
                                         if let crate::dashboard::CardKind::Graph {
                                             entities, ..
@@ -1384,7 +1397,7 @@ impl App {
                                 let cur = self
                                     .dashboards
                                     .get(dash_idx)
-                                    .and_then(|d| d.cards.get(idx))
+                                    .and_then(|d| d.card(idx))
                                     .and_then(|c| {
                                         if let crate::dashboard::CardKind::Graph {
                                             entities, ..
@@ -1443,7 +1456,7 @@ impl App {
                             if let Some(card) = self
                                 .dashboards
                                 .get_mut(dash_idx)
-                                .and_then(|d| d.cards.get_mut(idx))
+                                .and_then(|d| d.card_mut(idx))
                             {
                                 if let crate::dashboard::CardKind::Graph { entities, .. } =
                                     &mut card.kind
@@ -1490,7 +1503,7 @@ impl App {
                             if let Some(card) = self
                                 .dashboards
                                 .get_mut(dash_idx)
-                                .and_then(|d| d.cards.get_mut(idx))
+                                .and_then(|d| d.card_mut(idx))
                             {
                                 if let crate::dashboard::CardKind::Graph { entities, .. } =
                                     &mut card.kind
@@ -1528,7 +1541,7 @@ impl App {
                                 if let Some(card) = self
                                     .dashboards
                                     .get_mut(dash_idx)
-                                    .and_then(|d| d.cards.get_mut(idx))
+                                    .and_then(|d| d.card_mut(idx))
                                 {
                                     if let crate::dashboard::CardKind::Graph { window, .. } =
                                         &mut card.kind
@@ -1575,7 +1588,7 @@ impl App {
                             if let Some(card) = self
                                 .dashboards
                                 .get_mut(dash_idx)
-                                .and_then(|d| d.cards.get_mut(idx))
+                                .and_then(|d| d.card_mut(idx))
                             {
                                 if let crate::dashboard::CardKind::Graph { orientation, .. } =
                                     &mut card.kind
@@ -1614,7 +1627,7 @@ impl App {
                             let cur_sev = self
                                 .dashboards
                                 .get(dash_idx)
-                                .and_then(|d| d.cards.get(idx))
+                                .and_then(|d| d.card(idx))
                                 .and_then(|c| {
                                     if let CardKind::Gauge { severity, .. } = &c.kind {
                                         severity.as_ref().map(|s| s.yellow.to_string())
@@ -1658,7 +1671,7 @@ impl App {
                             let cur_red = self
                                 .dashboards
                                 .get(dash_idx)
-                                .and_then(|d| d.cards.get(idx))
+                                .and_then(|d| d.card(idx))
                                 .and_then(|c| {
                                     if let CardKind::Gauge { severity, .. } = &c.kind {
                                         severity.as_ref().map(|s| s.red.to_string())
@@ -1708,7 +1721,7 @@ impl App {
                                 if let Some(card) = self
                                     .dashboards
                                     .get_mut(dash_idx)
-                                    .and_then(|d| d.cards.get_mut(idx))
+                                    .and_then(|d| d.card_mut(idx))
                                 {
                                     if let CardKind::Gauge { severity, .. } = &mut card.kind {
                                         *severity = Some(new_sev);
@@ -1921,7 +1934,7 @@ impl App {
                             if let Some(card) = self
                                 .dashboards
                                 .get_mut(dash_idx)
-                                .and_then(|d| d.cards.get_mut(idx))
+                                .and_then(|d| d.card_mut(idx))
                             {
                                 if let CardKind::Statistics { metric, .. } = &mut card.kind {
                                     *metric = new_metric;
@@ -1961,7 +1974,7 @@ impl App {
                             if let Some(card) = self
                                 .dashboards
                                 .get_mut(dash_idx)
-                                .and_then(|d| d.cards.get_mut(idx))
+                                .and_then(|d| d.card_mut(idx))
                             {
                                 if let CardKind::Statistics { window, .. } = &mut card.kind {
                                     *window = new_window;
@@ -1999,7 +2012,7 @@ impl App {
                             if let Some(card) = self
                                 .dashboards
                                 .get_mut(dash_idx)
-                                .and_then(|d| d.cards.get_mut(idx))
+                                .and_then(|d| d.card_mut(idx))
                             {
                                 if let CardKind::Statistics { unit, .. } = &mut card.kind {
                                     *unit = new_unit;
@@ -2128,7 +2141,7 @@ impl App {
                             if let Some(card) = self
                                 .dashboards
                                 .get_mut(dash_idx)
-                                .and_then(|d| d.cards.get_mut(idx))
+                                .and_then(|d| d.card_mut(idx))
                             {
                                 if let CardKind::Clock { format, .. } = &mut card.kind {
                                     *format = new_fmt;
@@ -2166,7 +2179,7 @@ impl App {
                             if let Some(card) = self
                                 .dashboards
                                 .get_mut(dash_idx)
-                                .and_then(|d| d.cards.get_mut(idx))
+                                .and_then(|d| d.card_mut(idx))
                             {
                                 if let CardKind::Clock { timezone, .. } = &mut card.kind {
                                     *timezone = new_tz;
@@ -2398,6 +2411,240 @@ impl App {
                 }
                 return;
             }
+            EditorMode::PickingTargetDashboard { op, source_card_idx, selected } => {
+                let n = self.dashboards.len();
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Up | KeyCode::Char('k') if *selected > 0 => *selected -= 1,
+                    KeyCode::Down | KeyCode::Char('j') if *selected + 1 < n => *selected += 1,
+                    KeyCode::Enter => {
+                        let target = *selected;
+                        let op = *op;
+                        let src_idx = *source_card_idx;
+                        editor.mode = EditorMode::Browse;
+                        self.execute_or_continue_transfer(op, src_idx, target, None, None);
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::PickingTargetGridRow { op, source_card_idx, target_dash, selected } => {
+                let n_rows = self
+                    .dashboards
+                    .get(*target_dash)
+                    .and_then(|d| if let crate::dashboard::DashboardLayout::Grid { rows } = &d.layout { Some(rows.len()) } else { None })
+                    .unwrap_or(0);
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Up | KeyCode::Char('k') if *selected > 0 => *selected -= 1,
+                    KeyCode::Down | KeyCode::Char('j') if *selected + 1 < n_rows => *selected += 1,
+                    KeyCode::Enter => {
+                        let (op, src_idx, td, row) = (*op, *source_card_idx, *target_dash, *selected);
+                        editor.mode = EditorMode::PickingTargetGridColumn {
+                            op,
+                            source_card_idx: src_idx,
+                            target_dash: td,
+                            target_row: row,
+                            selected: 0,
+                        };
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::PickingTargetGridColumn { op, source_card_idx, target_dash, target_row, selected } => {
+                let n_cols = self
+                    .dashboards
+                    .get(*target_dash)
+                    .and_then(|d| if let crate::dashboard::DashboardLayout::Grid { rows } = &d.layout { rows.get(*target_row).map(|r| r.columns.len()) } else { None })
+                    .unwrap_or(0);
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Up | KeyCode::Char('k') if *selected > 0 => *selected -= 1,
+                    KeyCode::Down | KeyCode::Char('j') if *selected + 1 < n_cols => *selected += 1,
+                    KeyCode::Enter => {
+                        let (op, src_idx, td, tr, tc) = (*op, *source_card_idx, *target_dash, *target_row, *selected);
+                        editor.mode = EditorMode::Browse;
+                        self.execute_or_continue_transfer(op, src_idx, td, Some(tr), Some(tc));
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            // ── New dashboard layout picker ───────────────────────────────────
+            EditorMode::PickingNewDashboardLayout { selected } => {
+                match k.code {
+                    KeyCode::Esc => {
+                        // Cancel: remove the half-created dashboard and exit editor.
+                        let idx = editor.dash_idx;
+                        editor.mode = EditorMode::Browse;
+                        self.editor = None;
+                        if idx < self.dashboards.len() {
+                            self.dashboards.remove(idx);
+                        }
+                        self.screen = Screen::Dashboard {
+                            idx: idx.saturating_sub(1).min(self.dashboards.len().saturating_sub(1)),
+                            selected_card: 0,
+                            sub_index: 0,
+                        };
+                    }
+                    KeyCode::Up | KeyCode::Char('k') if *selected > 0 => *selected -= 1,
+                    KeyCode::Down | KeyCode::Char('j') if *selected < 1 => *selected += 1,
+                    KeyCode::Char('1') => *selected = 0,
+                    KeyCode::Char('2') => *selected = 1,
+                    KeyCode::Enter => {
+                        let layout_idx = *selected;
+                        let idx = editor.dash_idx;
+                        editor.mode = EditorMode::Browse;
+                        if layout_idx == 1 {
+                            if let Some(dash) = self.dashboards.get_mut(idx) {
+                                dash.layout = crate::dashboard::DashboardLayout::Grid { rows: vec![] };
+                            }
+                            use crate::dashboard::editor::GridFocus;
+                            editor.grid_focus = Some(GridFocus::Column { row: 0, col: 0 });
+                        }
+                        // Keep Free layout as-is (already set in create_new_dashboard).
+                        self.status_msg = Some("dashboard created — press 'a' to add cards, 's' to save".into());
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::ConfirmDeleteDashboard => {
+                match k.code {
+                    KeyCode::Char('y') | KeyCode::Char('Y') => {
+                        let idx = editor.dash_idx;
+                        editor.mode = EditorMode::Browse;
+                        self.editor = None;
+                        if idx < self.dashboards.len() {
+                            self.dashboards.remove(idx);
+                        }
+                        let new_idx = idx.saturating_sub(1).min(self.dashboards.len().saturating_sub(1));
+                        self.screen = Screen::Dashboard {
+                            idx: new_idx,
+                            selected_card: 0,
+                            sub_index: 0,
+                        };
+                        // Auto-save after delete.
+                        let path = self.dashboards_path.clone().or_else(crate::dashboard::persist::default_path);
+                        if let Some(p) = path {
+                            let file = crate::dashboard::DashboardFile { dashboards: self.dashboards.clone() };
+                            let _ = crate::dashboard::persist::save(&file, &p);
+                        }
+                    }
+                    _ => {
+                        editor.mode = EditorMode::Browse;
+                    }
+                }
+                return;
+            }
+            // ── Grid structural flows ─────────────────────────────────────────
+            EditorMode::PickingNewRowHeight { buf } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Char(c) if c.is_alphanumeric() => buf.push(c),
+                    KeyCode::Backspace => { buf.pop(); }
+                    KeyCode::Enter => {
+                        let raw = buf.trim().to_lowercase();
+                        let height = if raw == "auto" {
+                            crate::dashboard::RowHeight::Auto
+                        } else if let Ok(n) = raw.parse::<u16>() {
+                            crate::dashboard::RowHeight::Fixed(n.max(1))
+                        } else {
+                            self.last_error = Some(r#"enter a number or "auto""#.into());
+                            editor.mode = EditorMode::Browse;
+                            return;
+                        };
+                        editor.mode = EditorMode::PickingNewRowColumnCount { height, buf: String::new() };
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::PickingNewRowColumnCount { height, buf } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Char(c) if c.is_ascii_digit() => buf.push(c),
+                    KeyCode::Backspace => { buf.pop(); }
+                    KeyCode::Enter => {
+                        let n_cols = buf.trim().parse::<usize>().unwrap_or(1).max(1);
+                        let h = *height;
+                        editor.snapshot(&self.dashboards[dash_idx]);
+                        editor.mode = EditorMode::Browse;
+                        if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                            dash.grid_add_row(h, n_cols);
+                        }
+                        if let Some(ed) = self.editor.as_mut() { ed.dirty = true; }
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::EditingRowHeight { row_idx, buf } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Char(c) if c.is_alphanumeric() => buf.push(c),
+                    KeyCode::Backspace => { buf.pop(); }
+                    KeyCode::Enter => {
+                        let raw = buf.trim().to_lowercase();
+                        let height = if raw == "auto" {
+                            crate::dashboard::RowHeight::Auto
+                        } else if let Ok(n) = raw.parse::<u16>() {
+                            crate::dashboard::RowHeight::Fixed(n.max(1))
+                        } else {
+                            self.last_error = Some(r#"enter a number or "auto""#.into());
+                            editor.mode = EditorMode::Browse;
+                            return;
+                        };
+                        let ri = *row_idx;
+                        editor.mode = EditorMode::Browse;
+                        if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                            dash.grid_set_row_height(ri, height);
+                        }
+                        if let Some(ed) = self.editor.as_mut() { ed.dirty = true; }
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::ConfirmRemoveRow { row_idx } => {
+                match k.code {
+                    KeyCode::Char('y') | KeyCode::Char('Y') => {
+                        let ri = *row_idx;
+                        editor.snapshot(&self.dashboards[dash_idx]);
+                        editor.mode = EditorMode::Browse;
+                        if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                            dash.grid_remove_row(ri);
+                        }
+                        if let Some(ed) = self.editor.as_mut() {
+                            ed.dirty = true;
+                            ed.selected_card = None;
+                            ed.grid_focus = None;
+                        }
+                    }
+                    _ => editor.mode = EditorMode::Browse,
+                }
+                return;
+            }
+            EditorMode::ConfirmRemoveColumn { row_idx, col_idx } => {
+                match k.code {
+                    KeyCode::Char('y') | KeyCode::Char('Y') => {
+                        let (ri, ci) = (*row_idx, *col_idx);
+                        editor.snapshot(&self.dashboards[dash_idx]);
+                        editor.mode = EditorMode::Browse;
+                        if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                            dash.grid_remove_column(ri, ci);
+                        }
+                        if let Some(ed) = self.editor.as_mut() {
+                            ed.dirty = true;
+                            ed.selected_card = None;
+                            ed.grid_focus = None;
+                        }
+                    }
+                    _ => editor.mode = EditorMode::Browse,
+                }
+                return;
+            }
             EditorMode::Browse => {}
         }
 
@@ -2407,8 +2654,30 @@ impl App {
         };
         match k.code {
             KeyCode::Esc => {
+                // If grid focus is on a row or column, step back to card focus first.
+                if let Some(ed) = self.editor.as_mut() {
+                    match ed.grid_focus {
+                        Some(crate::dashboard::editor::GridFocus::Row { .. })
+                        | Some(crate::dashboard::editor::GridFocus::Column { .. }) => {
+                            ed.grid_focus = ed.selected_card.and_then(|i| {
+                                self.dashboards.get(ed.dash_idx).and_then(|d| {
+                                    d.locate_grid_flat(i).map(|(r, c, p)| {
+                                        crate::dashboard::editor::GridFocus::Card {
+                                            row: r, col: c, pos_in_col: p,
+                                        }
+                                    })
+                                })
+                            });
+                            return;
+                        }
+                        _ => {}
+                    }
+                }
+                let editor = self.editor.as_ref().unwrap();
                 if editor.dirty {
-                    editor.mode = EditorMode::ConfirmExit;
+                    if let Some(ed) = self.editor.as_mut() {
+                        ed.mode = EditorMode::ConfirmExit;
+                    }
                 } else {
                     self.editor = None;
                     self.screen = Screen::Dashboard {
@@ -2418,10 +2687,30 @@ impl App {
                     };
                 }
             }
-            KeyCode::Char('h') | KeyCode::Left => editor.move_cursor(-1, 0, dash),
-            KeyCode::Char('l') | KeyCode::Right => editor.move_cursor(1, 0, dash),
-            KeyCode::Char('k') | KeyCode::Up => editor.move_cursor(0, -1, dash),
-            KeyCode::Char('j') | KeyCode::Down => editor.move_cursor(0, 1, dash),
+            KeyCode::Char('h') | KeyCode::Left => {
+                self.navigate_editor_left(dash_idx);
+                return;
+            }
+            KeyCode::Char('l') | KeyCode::Right => {
+                self.navigate_editor_right(dash_idx);
+                return;
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                self.navigate_editor_up(dash_idx);
+                return;
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                self.navigate_editor_down(dash_idx);
+                return;
+            }
+            KeyCode::Char('R') => {
+                self.editor_focus_row(dash_idx);
+                return;
+            }
+            KeyCode::Char('C') => {
+                self.editor_focus_column(dash_idx);
+                return;
+            }
             KeyCode::Char('H') => {
                 editor.snapshot(dash);
                 editor.resize_selected(-1, 0, dash);
@@ -2497,35 +2786,65 @@ impl App {
             .dashboards_path
             .clone()
             .or_else(crate::dashboard::persist::default_path);
-        self.editor = Some(EditorState::new(idx, path));
+        let mut ed = EditorState::new(idx, path);
+        // Seed focus for grid dashboards so the overlay is visible immediately.
+        if matches!(
+            self.dashboards.get(idx).map(|d| &d.layout),
+            Some(crate::dashboard::DashboardLayout::Grid { .. })
+        ) {
+            use crate::dashboard::editor::GridFocus;
+            ed.grid_focus = Some(GridFocus::Column { row: 0, col: 0 });
+        }
+        self.editor = Some(ed);
         self.screen = Screen::Editor;
     }
 
     fn open_menu(&mut self) {
-        let Some(editor) = self.editor.as_mut() else {
-            return;
+        use crate::dashboard::editor::{
+            GridFocus, MenuContext, card_menu_items, column_menu_items,
+            dashboard_menu_items, grid_card_extra_items, row_menu_items,
         };
+        use crate::dashboard::DashboardLayout;
+
+        let Some(editor) = self.editor.as_ref() else { return; };
         let dash_idx = editor.dash_idx;
         let selected = editor.selected_card;
-        let Some(dash) = self.dashboards.get(dash_idx) else {
-            return;
+        let grid_focus = editor.grid_focus;
+        let Some(dash) = self.dashboards.get(dash_idx) else { return; };
+        let is_grid = matches!(&dash.layout, DashboardLayout::Grid { .. });
+
+        let (context, items) = if is_grid {
+            match grid_focus {
+                Some(GridFocus::Row { row }) => {
+                    (MenuContext::Row(row), row_menu_items())
+                }
+                Some(GridFocus::Column { row, col }) => {
+                    (MenuContext::GridColumn(row, col), column_menu_items())
+                }
+                Some(GridFocus::Card { .. }) | None => {
+                    match selected.and_then(|i| dash.card(i).map(|c| (i, c))) {
+                        Some((idx, card)) => {
+                            let mut items = card_menu_items(card);
+                            // Insert grid card movement items before the transfer items.
+                            let insert_pos = items.len().saturating_sub(3); // before Move/Copy/Delete
+                            for (j, item) in grid_card_extra_items().into_iter().enumerate() {
+                                items.insert(insert_pos + j, item);
+                            }
+                            (MenuContext::Card(idx), items)
+                        }
+                        None => (MenuContext::Dashboard, dashboard_menu_items(true)),
+                    }
+                }
+            }
+        } else {
+            match selected.and_then(|i| dash.card(i).map(|c| (i, c))) {
+                Some((idx, card)) => (MenuContext::Card(idx), card_menu_items(card)),
+                None => (MenuContext::Dashboard, dashboard_menu_items(false)),
+            }
         };
-        let (context, items) = match selected.and_then(|i| dash.cards.get(i).map(|c| (i, c))) {
-            Some((idx, card)) => (
-                crate::dashboard::editor::MenuContext::Card(idx),
-                crate::dashboard::editor::card_menu_items(card),
-            ),
-            None => (
-                crate::dashboard::editor::MenuContext::Dashboard,
-                crate::dashboard::editor::dashboard_menu_items(),
-            ),
-        };
+
         if let Some(ed) = self.editor.as_mut() {
-            ed.mode = EditorMode::Menu {
-                context,
-                items,
-                selected: 0,
-            };
+            ed.mode = EditorMode::Menu { context, items, selected: 0 };
         }
     }
 
@@ -2544,7 +2863,7 @@ impl App {
                 let current = self
                     .dashboards
                     .get(dash_idx)
-                    .and_then(|d| d.cards.get(idx))
+                    .and_then(|d| d.card(idx))
                     .and_then(|c| match &c.kind {
                         crate::dashboard::CardKind::Entity { title, .. }
                         | crate::dashboard::CardKind::Toggle { title, .. }
@@ -2578,7 +2897,7 @@ impl App {
                 let current = self
                     .dashboards
                     .get(dash_idx)
-                    .and_then(|d| d.cards.get(idx))
+                    .and_then(|d| d.card(idx))
                     .and_then(|c| match &c.kind {
                         crate::dashboard::CardKind::Graph { window, .. } => Some(window.clone()),
                         _ => None,
@@ -2596,7 +2915,7 @@ impl App {
                 let current_color = self
                     .dashboards
                     .get(dash_idx)
-                    .and_then(|d| d.cards.get(idx))
+                    .and_then(|d| d.card(idx))
                     .and_then(|c| c.color.clone())
                     .unwrap_or_default();
                 if let Some(ed) = self.editor.as_mut() {
@@ -2611,7 +2930,7 @@ impl App {
                 let current_size = self
                     .dashboards
                     .get(dash_idx)
-                    .and_then(|d| d.cards.get(idx))
+                    .and_then(|d| d.card(idx))
                     .map(|c| c.size)
                     .unwrap_or_default();
                 if let Some(ed) = self.editor.as_mut() {
@@ -2630,7 +2949,7 @@ impl App {
             }
             (A::EditQuery, C::Card(idx)) => {
                 let mut existing: Option<(String, String, bool, String)> = None;
-                if let Some(card) = self.dashboards.get(dash_idx).and_then(|d| d.cards.get(idx)) {
+                if let Some(card) = self.dashboards.get(dash_idx).and_then(|d| d.card(idx)) {
                     if let CardKind::FilteredEntityList {
                         instance,
                         query,
@@ -2666,7 +2985,7 @@ impl App {
                     if let Some(ed) = self.editor.as_mut() {
                         ed.snapshot(dash);
                     }
-                    if let Some(card) = dash.cards.get_mut(idx) {
+                    if let Some(card) = dash.card_mut(idx) {
                         if let CardKind::FilteredEntityList { hide_state, .. } = &mut card.kind {
                             *hide_state = !*hide_state;
                             if let Some(ed) = self.editor.as_mut() {
@@ -2681,7 +3000,7 @@ impl App {
                     if let Some(ed) = self.editor.as_mut() {
                         ed.snapshot(dash);
                     }
-                    if let Some(card) = dash.cards.get_mut(idx) {
+                    if let Some(card) = dash.card_mut(idx) {
                         if let CardKind::FilteredEntityList {
                             hide_when_empty, ..
                         } = &mut card.kind
@@ -2699,7 +3018,7 @@ impl App {
                     if let Some(ed) = self.editor.as_mut() {
                         ed.snapshot(dash);
                     }
-                    if let Some(card) = dash.cards.get_mut(idx) {
+                    if let Some(card) = dash.card_mut(idx) {
                         if let CardKind::Entity { ticker, .. } = &mut card.kind {
                             *ticker = !*ticker;
                             if let Some(ed) = self.editor.as_mut() {
@@ -2723,7 +3042,7 @@ impl App {
                 let (cols, rows) = self
                     .dashboards
                     .get(dash_idx)
-                    .map(|d| (d.grid.cols.to_string(), d.grid.rows.to_string()))
+                    .and_then(|d| d.free_grid().map(|g| (g.cols.to_string(), g.rows.to_string())))
                     .unwrap_or_else(|| ("12".into(), "24".into()));
                 if let Some(ed) = self.editor.as_mut() {
                     ed.mode = EditorMode::ResizingGrid {
@@ -2779,7 +3098,7 @@ impl App {
                         ed.snapshot(dash);
                         ed.selected_card = Some(idx);
                     }
-                    if let Some(card) = dash.cards.get_mut(idx) {
+                    if let Some(card) = dash.card_mut(idx) {
                         if let crate::dashboard::CardKind::Graph { graph_type, .. } = &mut card.kind
                         {
                             *graph_type = match graph_type {
@@ -2804,7 +3123,7 @@ impl App {
                 let current = self
                     .dashboards
                     .get(dash_idx)
-                    .and_then(|d| d.cards.get(idx))
+                    .and_then(|d| d.card(idx))
                     .and_then(|c| match &c.kind {
                         crate::dashboard::CardKind::Graph { window, .. } => Some(window.clone()),
                         _ => None,
@@ -2822,7 +3141,7 @@ impl App {
                 let current_ori = self
                     .dashboards
                     .get(dash_idx)
-                    .and_then(|d| d.cards.get(idx))
+                    .and_then(|d| d.card(idx))
                     .and_then(|c| match &c.kind {
                         crate::dashboard::CardKind::Graph { orientation, .. } => Some(*orientation),
                         _ => None,
@@ -2841,7 +3160,7 @@ impl App {
                 let existing = self
                     .dashboards
                     .get(dash_idx)
-                    .and_then(|d| d.cards.get(idx))
+                    .and_then(|d| d.card(idx))
                     .and_then(|c| {
                         if let CardKind::Gauge { severity, .. } = &c.kind {
                             severity.as_ref().map(|s| (s.green, s.yellow, s.red))
@@ -2876,7 +3195,7 @@ impl App {
                     if let Some(ed) = self.editor.as_mut() {
                         ed.snapshot(dash);
                     }
-                    if let Some(card) = dash.cards.get_mut(idx) {
+                    if let Some(card) = dash.card_mut(idx) {
                         if let CardKind::Gauge { needle, .. } = &mut card.kind {
                             *needle = !*needle;
                             if let Some(ed) = self.editor.as_mut() {
@@ -2890,7 +3209,7 @@ impl App {
                 let current = self
                     .dashboards
                     .get(dash_idx)
-                    .and_then(|d| d.cards.get(idx))
+                    .and_then(|d| d.card(idx))
                     .and_then(|c| {
                         if let CardKind::Clock { format, .. } = &c.kind {
                             Some(format.clone())
@@ -2911,7 +3230,7 @@ impl App {
                 let current = self
                     .dashboards
                     .get(dash_idx)
-                    .and_then(|d| d.cards.get(idx))
+                    .and_then(|d| d.card(idx))
                     .and_then(|c| {
                         if let CardKind::Clock { timezone, .. } = &c.kind {
                             timezone.clone()
@@ -2933,7 +3252,7 @@ impl App {
                 let current_selected = self
                     .dashboards
                     .get(dash_idx)
-                    .and_then(|d| d.cards.get(idx))
+                    .and_then(|d| d.card(idx))
                     .and_then(|c| {
                         if let CardKind::Statistics { metric, .. } = &c.kind {
                             use crate::dashboard::StatsMetric::*;
@@ -2961,7 +3280,7 @@ impl App {
                 let current = self
                     .dashboards
                     .get(dash_idx)
-                    .and_then(|d| d.cards.get(idx))
+                    .and_then(|d| d.card(idx))
                     .and_then(|c| {
                         if let CardKind::Statistics { window, .. } = &c.kind {
                             Some(window.clone())
@@ -2982,7 +3301,7 @@ impl App {
                 let current = self
                     .dashboards
                     .get(dash_idx)
-                    .and_then(|d| d.cards.get(idx))
+                    .and_then(|d| d.card(idx))
                     .and_then(|c| {
                         if let CardKind::Statistics { unit, .. } = &c.kind {
                             unit.clone()
@@ -2999,9 +3318,220 @@ impl App {
                     };
                 }
             }
+            (A::MoveToDashboard, C::Card(idx)) => {
+                if let Some(ed) = self.editor.as_mut() {
+                    ed.selected_card = Some(idx);
+                    ed.mode = EditorMode::PickingTargetDashboard {
+                        op: crate::dashboard::editor::TransferOp::Move,
+                        source_card_idx: idx,
+                        selected: 0,
+                    };
+                }
+            }
+            (A::CopyToDashboard, C::Card(idx)) => {
+                if let Some(ed) = self.editor.as_mut() {
+                    ed.selected_card = Some(idx);
+                    ed.mode = EditorMode::PickingTargetDashboard {
+                        op: crate::dashboard::editor::TransferOp::Copy,
+                        source_card_idx: idx,
+                        selected: 0,
+                    };
+                }
+            }
+            // ── Grid card actions ─────────────────────────────────────────────
+            (A::MoveToColumn, C::Card(idx)) => {
+                let same_dash = self.editor.as_ref().map(|e| e.dash_idx).unwrap_or(0);
+                if let Some(ed) = self.editor.as_mut() {
+                    ed.mode = EditorMode::PickingTargetGridRow {
+                        op: crate::dashboard::editor::TransferOp::Move,
+                        source_card_idx: idx,
+                        target_dash: same_dash,
+                        selected: 0,
+                    };
+                }
+            }
+            (A::MoveCardUpInColumn, C::Card(idx)) | (A::MoveCardDownInColumn, C::Card(idx)) => {
+                let up = action == A::MoveCardUpInColumn;
+                let loc = self.dashboards.get(dash_idx).and_then(|d| d.locate_grid_flat(idx));
+                if let Some((row, col, pos)) = loc {
+                    if let Some(ed) = self.editor.as_mut() { ed.snapshot(&self.dashboards[dash_idx]); }
+                    self.with_selection_preserved(dash_idx, |dash| {
+                        dash.grid_move_card_in_column(row, col, pos, up);
+                    });
+                    if let Some(ed) = self.editor.as_mut() { ed.dirty = true; }
+                }
+            }
+            // ── Row actions ───────────────────────────────────────────────────
+            (A::SetRowHeight, C::Row(row_idx)) => {
+                let current = self.dashboards.get(dash_idx)
+                    .and_then(|d| if let crate::dashboard::DashboardLayout::Grid { rows } = &d.layout { rows.get(row_idx) } else { None })
+                    .map(|r| match r.height { crate::dashboard::RowHeight::Fixed(n) => n.to_string(), crate::dashboard::RowHeight::Auto => "auto".into() })
+                    .unwrap_or_default();
+                if let Some(ed) = self.editor.as_mut() {
+                    ed.mode = EditorMode::EditingRowHeight { row_idx, buf: current };
+                }
+            }
+            (A::ToggleRowFillHeight, C::Row(row_idx)) => {
+                if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                    dash.grid_toggle_row_fill_height(row_idx);
+                }
+                if let Some(ed) = self.editor.as_mut() { ed.dirty = true; }
+            }
+            (A::AddColumn, C::Row(row_idx)) => {
+                if let Some(ed) = self.editor.as_mut() { ed.snapshot(&self.dashboards[dash_idx]); }
+                if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                    dash.grid_add_column(row_idx);
+                }
+                if let Some(ed) = self.editor.as_mut() { ed.dirty = true; }
+            }
+            (A::RemoveRow, C::Row(row_idx)) => {
+                if let Some(ed) = self.editor.as_mut() {
+                    ed.mode = EditorMode::ConfirmRemoveRow { row_idx };
+                }
+            }
+            (A::MoveRowUp, C::Row(row_idx)) => {
+                if let Some(ed) = self.editor.as_mut() { ed.snapshot(&self.dashboards[dash_idx]); }
+                self.with_selection_preserved(dash_idx, |dash| { dash.grid_move_row(row_idx, true); });
+                if let Some(ed) = self.editor.as_mut() { ed.dirty = true; }
+            }
+            (A::MoveRowDown, C::Row(row_idx)) => {
+                if let Some(ed) = self.editor.as_mut() { ed.snapshot(&self.dashboards[dash_idx]); }
+                self.with_selection_preserved(dash_idx, |dash| { dash.grid_move_row(row_idx, false); });
+                if let Some(ed) = self.editor.as_mut() { ed.dirty = true; }
+            }
+            // ── Column actions ────────────────────────────────────────────────
+            (A::SetColumnFillHeight, C::GridColumn(row_idx, col_idx)) => {
+                if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                    dash.grid_toggle_column_fill_height(row_idx, col_idx);
+                }
+                if let Some(ed) = self.editor.as_mut() { ed.dirty = true; }
+            }
+            (A::RemoveColumn, C::GridColumn(row_idx, col_idx)) => {
+                if let Some(ed) = self.editor.as_mut() {
+                    ed.mode = EditorMode::ConfirmRemoveColumn { row_idx, col_idx };
+                }
+            }
+            (A::MoveColumnLeft, C::GridColumn(row_idx, col_idx)) => {
+                if let Some(ed) = self.editor.as_mut() { ed.snapshot(&self.dashboards[dash_idx]); }
+                self.with_selection_preserved(dash_idx, |dash| { dash.grid_move_column(row_idx, col_idx, true); });
+                if let Some(ed) = self.editor.as_mut() { ed.dirty = true; }
+            }
+            (A::MoveColumnRight, C::GridColumn(row_idx, col_idx)) => {
+                if let Some(ed) = self.editor.as_mut() { ed.snapshot(&self.dashboards[dash_idx]); }
+                self.with_selection_preserved(dash_idx, |dash| { dash.grid_move_column(row_idx, col_idx, false); });
+                if let Some(ed) = self.editor.as_mut() { ed.dirty = true; }
+            }
+            // ── Dashboard-level grid actions ──────────────────────────────────
+            (A::AddRow, C::Dashboard) => {
+                if let Some(ed) = self.editor.as_mut() {
+                    ed.mode = EditorMode::PickingNewRowHeight { buf: String::new() };
+                }
+            }
+            (A::DeleteDashboard, C::Dashboard) => {
+                if let Some(ed) = self.editor.as_mut() {
+                    ed.mode = EditorMode::ConfirmDeleteDashboard;
+                }
+            }
             _ => {
                 self.last_error = Some("menu action not valid in this context".into());
             }
+        }
+    }
+
+    /// Commit a cross-dashboard card transfer.
+    ///
+    /// If `target_row`/`target_col` are `None` and target is Grid, continue to row picker.
+    /// If target is Free, place at first available cell (fallback: 0,0 with overlap warning).
+    fn execute_or_continue_transfer(
+        &mut self,
+        op: crate::dashboard::editor::TransferOp,
+        source_card_idx: usize,
+        target_dash: usize,
+        target_row: Option<usize>,
+        target_col: Option<usize>,
+    ) {
+        use crate::dashboard::editor::TransferOp;
+        use crate::dashboard::Pos;
+
+        let editor_dash_idx = match self.editor.as_ref() {
+            Some(e) => e.dash_idx,
+            None => return,
+        };
+
+        // Target is Grid but no row chosen yet → open row picker.
+        let target_is_grid = self
+            .dashboards
+            .get(target_dash)
+            .map(|d| !d.is_free())
+            .unwrap_or(false);
+        if target_is_grid && target_row.is_none() {
+            if let Some(ed) = self.editor.as_mut() {
+                ed.mode = EditorMode::PickingTargetGridRow {
+                    op,
+                    source_card_idx,
+                    target_dash,
+                    selected: 0,
+                };
+            }
+            return;
+        }
+
+        // For Move: remove from source first (avoids index drift on same-dashboard moves).
+        // For Copy: clone from source, leave source intact.
+        let mut card = if op == TransferOp::Move {
+            let Some(c) = self
+                .dashboards
+                .get_mut(editor_dash_idx)
+                .and_then(|d| d.remove_card_at(source_card_idx))
+            else {
+                return;
+            };
+            if let Some(ed) = self.editor.as_mut() {
+                ed.selected_card = None;
+            }
+            c
+        } else {
+            let Some(c) = self
+                .dashboards
+                .get(editor_dash_idx)
+                .and_then(|d| d.card(source_card_idx))
+                .cloned()
+            else {
+                return;
+            };
+            let new_id = self.dashboards.get(target_dash).map(|d| d.next_card_id()).unwrap_or(crate::dashboard::CardId(1));
+            let mut c = c;
+            c.id = new_id;
+            c
+        };
+
+        if target_is_grid {
+            card.pos = None;
+            let (tr, tc) = (target_row.unwrap_or(0), target_col.unwrap_or(0));
+            if let Some(target) = self.dashboards.get_mut(target_dash) {
+                target.insert_card_grid(tr, tc, card);
+            }
+        } else {
+            // Free target: find first available cell.
+            let grid = self.dashboards.get(target_dash).and_then(|d| d.free_grid()).unwrap_or(crate::dashboard::Grid { cols: 12, rows: 8 });
+            let occupied: Vec<Pos> = self
+                .dashboards
+                .get(target_dash)
+                .map(|d| d.cards_iter().filter_map(|c| c.pos).collect())
+                .unwrap_or_default();
+            let new_pos = find_free_cell(grid, &occupied, 3, 2);
+            let overlaps = new_pos.is_none();
+            card.pos = Some(new_pos.unwrap_or(Pos { col: 0, row: 0, w: 3, h: 2 }));
+            if let Some(target) = self.dashboards.get_mut(target_dash) {
+                target.push_card_free(card);
+            }
+            if overlaps {
+                self.status_msg = Some("Card placed at (0,0) — may overlap existing cards".into());
+            }
+        }
+
+        if let Some(ed) = self.editor.as_mut() {
+            ed.dirty = true;
         }
     }
 
@@ -3013,7 +3543,7 @@ impl App {
         let Some(dash) = self.dashboards.get(editor.dash_idx) else {
             return;
         };
-        let Some(card) = dash.cards.get(idx) else {
+        let Some(card) = dash.card(idx) else {
             return;
         };
         use crate::dashboard::CardKind;
@@ -3220,8 +3750,10 @@ impl App {
         let n = self.dashboards.len() + 1;
         let dash = crate::dashboard::Dashboard {
             name: format!("Dashboard {n}"),
-            grid: crate::dashboard::Grid { cols: 12, rows: 24 },
-            cards: Vec::new(),
+            layout: crate::dashboard::DashboardLayout::Free {
+                grid: crate::dashboard::Grid { cols: 12, rows: 24 },
+                cards: Vec::new(),
+            },
         };
         self.dashboards.push(dash);
         let idx = self.dashboards.len() - 1;
@@ -3231,11 +3763,10 @@ impl App {
             .or_else(crate::dashboard::persist::default_path);
         let mut ed = EditorState::new(idx, path);
         ed.dirty = true;
+        ed.mode = EditorMode::PickingNewDashboardLayout { selected: 0 };
         self.editor = Some(ed);
         self.screen = Screen::Editor;
-        self.status_msg = Some(format!(
-            "new dashboard #{n} — press 'R' to rename, 's' to save"
-        ));
+        self.status_msg = Some(format!("new dashboard #{n} — pick layout type"));
     }
 
     fn handle_mouse(&mut self, m: MouseEvent) {
@@ -3297,7 +3828,7 @@ impl App {
         let Some(card) = self
             .dashboards
             .get(idx)
-            .and_then(|d| d.cards.get(selected_card))
+            .and_then(|d| d.card(selected_card))
         else {
             return false;
         };
@@ -3351,7 +3882,7 @@ impl App {
         let Some(dash) = self.dashboards.get(*idx) else {
             return;
         };
-        let Some(card) = dash.cards.get(*selected_card) else {
+        let Some(card) = dash.card(*selected_card) else {
             return;
         };
         // EntityList / FilteredEntityList: act on sub-selected entity.
@@ -3387,6 +3918,232 @@ impl App {
         }
     }
 
+    /// Scroll the focused column on a grid dashboard. Returns true if consumed.
+    fn scroll_grid_column(&mut self, direction: i32) -> bool {
+        let Screen::Dashboard { idx, selected_card, .. } = self.screen else { return false; };
+        let Some(dash) = self.dashboards.get(idx) else { return false; };
+        let crate::dashboard::DashboardLayout::Grid { ref rows } = dash.layout else { return false; };
+
+        // Find which (row_idx, col_idx) the selected card is in.
+        let mut flat = 0usize;
+        let mut found: Option<(usize, usize)> = None;
+        'outer: for (ri, row) in rows.iter().enumerate() {
+            for (ci, col) in row.columns.iter().enumerate() {
+                if selected_card >= flat && selected_card < flat + col.cards.len() {
+                    found = Some((ri, ci));
+                    break 'outer;
+                }
+                flat += col.cards.len();
+            }
+        }
+
+        let Some((ri, ci)) = found else { return false; };
+        let step = (self.last_terminal_size.1 / 2).max(1) as i32;
+        let current = self.column_scroll.get(&(idx, ri, ci)).copied().unwrap_or(0) as i32;
+        let new_val = (current + direction * step).max(0) as u16;
+        self.column_scroll.insert((idx, ri, ci), new_val);
+        true
+    }
+
+    // ── Editor grid navigation ────────────────────────────────────────────────
+
+    /// Set grid_focus directly, updating selected_card for Card focus.
+    fn editor_set_focus(&mut self, dash_idx: usize, focus: crate::dashboard::editor::GridFocus) {
+        use crate::dashboard::editor::GridFocus;
+        let flat = if let GridFocus::Card { row, col, pos_in_col } = focus {
+            self.dashboards.get(dash_idx).and_then(|d| d.flat_idx_from_grid(row, col, pos_in_col))
+        } else {
+            None
+        };
+        if let Some(ed) = self.editor.as_mut() {
+            ed.grid_focus = Some(focus);
+            ed.selected_card = flat;
+        }
+    }
+
+    fn navigate_editor_left(&mut self, dash_idx: usize) {
+        if let Some(dash) = self.dashboards.get(dash_idx) {
+            if dash.is_free() {
+                if let Some(ed) = self.editor.as_mut() { ed.move_cursor(-1, 0, dash); }
+                return;
+            }
+        }
+        use crate::dashboard::editor::GridFocus;
+        let focus = self.editor.as_ref().and_then(|e| e.grid_focus)
+            .unwrap_or(GridFocus::Row { row: 0 });
+        let Some(dash) = self.dashboards.get(dash_idx) else { return; };
+        let crate::dashboard::DashboardLayout::Grid { rows } = &dash.layout else { return; };
+        let new_focus = match focus {
+            GridFocus::Card { row, col, .. } => GridFocus::Column { row, col },
+            GridFocus::Column { row, col: 0 } => GridFocus::Row { row },
+            GridFocus::Column { row, col } => GridFocus::Column { row, col: col - 1 },
+            GridFocus::Row { row: 0 } => GridFocus::Row { row: 0 },
+            GridFocus::Row { row } => {
+                let pr = row - 1;
+                let pc = rows.get(pr).map(|r| r.columns.len().saturating_sub(1)).unwrap_or(0);
+                GridFocus::Column { row: pr, col: pc }
+            }
+        };
+        self.editor_set_focus(dash_idx, new_focus);
+    }
+
+    fn navigate_editor_right(&mut self, dash_idx: usize) {
+        if let Some(dash) = self.dashboards.get(dash_idx) {
+            if dash.is_free() {
+                if let Some(ed) = self.editor.as_mut() { ed.move_cursor(1, 0, dash); }
+                return;
+            }
+        }
+        use crate::dashboard::editor::GridFocus;
+        let focus = self.editor.as_ref().and_then(|e| e.grid_focus)
+            .unwrap_or(GridFocus::Row { row: 0 });
+        let Some(dash) = self.dashboards.get(dash_idx) else { return; };
+        let crate::dashboard::DashboardLayout::Grid { rows } = &dash.layout else { return; };
+        let n_rows = rows.len();
+        let new_focus = match focus {
+            GridFocus::Card { row, col, .. } => GridFocus::Column { row, col },
+            GridFocus::Column { row, col } => {
+                let n_cols = rows.get(row).map(|r| r.columns.len()).unwrap_or(0);
+                if col + 1 < n_cols {
+                    GridFocus::Column { row, col: col + 1 }
+                } else if row + 1 < n_rows {
+                    GridFocus::Row { row: row + 1 }
+                } else {
+                    GridFocus::Column { row, col }
+                }
+            }
+            GridFocus::Row { row } => {
+                if rows.get(row).map(|r| !r.columns.is_empty()).unwrap_or(false) {
+                    GridFocus::Column { row, col: 0 }
+                } else if row + 1 < n_rows {
+                    GridFocus::Row { row: row + 1 }
+                } else {
+                    GridFocus::Row { row }
+                }
+            }
+        };
+        self.editor_set_focus(dash_idx, new_focus);
+    }
+
+    fn navigate_editor_up(&mut self, dash_idx: usize) {
+        if let Some(dash) = self.dashboards.get(dash_idx) {
+            if dash.is_free() {
+                if let Some(ed) = self.editor.as_mut() { ed.move_cursor(0, -1, dash); }
+                return;
+            }
+        }
+        use crate::dashboard::editor::GridFocus;
+        let focus = self.editor.as_ref().and_then(|e| e.grid_focus)
+            .unwrap_or(GridFocus::Row { row: 0 });
+        let new_focus = match focus {
+            GridFocus::Card { row, col, pos_in_col: 0 } => GridFocus::Column { row, col },
+            GridFocus::Card { row, col, pos_in_col } => GridFocus::Card { row, col, pos_in_col: pos_in_col - 1 },
+            GridFocus::Column { row, col } => GridFocus::Column { row, col },
+            GridFocus::Row { row: 0 } => GridFocus::Row { row: 0 },
+            GridFocus::Row { row } => GridFocus::Row { row: row - 1 },
+        };
+        self.editor_set_focus(dash_idx, new_focus);
+    }
+
+    fn navigate_editor_down(&mut self, dash_idx: usize) {
+        if let Some(dash) = self.dashboards.get(dash_idx) {
+            if dash.is_free() {
+                if let Some(ed) = self.editor.as_mut() { ed.move_cursor(0, 1, dash); }
+                return;
+            }
+        }
+        use crate::dashboard::editor::GridFocus;
+        let focus = self.editor.as_ref().and_then(|e| e.grid_focus)
+            .unwrap_or(GridFocus::Row { row: 0 });
+        let col_cards = |row: usize, col: usize| -> usize {
+            self.dashboards.get(dash_idx)
+                .and_then(|d| if let crate::dashboard::DashboardLayout::Grid { rows } = &d.layout {
+                    rows.get(row).and_then(|r| r.columns.get(col)).map(|c| c.cards.len())
+                } else { None })
+                .unwrap_or(0)
+        };
+        let n_rows = self.dashboards.get(dash_idx)
+            .and_then(|d| if let crate::dashboard::DashboardLayout::Grid { rows } = &d.layout {
+                Some(rows.len())
+            } else { None })
+            .unwrap_or(0);
+        let new_focus = match focus {
+            GridFocus::Card { row, col, pos_in_col } => {
+                let n = col_cards(row, col);
+                if pos_in_col + 1 < n {
+                    GridFocus::Card { row, col, pos_in_col: pos_in_col + 1 }
+                } else {
+                    GridFocus::Card { row, col, pos_in_col }
+                }
+            }
+            GridFocus::Column { row, col } => {
+                let n = col_cards(row, col);
+                if n > 0 {
+                    GridFocus::Card { row, col, pos_in_col: 0 }
+                } else {
+                    GridFocus::Column { row, col }
+                }
+            }
+            GridFocus::Row { row } => {
+                if row + 1 < n_rows {
+                    GridFocus::Row { row: row + 1 }
+                } else {
+                    GridFocus::Row { row }
+                }
+            }
+        };
+        self.editor_set_focus(dash_idx, new_focus);
+    }
+
+    /// Set focus to the row that contains the current selection.
+    fn editor_focus_row(&mut self, dash_idx: usize) {
+        use crate::dashboard::editor::GridFocus;
+        let Some(ed) = self.editor.as_ref() else { return; };
+        let flat = ed.selected_card;
+        let Some(dash) = self.dashboards.get(dash_idx) else { return; };
+        let row = flat.and_then(|f| dash.locate_grid_flat(f)).map(|(r, _, _)| r);
+        if let (Some(row), Some(ed)) = (row, self.editor.as_mut()) {
+            ed.grid_focus = Some(GridFocus::Row { row });
+        }
+    }
+
+    /// Set focus to the column that contains the current selection.
+    fn editor_focus_column(&mut self, dash_idx: usize) {
+        use crate::dashboard::editor::GridFocus;
+        let Some(ed) = self.editor.as_ref() else { return; };
+        let flat = ed.selected_card;
+        let Some(dash) = self.dashboards.get(dash_idx) else { return; };
+        let rc = flat.and_then(|f| dash.locate_grid_flat(f)).map(|(r, c, _)| (r, c));
+        if let (Some((row, col)), Some(ed)) = (rc, self.editor.as_mut()) {
+            ed.grid_focus = Some(GridFocus::Column { row, col });
+        }
+    }
+
+    /// Wrap a structural grid mutation with selection stability.
+    fn with_selection_preserved<F>(&mut self, dash_idx: usize, f: F)
+    where
+        F: FnOnce(&mut crate::dashboard::Dashboard),
+    {
+        let id = self.editor.as_ref()
+            .and_then(|e| e.selected_card)
+            .and_then(|i| self.dashboards.get(dash_idx)?.card(i))
+            .map(|c| c.id);
+        if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+            f(dash);
+        }
+        if let Some(id) = id {
+            if let Some(dash) = self.dashboards.get(dash_idx) {
+                let new_flat = dash.flat_idx_of(id);
+                let new_gf = new_flat.and_then(|f| dash.locate_grid_flat(f))
+                    .map(|(r, c, p)| crate::dashboard::editor::GridFocus::Card { row: r, col: c, pos_in_col: p });
+                if let Some(ed) = self.editor.as_mut() {
+                    ed.selected_card = new_flat;
+                    if new_gf.is_some() { ed.grid_focus = new_gf; }
+                }
+            }
+        }
+    }
+
     fn move_selection(&mut self, delta: i32) {
         // Special-case Dashboard: if the selected card is an EntityList, j/k
         // navigates rows within that card; otherwise it moves between cards.
@@ -3397,7 +4154,7 @@ impl App {
         } = &mut self.screen
         {
             if let Some(dash) = self.dashboards.get(*idx) {
-                if let Some(card) = dash.cards.get(*selected_card) {
+                if let Some(card) = dash.card(*selected_card) {
                     if let Some((_, entities)) = list_entities(card, &self.instances) {
                         if entities.is_empty() {
                             return;
@@ -3407,6 +4164,19 @@ impl App {
                         *sub_index = new as usize;
                         return;
                     }
+                }
+                // Grid layout: j/k navigate within the focused column.
+                let dir = if delta < 0 {
+                    crate::dashboard::NavDir::Up
+                } else {
+                    crate::dashboard::NavDir::Down
+                };
+                if let Some(next) = dash.neighbor(*selected_card, dir) {
+                    *selected_card = next;
+                    *sub_index = 0;
+                    return;
+                } else if !dash.is_free() {
+                    return; // at boundary — stay
                 }
             }
         }
@@ -3434,10 +4204,24 @@ impl App {
         let Some(dash) = self.dashboards.get(*idx) else {
             return;
         };
-        if dash.cards.is_empty() {
+        if dash.card_count() == 0 {
             return;
         }
-        let total = dash.cards.len() as i64;
+        // Grid layout: h/l navigate between columns using 2D neighbor.
+        let dir = if delta < 0 {
+            crate::dashboard::NavDir::Left
+        } else {
+            crate::dashboard::NavDir::Right
+        };
+        if let Some(next) = dash.neighbor(*selected_card, dir) {
+            *selected_card = next;
+            *sub_index = 0;
+            return;
+        } else if !dash.is_free() {
+            return; // at boundary in grid mode — stay
+        }
+        // Free layout: wrap-around traversal.
+        let total = dash.card_count() as i64;
         let cur = i64::try_from(*selected_card).unwrap_or(0);
         let new = (cur + i64::from(delta)).rem_euclid(total);
         *selected_card = new as usize;
@@ -3457,7 +4241,7 @@ impl App {
 
     fn current_row_count(&self) -> usize {
         match &self.screen {
-            Screen::Dashboard { idx, .. } => self.dashboards.get(*idx).map_or(0, |d| d.cards.len()),
+            Screen::Dashboard { idx, .. } => self.dashboards.get(*idx).map_or(0, |d| d.card_count()),
             Screen::Editor => 0,
         }
     }
@@ -3612,7 +4396,7 @@ impl App {
     fn fetch_image_cards(&mut self, instance: &Alias) {
         let mut entities: Vec<String> = Vec::new();
         for dash in &self.dashboards {
-            for card in &dash.cards {
+            for card in dash.cards_iter() {
                 if let crate::dashboard::CardKind::Image {
                     instance: card_inst,
                     source,
@@ -3638,7 +4422,7 @@ impl App {
     fn fetch_weather_forecasts(&mut self, instance: &Alias) {
         let mut entities: Vec<String> = Vec::new();
         for dash in &self.dashboards {
-            for card in &dash.cards {
+            for card in dash.cards_iter() {
                 if let crate::dashboard::CardKind::Weather {
                     instance: card_inst,
                     entity,
@@ -3699,7 +4483,7 @@ impl App {
     /// Look up whether an entity is an image or camera source across all dashboards.
     fn image_fetch_kind_for(&self, instance: &Alias, entity: &EntityId) -> Option<ImageFetchKind> {
         for dash in &self.dashboards {
-            for card in &dash.cards {
+            for card in dash.cards_iter() {
                 if let crate::dashboard::CardKind::Image {
                     instance: card_inst,
                     source,
@@ -3735,7 +4519,7 @@ impl App {
         // For each graph/statistics card on every dashboard matching this instance, request backfill.
         let mut requests: Vec<(String, u32)> = Vec::new();
         for dash in &self.dashboards {
-            for card in &dash.cards {
+            for card in dash.cards_iter() {
                 match &card.kind {
                     crate::dashboard::CardKind::Graph {
                         instance: card_inst,
@@ -4035,7 +4819,7 @@ fn build_card_kind(kind: CardTypeStub, buf: &str, default_alias: Option<&str>) -
 /// Each task sends `AppEvent::RefreshImageCard` on the given interval.
 pub fn spawn_camera_timers(dashboards: &[Dashboard], tx: &mpsc::UnboundedSender<AppEvent>) {
     for dash in dashboards {
-        for card in &dash.cards {
+        for card in dash.cards_iter() {
             if let crate::dashboard::CardKind::Image {
                 instance,
                 source: crate::dashboard::ImageSource::Camera { entity },
@@ -4074,7 +4858,7 @@ pub fn spawn_weather_timer(dashboards: &[Dashboard], tx: &mpsc::UnboundedSender<
     // Collect unique (instance, entity) pairs from all Weather cards.
     let mut pairs: Vec<(String, String)> = Vec::new();
     for dash in dashboards {
-        for card in &dash.cards {
+        for card in dash.cards_iter() {
             if let crate::dashboard::CardKind::Weather {
                 instance, entity, ..
             } = &card.kind
@@ -4110,16 +4894,42 @@ pub fn spawn_weather_timer(dashboards: &[Dashboard], tx: &mpsc::UnboundedSender<
     });
 }
 
+/// Find the first unoccupied `w×h` cell in a free-canvas grid, scanning left-to-right top-to-bottom.
+fn find_free_cell(
+    grid: crate::dashboard::Grid,
+    occupied: &[crate::dashboard::Pos],
+    w: u16,
+    h: u16,
+) -> Option<crate::dashboard::Pos> {
+    use crate::dashboard::Pos;
+    for row in 0..grid.rows {
+        for col in 0..grid.cols {
+            if col + w > grid.cols || row + h > grid.rows {
+                continue;
+            }
+            let candidate = Pos { col, row, w, h };
+            let overlap = occupied.iter().any(|p| {
+                col < p.col + p.w && col + w > p.col && row < p.row + p.h && row + h > p.row
+            });
+            if !overlap {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
 fn mouse_to_cell(area: Rect, dash: &Dashboard, mx: u16, my: u16) -> Option<(u16, u16)> {
     if mx < area.x || mx >= area.x + area.width || my < area.y || my >= area.y + area.height {
         return None;
     }
     let dx = mx - area.x;
     let dy = my - area.y;
-    let cell_w = (area.width as f32 / dash.grid.cols as f32).max(1.0);
-    let cell_h = (area.height as f32 / dash.grid.rows as f32).max(1.0);
-    let col = ((dx as f32 / cell_w) as u16).min(dash.grid.cols - 1);
-    let row = ((dy as f32 / cell_h) as u16).min(dash.grid.rows - 1);
+    let (cols, rows) = dash.free_grid().map(|g| (g.cols, g.rows)).unwrap_or((12, 24));
+    let cell_w = (area.width as f32 / cols as f32).max(1.0);
+    let cell_h = (area.height as f32 / rows as f32).max(1.0);
+    let col = ((dx as f32 / cell_w) as u16).min(cols - 1);
+    let row = ((dy as f32 / cell_h) as u16).min(rows - 1);
     Some((col, row))
 }
 

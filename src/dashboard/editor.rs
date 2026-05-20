@@ -1,5 +1,6 @@
 use crate::dashboard::{
-    BarOrientation, Card, CardKind, CardSize, Dashboard, GraphSeries, GraphType, Pos, StatsMetric,
+    BarOrientation, Card, CardKind, CardSize, Dashboard, DashboardLayout, GraphSeries,
+    GraphType, Pos, RowHeight, StatsMetric,
 };
 
 const MAX_UNDO: usize = 32;
@@ -20,6 +21,8 @@ pub struct EditorState {
     /// During the Image add-flow, set after `ImagePickSourceKind` so the
     /// downstream entity picker can filter to `image.*` or `camera.*` only.
     pub image_pending_is_camera: Option<bool>,
+    /// Focus position within a grid-layout dashboard. `None` for Free dashboards.
+    pub grid_focus: Option<GridFocus>,
 }
 
 #[derive(Debug, Clone)]
@@ -330,6 +333,73 @@ pub enum EditorMode {
         forecast_days: u8,
         buf: String,
     },
+    // ---- Cross-dashboard transfer flow ----
+    /// Step 1: pick which dashboard to move/copy the card to.
+    PickingTargetDashboard {
+        op: TransferOp,
+        source_card_idx: usize,
+        selected: usize,
+    },
+    /// Step 2 (Grid target): pick which row.
+    PickingTargetGridRow {
+        op: TransferOp,
+        source_card_idx: usize,
+        target_dash: usize,
+        selected: usize,
+    },
+    /// Step 3 (Grid target): pick which column within the chosen row.
+    PickingTargetGridColumn {
+        op: TransferOp,
+        source_card_idx: usize,
+        target_dash: usize,
+        target_row: usize,
+        selected: usize,
+    },
+    // ---- New-dashboard layout picker ----
+    /// Shown immediately after `n` — user picks Free or Grid before the dashboard is configured.
+    PickingNewDashboardLayout {
+        selected: usize, // 0 = Free, 1 = Grid
+    },
+    /// Confirm before deleting the current dashboard.
+    ConfirmDeleteDashboard,
+    // ---- Grid structural flows ----
+    /// Enter height for a new row (integer terminal rows or "auto").
+    PickingNewRowHeight {
+        buf: String,
+    },
+    /// Enter number of columns for the new row (after height was accepted).
+    PickingNewRowColumnCount {
+        height: RowHeight,
+        buf: String,
+    },
+    /// Edit the height of an existing row.
+    EditingRowHeight {
+        row_idx: usize,
+        buf: String,
+    },
+    /// Confirm before removing a row.
+    ConfirmRemoveRow {
+        row_idx: usize,
+    },
+    /// Confirm before removing a column.
+    ConfirmRemoveColumn {
+        row_idx: usize,
+        col_idx: usize,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransferOp {
+    Move,
+    Copy,
+}
+
+/// Where the editor focus sits within a grid-layout dashboard.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GridFocus {
+    Card { row: usize, col: usize, pos_in_col: usize },
+    Column { row: usize, col: usize },
+    Row { row: usize },
 }
 
 /// Accumulates the first two threshold values while collecting severity input.
@@ -357,6 +427,8 @@ pub enum FilterFocus {
 pub enum MenuContext {
     Dashboard,
     Card(usize),
+    Row(usize),
+    GridColumn(usize, usize), // (row_idx, col_idx)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -392,6 +464,29 @@ pub enum MenuAction {
     StatsEditMetric,
     StatsEditWindow,
     StatsEditUnit,
+    // Cross-dashboard transfer
+    MoveToDashboard,
+    CopyToDashboard,
+    // Grid card actions
+    MoveCardUpInColumn,
+    MoveCardDownInColumn,
+    MoveToColumn,
+    // Row actions
+    SetRowHeight,
+    ToggleRowFillHeight,
+    AddColumn,
+    RemoveRow,
+    MoveRowUp,
+    MoveRowDown,
+    // Column actions
+    SetColumnFillHeight,
+    RemoveColumn,
+    MoveColumnLeft,
+    MoveColumnRight,
+    // Dashboard-level grid actions
+    AddRow,
+    // Dashboard management
+    DeleteDashboard,
 }
 
 #[derive(Debug, Clone)]
@@ -535,23 +630,60 @@ pub fn card_menu_items(card: &Card) -> Vec<MenuItem> {
         label: "Size",
     });
     items.push(MenuItem {
+        action: MenuAction::MoveToDashboard,
+        label: "Move to dashboard…",
+    });
+    items.push(MenuItem {
+        action: MenuAction::CopyToDashboard,
+        label: "Copy to dashboard…",
+    });
+    items.push(MenuItem {
         action: MenuAction::DeleteCard,
         label: "Delete card",
     });
     items
 }
 
-pub fn dashboard_menu_items() -> Vec<MenuItem> {
+/// Grid-only card menu additions (appended by `open_menu` when in a grid dashboard).
+pub fn grid_card_extra_items() -> Vec<MenuItem> {
     vec![
-        MenuItem {
-            action: MenuAction::RenameDashboard,
-            label: "Rename dashboard",
-        },
-        MenuItem {
-            action: MenuAction::ResizeGrid,
-            label: "Grid size (cols × rows)",
-        },
+        MenuItem { action: MenuAction::MoveCardUpInColumn, label: "Move up in column" },
+        MenuItem { action: MenuAction::MoveCardDownInColumn, label: "Move down in column" },
+        MenuItem { action: MenuAction::MoveToColumn, label: "Move to column…" },
     ]
+}
+
+pub fn row_menu_items() -> Vec<MenuItem> {
+    vec![
+        MenuItem { action: MenuAction::SetRowHeight, label: "Set row height" },
+        MenuItem { action: MenuAction::ToggleRowFillHeight, label: "Toggle fill_height default" },
+        MenuItem { action: MenuAction::AddColumn, label: "Add column" },
+        MenuItem { action: MenuAction::MoveRowUp, label: "Move row up" },
+        MenuItem { action: MenuAction::MoveRowDown, label: "Move row down" },
+        MenuItem { action: MenuAction::RemoveRow, label: "Remove row" },
+    ]
+}
+
+pub fn column_menu_items() -> Vec<MenuItem> {
+    vec![
+        MenuItem { action: MenuAction::SetColumnFillHeight, label: "Toggle fill_height" },
+        MenuItem { action: MenuAction::MoveColumnLeft, label: "Move column left" },
+        MenuItem { action: MenuAction::MoveColumnRight, label: "Move column right" },
+        MenuItem { action: MenuAction::RemoveColumn, label: "Remove column" },
+    ]
+}
+
+pub fn dashboard_menu_items(is_grid: bool) -> Vec<MenuItem> {
+    let mut items = vec![
+        MenuItem { action: MenuAction::RenameDashboard, label: "Rename dashboard" },
+    ];
+    if is_grid {
+        items.push(MenuItem { action: MenuAction::AddRow, label: "Add row" });
+    } else {
+        items.push(MenuItem { action: MenuAction::ResizeGrid, label: "Grid size (cols × rows)" });
+    }
+    items.push(MenuItem { action: MenuAction::DeleteDashboard, label: "Delete dashboard" });
+    items
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -616,6 +748,7 @@ impl EditorState {
             source_path,
             edit_target: None,
             image_pending_is_camera: None,
+            grid_focus: None,
         }
     }
 
@@ -637,8 +770,10 @@ impl EditorState {
     }
 
     pub fn move_cursor(&mut self, dx: i32, dy: i32, dash: &Dashboard) {
-        self.cursor_col = clamp_add(self.cursor_col, dx, dash.grid.cols.saturating_sub(1));
-        self.cursor_row = clamp_add(self.cursor_row, dy, dash.grid.rows.saturating_sub(1));
+        if let Some(grid) = dash.free_grid() {
+            self.cursor_col = clamp_add(self.cursor_col, dx, grid.cols.saturating_sub(1));
+            self.cursor_row = clamp_add(self.cursor_row, dy, grid.rows.saturating_sub(1));
+        }
     }
 
     pub fn select_at_cursor(&mut self, dash: &Dashboard) {
@@ -647,14 +782,16 @@ impl EditorState {
 
     pub fn resize_selected(&mut self, dw: i32, dh: i32, dash: &mut Dashboard) {
         let Some(i) = self.selected_card else { return };
-        let Some(card) = dash.cards.get_mut(i) else {
+        let (grid_cols, grid_rows) = dash.free_grid().map(|g| (g.cols, g.rows)).unwrap_or((12, 8));
+        let Some(card) = dash.card_mut(i) else {
             return;
         };
         self.snapshot_inner(card);
-        let new_w = clamp_dim(card.pos.w, dw, dash.grid.cols - card.pos.col);
-        let new_h = clamp_dim(card.pos.h, dh, dash.grid.rows - card.pos.row);
-        card.pos.w = new_w.max(1);
-        card.pos.h = new_h.max(1);
+        let Some(pos) = card.pos.as_mut() else { return; };
+        let new_w = clamp_dim(pos.w, dw, grid_cols - pos.col);
+        let new_h = clamp_dim(pos.h, dh, grid_rows - pos.row);
+        pos.w = new_w.max(1);
+        pos.h = new_h.max(1);
         self.dirty = true;
     }
 
@@ -662,14 +799,16 @@ impl EditorState {
         let Some(i) = self.selected_card else { return };
         let target_col = self.cursor_col;
         let target_row = self.cursor_row;
-        let Some(card) = dash.cards.get_mut(i) else {
+        let (grid_cols, grid_rows) = dash.free_grid().map(|g| (g.cols, g.rows)).unwrap_or((12, 8));
+        let Some(card) = dash.card_mut(i) else {
             return;
         };
-        let new_col = target_col.min(dash.grid.cols.saturating_sub(card.pos.w));
-        let new_row = target_row.min(dash.grid.rows.saturating_sub(card.pos.h));
-        if card.pos.col != new_col || card.pos.row != new_row {
-            card.pos.col = new_col;
-            card.pos.row = new_row;
+        let Some(pos) = card.pos.as_mut() else { return; };
+        let new_col = target_col.min(grid_cols.saturating_sub(pos.w));
+        let new_row = target_row.min(grid_rows.saturating_sub(pos.h));
+        if pos.col != new_col || pos.row != new_row {
+            pos.col = new_col;
+            pos.row = new_row;
             self.dirty = true;
         }
     }
@@ -678,40 +817,81 @@ impl EditorState {
         let Some(i) = self.selected_card.take() else {
             return;
         };
-        if i < dash.cards.len() {
-            dash.cards.remove(i);
+        if dash.remove_card_at(i).is_some() {
+            self.grid_focus = None;
             self.dirty = true;
         }
     }
 
     pub fn add_card(&mut self, dash: &mut Dashboard, kind: CardKind) {
         if let Some(idx) = self.edit_target.take() {
-            if let Some(card) = dash.cards.get_mut(idx) {
+            if let Some(card) = dash.card_mut(idx) {
                 card.kind = kind;
                 self.dirty = true;
                 self.selected_card = Some(idx);
                 return;
             }
         }
-        let card = Card {
-            pos: Pos {
-                col: self.cursor_col,
-                row: self.cursor_row,
-                w: 3.min(dash.grid.cols.saturating_sub(self.cursor_col).max(1)),
-                h: 2.min(dash.grid.rows.saturating_sub(self.cursor_row).max(1)),
-            },
-            kind,
-            color: None,
-            size: CardSize::Normal,
-        };
-        dash.cards.push(card);
-        self.selected_card = Some(dash.cards.len() - 1);
-        self.dirty = true;
+        match &dash.layout {
+            DashboardLayout::Grid { .. } => {
+                let (row_idx, col_idx) = match self.grid_focus {
+                    Some(GridFocus::Card { row, col, .. }) => (row, col),
+                    Some(GridFocus::Column { row, col }) => (row, col),
+                    Some(GridFocus::Row { row }) => (row, 0),
+                    None => (0, 0),
+                };
+                let card = Card {
+                    id: dash.next_card_id(),
+                    pos: None,
+                    height: None,
+                    kind,
+                    color: None,
+                    size: CardSize::Normal,
+                };
+                dash.insert_card_grid(row_idx, col_idx, card);
+                // Move focus to the newly added card (last in that column).
+                if let DashboardLayout::Grid { rows } = &dash.layout {
+                    if let Some(row) = rows.get(row_idx) {
+                        if let Some(col) = row.columns.get(col_idx) {
+                            let pos_in_col = col.cards.len().saturating_sub(1);
+                            self.grid_focus = Some(GridFocus::Card { row: row_idx, col: col_idx, pos_in_col });
+                        }
+                    }
+                }
+                self.selected_card = self.grid_focus.and_then(|gf| {
+                    if let GridFocus::Card { row, col, pos_in_col } = gf {
+                        dash.flat_idx_from_grid(row, col, pos_in_col)
+                    } else {
+                        None
+                    }
+                });
+                self.dirty = true;
+            }
+            DashboardLayout::Free { .. } => {
+                let (gcols, grows) = dash.free_grid().map(|g| (g.cols, g.rows)).unwrap_or((12, 8));
+                let card = Card {
+                    id: dash.next_card_id(),
+                    pos: Some(Pos {
+                        col: self.cursor_col,
+                        row: self.cursor_row,
+                        w: 3.min(gcols.saturating_sub(self.cursor_col).max(1)),
+                        h: 2.min(grows.saturating_sub(self.cursor_row).max(1)),
+                    }),
+                    height: None,
+                    kind,
+                    color: None,
+                    size: CardSize::Normal,
+                };
+                dash.push_card_free(card);
+                self.selected_card = Some(dash.card_count() - 1);
+                self.dirty = true;
+            }
+        }
     }
 
     /// Replace just the title of the card at `idx` (keeps everything else).
     pub fn retitle_card(&mut self, dash: &mut Dashboard, idx: usize, new_title: Option<String>) {
-        let Some(card) = dash.cards.get_mut(idx) else {
+        let Some(card) = dash.card_mut(idx) else {
             return;
         };
         match &mut card.kind {
@@ -749,14 +929,20 @@ fn clamp_dim(v: u16, delta: i32, headroom: u16) -> u16 {
 }
 
 pub fn card_at(dash: &Dashboard, col: u16, row: u16) -> Option<usize> {
+    if dash.free_grid().is_none() {
+        return None;
+    }
     // Iterate in reverse so newest (drawn last) wins.
-    for (i, c) in dash.cards.iter().enumerate().rev() {
-        if col >= c.pos.col
-            && col < c.pos.col + c.pos.w
-            && row >= c.pos.row
-            && row < c.pos.row + c.pos.h
-        {
-            return Some(i);
+    let cards: Vec<_> = dash.cards_iter().enumerate().collect();
+    for (i, c) in cards.into_iter().rev() {
+        if let Some(pos) = c.pos {
+            if col >= pos.col
+                && col < pos.col + pos.w
+                && row >= pos.row
+                && row < pos.row + pos.h
+            {
+                return Some(i);
+            }
         }
     }
     None
@@ -765,42 +951,49 @@ pub fn card_at(dash: &Dashboard, col: u16, row: u16) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dashboard::{Grid, Pos};
+    use crate::dashboard::{CardId, Grid};
+    use crate::dashboard::Pos;
 
     fn make_dash() -> Dashboard {
         Dashboard {
             name: "t".into(),
-            grid: Grid { cols: 12, rows: 8 },
-            cards: vec![
-                Card {
-                    pos: Pos {
-                        col: 0,
-                        row: 0,
-                        w: 3,
-                        h: 2,
+            layout: DashboardLayout::Free {
+                grid: Grid { cols: 12, rows: 8 },
+                cards: vec![
+                    Card {
+                        id: CardId(1),
+                        pos: Some(Pos {
+                            col: 0,
+                            row: 0,
+                            w: 3,
+                            h: 2,
+                        }),
+                        height: None,
+                        kind: CardKind::Text {
+                            markdown: "a".into(),
+                            title: None,
+                        },
+                        color: None,
+                        size: CardSize::Normal,
                     },
-                    kind: CardKind::Text {
-                        markdown: "a".into(),
-                        title: None,
+                    Card {
+                        id: CardId(2),
+                        pos: Some(Pos {
+                            col: 4,
+                            row: 0,
+                            w: 2,
+                            h: 2,
+                        }),
+                        height: None,
+                        kind: CardKind::Text {
+                            markdown: "b".into(),
+                            title: None,
+                        },
+                        color: None,
+                        size: CardSize::Normal,
                     },
-                    color: None,
-                    size: CardSize::Normal,
-                },
-                Card {
-                    pos: Pos {
-                        col: 4,
-                        row: 0,
-                        w: 2,
-                        h: 2,
-                    },
-                    kind: CardKind::Text {
-                        markdown: "b".into(),
-                        title: None,
-                    },
-                    color: None,
-                    size: CardSize::Normal,
-                },
-            ],
+                ],
+            },
         }
     }
 
@@ -829,7 +1022,7 @@ mod tests {
         let mut e = EditorState::new(0, None);
         e.selected_card = Some(1);
         e.delete_selected(&mut d);
-        assert_eq!(d.cards.len(), 1);
+        assert_eq!(d.card_count(), 1);
     }
 
     #[test]
@@ -837,9 +1030,9 @@ mod tests {
         let mut d = make_dash();
         let mut e = EditorState::new(0, None);
         e.snapshot(&d);
-        d.cards.pop();
-        assert_eq!(d.cards.len(), 1);
+        d.remove_card_at_free(d.card_count() - 1);
+        assert_eq!(d.card_count(), 1);
         e.undo(&mut d);
-        assert_eq!(d.cards.len(), 2);
+        assert_eq!(d.card_count(), 2);
     }
 }
