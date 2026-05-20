@@ -58,8 +58,22 @@ fn main() -> Result<()> {
     // doesn't actually render it).
     let picker = match ratatui_image::picker::Picker::from_query_stdio() {
         Ok(mut p) => {
+            use ratatui_image::picker::ProtocolType;
+            // iTerm2 advertises partial Kitty support but its native protocol
+            // renders correctly while Kitty does not. Auto-prefer iterm2 when
+            // running inside iTerm2.app.
+            if std::env::var("TERM_PROGRAM")
+                .map(|v| v == "iTerm.app")
+                .unwrap_or(false)
+                && p.protocol_type() != ProtocolType::Iterm2
+            {
+                tracing::info!(
+                    "TERM_PROGRAM=iTerm.app detected — overriding {:?} → Iterm2",
+                    p.protocol_type()
+                );
+                p.set_protocol_type(ProtocolType::Iterm2);
+            }
             if let Ok(forced) = std::env::var("HA_TUI_IMAGE_PROTO") {
-                use ratatui_image::picker::ProtocolType;
                 let proto = match forced.to_ascii_lowercase().as_str() {
                     "halfblocks" => Some(ProtocolType::Halfblocks),
                     "sixel" => Some(ProtocolType::Sixel),
