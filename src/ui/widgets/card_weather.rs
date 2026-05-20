@@ -39,6 +39,7 @@ pub fn render(
     // Extract current condition and temperature from entity state.
     let condition = state.map(|s| s.state.as_str()).unwrap_or("unavailable");
     let temp = attr_f64(state, "temperature");
+    let temp_unit = attr_str(state, "temperature_unit").unwrap_or_else(|| "°".into());
     let humidity = attr_f64(state, "humidity");
     let wind_speed = attr_f64(state, "wind_speed");
 
@@ -48,7 +49,7 @@ pub fn render(
         CardSize::Small => {
             // Small: single header line — glyph + temp + condition
             let text = if let Some(t) = temp {
-                format!("{glyph}  {t:.1}°  {condition}")
+                format!("{glyph}  {t:.1}{temp_unit}  {condition}")
             } else {
                 format!("{glyph}  {condition}")
             };
@@ -57,7 +58,7 @@ pub fn render(
         CardSize::Large => {
             // Large: oversized temperature via big-text + glyph + condition line.
             let temp_str = temp
-                .map(|t| format!("{t:.0}°"))
+                .map(|t| format!("{t:.0}{temp_unit}"))
                 .unwrap_or_else(|| "—".into());
 
             let [glyph_area, temp_area] =
@@ -84,7 +85,7 @@ pub fn render(
         CardSize::Normal => {
             // Normal: header line + attributes + forecast strip
             let header = if let Some(t) = temp {
-                format!("{glyph}  {t:.1}°  {condition}")
+                format!("{glyph}  {t:.1}{temp_unit}  {condition}")
             } else {
                 format!("{glyph}  {condition}")
             };
@@ -184,4 +185,12 @@ fn condition_glyph(condition: &str) -> &'static str {
 
 fn attr_f64(state: Option<&EntityState>, key: &str) -> Option<f64> {
     state?.attributes.get(key).and_then(|v| v.as_f64())
+}
+
+fn attr_str(state: Option<&EntityState>, key: &str) -> Option<String> {
+    state?
+        .attributes
+        .get(key)
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
 }
