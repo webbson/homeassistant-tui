@@ -23,7 +23,9 @@ pub struct EditorState {
 pub enum EditorMode {
     Browse,
     /// User pressed `a` — picking a card type.
-    PickingType,
+    PickingType {
+        selected: usize,
+    },
     /// Card type chosen, multi-instance — pick which HA instance.
     PickingInstance {
         card_type: CardTypeStub,

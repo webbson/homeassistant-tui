@@ -169,17 +169,29 @@ impl App {
 
         // Modal modes have their own handling
         match &mut editor.mode {
-            EditorMode::PickingType => {
-                if let KeyCode::Char(c) = k.code {
-                    if let Some(d) = c.to_digit(10) {
-                        if let Some(kind) = CardTypeStub::ALL.get((d as usize).wrapping_sub(1)) {
+            EditorMode::PickingType { selected } => {
+                let n = CardTypeStub::ALL.len();
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Up | KeyCode::Char('k') if *selected > 0 => *selected -= 1,
+                    KeyCode::Down | KeyCode::Char('j') if *selected + 1 < n => *selected += 1,
+                    KeyCode::Enter => {
+                        if let Some(kind) = CardTypeStub::ALL.get(*selected) {
                             self.start_card_after_type(*kind);
                             return;
                         }
                     }
-                }
-                if matches!(k.code, KeyCode::Esc) {
-                    editor.mode = EditorMode::Browse;
+                    KeyCode::Char(c) => {
+                        if let Some(d) = c.to_digit(10) {
+                            if d >= 1 {
+                                if let Some(kind) = CardTypeStub::ALL.get((d as usize) - 1) {
+                                    self.start_card_after_type(*kind);
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
                 }
                 return;
             }
@@ -2333,7 +2345,7 @@ impl App {
                 }
             }
             KeyCode::Char(' ') => editor.select_at_cursor(dash),
-            KeyCode::Char('a') => editor.mode = EditorMode::PickingType,
+            KeyCode::Char('a') => editor.mode = EditorMode::PickingType { selected: 0 },
             KeyCode::Char('m') | KeyCode::Char('M') => {
                 self.open_menu();
             }

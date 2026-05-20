@@ -99,7 +99,7 @@ pub fn draw(f: &mut Frame, area: Rect, app: &mut App) {
     };
 
     match &editor.mode {
-        EditorMode::PickingType => draw_palette(f, area),
+        EditorMode::PickingType { selected } => draw_palette(f, area, *selected),
         EditorMode::PickingInstance { selected, .. } => {
             draw_instance_picker(f, area, app, *selected)
         }
@@ -468,22 +468,38 @@ fn modal_rect(parent: Rect, w: u16, h: u16) -> Rect {
     }
 }
 
-fn draw_palette(f: &mut Frame, area: Rect) {
-    let r = modal_rect(area, 40, 10);
+fn draw_palette(f: &mut Frame, area: Rect, selected: usize) {
+    let height = (CardTypeStub::ALL.len() as u16) + 2;
+    let r = modal_rect(area, 44, height);
     f.render_widget(Clear, r);
     let lines: Vec<Line<'_>> = CardTypeStub::ALL
         .iter()
         .enumerate()
         .map(|(i, k)| {
+            let idx_style = if i == selected {
+                Style::new().reversed().bold()
+            } else {
+                Style::new().reversed()
+            };
+            let label_style = if i == selected {
+                Style::new().bold()
+            } else {
+                Style::new()
+            };
+            let idx_label = if i < 9 {
+                format!(" {} ", i + 1)
+            } else {
+                "   ".to_string()
+            };
             Line::from(vec![
-                Span::styled(format!(" {} ", i + 1), Style::new().reversed()),
+                Span::styled(idx_label, idx_style),
                 Span::raw("  "),
-                Span::raw(k.label()),
+                Span::styled(k.label(), label_style),
             ])
         })
         .collect();
     f.render_widget(
-        Paragraph::new(lines).block(Block::bordered().title(" Add card — pick type ")),
+        Paragraph::new(lines).block(Block::bordered().title(" Add card — j/k + Enter, or 1-9 ")),
         r,
     );
 }
