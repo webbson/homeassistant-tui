@@ -3,6 +3,9 @@
 *.pdb
 .DS_Store
 
+# Personal session-continuity notes — not for the repo
+primer.md
+
 # Local config with secrets — NEVER commit
 config/config.yaml
 config/dashboards.yaml
