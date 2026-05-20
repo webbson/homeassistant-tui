@@ -284,6 +284,65 @@ pos: { col: 0, row: 0, w: 4, h: 2 }
     }
 
     #[test]
+    fn graph_legacy_sparkline_normalizes_to_single_series() {
+        let yaml = r#"
+type: sparkline
+instance: home
+entity: sensor.temp
+window: 6h
+pos: { col: 0, row: 0, w: 6, h: 4 }
+"#;
+        let mut card: Card = serde_yaml::from_str(yaml).unwrap();
+        card.normalize();
+        if let CardKind::Graph {
+            entity,
+            entities,
+            window,
+            ..
+        } = &card.kind
+        {
+            assert!(
+                entity.is_none(),
+                "legacy entity should be cleared after normalize"
+            );
+            assert_eq!(entities.len(), 1);
+            assert_eq!(entities[0].entity.as_str(), "sensor.temp");
+            assert_eq!(window, "6h");
+        } else {
+            panic!("wrong variant");
+        }
+    }
+
+    #[test]
+    fn graph_multi_series_round_trip() {
+        let yaml = r##"
+type: graph
+instance: home
+graph_type: bar
+orientation: horizontal
+entities:
+  - { entity: sensor.cpu_0 }
+  - { entity: sensor.cpu_1, label: "CPU 1", color: "#ff00ff" }
+pos: { col: 0, row: 0, w: 6, h: 4 }
+"##;
+        let card: Card = serde_yaml::from_str(yaml).unwrap();
+        if let CardKind::Graph {
+            entities,
+            graph_type,
+            orientation,
+            ..
+        } = &card.kind
+        {
+            assert_eq!(entities.len(), 2);
+            assert_eq!(*graph_type, GraphType::Bar);
+            assert_eq!(*orientation, BarOrientation::Horizontal);
+            assert_eq!(entities[1].label.as_deref(), Some("CPU 1"));
+        } else {
+            panic!("wrong variant");
+        }
+    }
+
+    #[test]
     fn filtered_list_hide_when_empty_round_trip() {
         let yaml = r#"
 type: filtered_entity_list
