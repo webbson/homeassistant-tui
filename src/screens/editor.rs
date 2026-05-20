@@ -6,9 +6,9 @@ use ratatui::widgets::{Block, Clear, List, ListItem, ListState, Paragraph};
 use ratatui::Frame;
 
 use crate::app::App;
-use crate::dashboard::editor::{CardTypeStub, EditorMode};
+use crate::dashboard::editor::{CardTypeStub, EditorMode, SeriesIndexOp};
 use crate::dashboard::layout::cell_to_rect;
-use crate::dashboard::CardSize;
+use crate::dashboard::{BarOrientation, CardSize};
 
 pub fn draw(f: &mut Frame, area: Rect, app: &App) {
     let Some(editor) = app.editor.as_ref() else {
@@ -148,6 +148,57 @@ pub fn draw(f: &mut Frame, area: Rect, app: &App) {
         } => draw_resize_grid(f, area, cols_buffer, rows_buffer, *focus_rows),
         EditorMode::EnterColorOverride { buf, .. } => draw_color_override(f, area, buf),
         EditorMode::PickCardSize { current, .. } => draw_pick_size(f, area, *current),
+        // Graph add-flow
+        EditorMode::GraphPickType => draw_graph_pick_type(f, area),
+        EditorMode::GraphPickInstance { selected, .. } => {
+            draw_instance_picker(f, area, app, *selected)
+        }
+        EditorMode::GraphAddEntities {
+            instance,
+            accumulated,
+            query,
+            selected,
+            asking_more,
+            ..
+        } => draw_graph_add_entities(
+            f,
+            area,
+            app,
+            instance,
+            accumulated,
+            query,
+            *selected,
+            *asking_more,
+        ),
+        EditorMode::GraphEditWindowAdd {
+            window_buf,
+            title_buf,
+            title_stage,
+            ..
+        } => draw_graph_window_add(f, area, window_buf, title_buf, *title_stage),
+        EditorMode::GraphPickOrientationAdd {
+            current,
+            title_buf,
+            title_stage,
+            ..
+        } => draw_graph_orientation_add(f, area, *current, title_buf, *title_stage),
+        // Graph context-menu flows
+        EditorMode::GraphAddOneSeries {
+            card_idx,
+            query,
+            selected,
+        } => draw_graph_add_one_series(f, area, app, *card_idx, query, *selected),
+        EditorMode::GraphPickSeriesIndex {
+            card_idx,
+            op,
+            selected,
+        } => draw_graph_pick_series(f, area, app, editor, dash, *card_idx, *op, *selected),
+        EditorMode::GraphEditSeriesColor { buf, .. } => draw_graph_series_color(f, area, buf),
+        EditorMode::GraphEditSeriesLabel { buf, .. } => draw_graph_series_label(f, area, buf),
+        EditorMode::GraphEditWindow { buf, .. } => draw_window_edit(f, area, buf),
+        EditorMode::GraphPickOrientation { current, .. } => {
+            draw_graph_pick_orientation(f, area, *current)
+        }
         EditorMode::Browse => {}
     }
 }
@@ -788,6 +839,483 @@ fn draw_pick_size(f: &mut Frame, area: Rect, current: CardSize) {
     f.render_stateful_widget(
         List::new(items)
             .block(Block::bordered().title(" Size (j/k · Enter · Esc) "))
+            .highlight_style(Style::new().reversed())
+            .highlight_symbol("▶ "),
+        r,
+        &mut state,
+    );
+}
+
+// ── Graph add-flow draw helpers ───────────────────────────────────────────────
+
+fn draw_graph_pick_type(f: &mut Frame, area: Rect) {
+    const TYPES: [(&str, &str); 3] = [
+        ("1", "Line  — time series chart"),
+        ("2", "Bar   — bar chart"),
+        ("3", "Pie   — pie chart"),
+    ];
+    let r = modal_rect(area, 40, 7);
+    f.render_widget(Clear, r);
+    let lines: Vec<Line<'_>> = TYPES
+        .iter()
+        .map(|(key, label)| {
+            Line::from(vec![
+                Span::styled(format!(" {key} "), Style::new().reversed()),
+                Span::raw("  "),
+                Span::raw(*label),
+            ])
+        })
+        .collect();
+    f.render_widget(
+        Paragraph::new(lines).block(Block::bordered().title(" Graph — pick type (Esc cancel) ")),
+        r,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_graph_add_entities(
+    f: &mut Frame,
+    area: Rect,
+    app: &App,
+    instance: &str,
+    accumulated: &[crate::dashboard::GraphSeries],
+    query: &str,
+    selected: usize,
+    asking_more: bool,
+) {
+    let w = 80u16.min(area.width.saturating_sub(2));
+    let h = 26u16.min(area.height.saturating_sub(2));
+    let x = area.x + area.width.saturating_sub(w) / 2;
+    let y = area.y + area.height.saturating_sub(h) / 2;
+    let r = Rect {
+        x,
+        y,
+        width: w,
+        height: h,
+    };
+    f.render_widget(Clear, r);
+    let color = app.theme.instance_color(instance);
+
+    let added = accumulated
+        .iter()
+        .map(|s| s.entity.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let added_label = if added.is_empty() {
+        "(none yet)".into()
+    } else {
+        added
+    };
+
+    if asking_more {
+        let inner = Rect {
+            x: r.x + 1,
+            y: r.y + 1,
+            width: r.width.saturating_sub(2),
+            height: r.height.saturating_sub(2),
+        };
+        f.render_widget(Block::bordered().title(" Graph — add entity "), r);
+        let lines = vec![
+            Line::from(vec![
+                Span::styled("added: ", Style::new().dim()),
+                Span::styled(added_label, Style::new().fg(color)),
+            ]),
+            Line::raw(""),
+            Line::from(Span::styled(
+                "Add another entity? (y / n / Esc = done)",
+                Style::new().bold(),
+            )),
+        ];
+        f.render_widget(Paragraph::new(lines), inner);
+        return;
+    }
+
+    let title = format!(
+        " graph → {}  (type to search, ↑/↓ select, ⏎ pick, Esc = done) ",
+        instance
+    );
+    f.render_widget(Block::bordered().title(title), r);
+
+    let inner = Rect {
+        x: r.x + 1,
+        y: r.y + 1,
+        width: r.width.saturating_sub(2),
+        height: r.height.saturating_sub(2),
+    };
+    let search_row = Rect {
+        x: inner.x,
+        y: inner.y,
+        width: inner.width,
+        height: 1,
+    };
+    let picked_row = Rect {
+        x: inner.x,
+        y: inner.y + 1,
+        width: inner.width,
+        height: 1,
+    };
+    let list_row = Rect {
+        x: inner.x,
+        y: inner.y + 3,
+        width: inner.width,
+        height: inner.height.saturating_sub(4),
+    };
+
+    f.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("search: ", Style::new().dim()),
+            Span::styled(query.to_string(), Style::new().fg(color).bold()),
+            Span::styled("_", Style::new().fg(color).rapid_blink()),
+        ])),
+        search_row,
+    );
+    f.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("added: ", Style::new().dim()),
+            Span::styled(added_label, Style::new().fg(color)),
+        ])),
+        picked_row,
+    );
+
+    let rows = crate::app::entity_search(&app.instances, instance, query);
+    let items: Vec<ListItem<'_>> = rows
+        .iter()
+        .map(|p| {
+            let primary = if p.friendly_name.is_empty() {
+                p.entity_id.clone()
+            } else {
+                p.friendly_name.clone()
+            };
+            ListItem::new(Line::from(vec![
+                Span::styled(primary, Style::new().fg(color).bold()),
+                Span::raw("  "),
+                Span::styled(p.entity_id.clone(), Style::new().dim()),
+            ]))
+        })
+        .collect();
+    let mut state = ListState::default();
+    if !items.is_empty() {
+        state.select(Some(selected.min(items.len() - 1)));
+    }
+    f.render_stateful_widget(
+        List::new(items)
+            .highlight_style(Style::new().reversed())
+            .highlight_symbol("▶ "),
+        list_row,
+        &mut state,
+    );
+}
+
+fn draw_graph_window_add(
+    f: &mut Frame,
+    area: Rect,
+    window_buf: &str,
+    title_buf: &str,
+    title_stage: bool,
+) {
+    let r = modal_rect(area, 60, 8);
+    f.render_widget(Clear, r);
+    let lines = if title_stage {
+        vec![
+            Line::raw("Optional card title (blank = no title):"),
+            Line::raw(""),
+            Line::from(vec![
+                Span::raw("> "),
+                Span::styled(title_buf.to_string(), Style::new().bold()),
+                Span::styled("_", Style::new().rapid_blink()),
+            ]),
+            Line::raw(""),
+            Line::from(vec![
+                Span::styled("window: ", Style::new().dim()),
+                Span::raw(window_buf.to_string()),
+            ]),
+        ]
+    } else {
+        vec![
+            Line::raw("History window — examples: 1h, 6h, 24h, 7d"),
+            Line::raw(""),
+            Line::from(vec![
+                Span::raw("> "),
+                Span::styled(window_buf.to_string(), Style::new().bold()),
+                Span::styled("_", Style::new().rapid_blink()),
+            ]),
+        ]
+    };
+    f.render_widget(
+        Paragraph::new(lines)
+            .block(Block::bordered().title(" Graph config (Enter=next, Esc=cancel) ")),
+        r,
+    );
+}
+
+fn draw_graph_orientation_add(
+    f: &mut Frame,
+    area: Rect,
+    current: BarOrientation,
+    title_buf: &str,
+    title_stage: bool,
+) {
+    if title_stage {
+        let r = modal_rect(area, 60, 6);
+        f.render_widget(Clear, r);
+        let lines = vec![
+            Line::raw("Optional card title (blank = no title):"),
+            Line::raw(""),
+            Line::from(vec![
+                Span::raw("> "),
+                Span::styled(title_buf.to_string(), Style::new().bold()),
+                Span::styled("_", Style::new().rapid_blink()),
+            ]),
+        ];
+        f.render_widget(
+            Paragraph::new(lines)
+                .block(Block::bordered().title(" Graph config (Enter=done, Esc=cancel) ")),
+            r,
+        );
+        return;
+    }
+    const OPTS: [(BarOrientation, &str); 2] = [
+        (BarOrientation::Vertical, "Vertical"),
+        (BarOrientation::Horizontal, "Horizontal"),
+    ];
+    let selected = OPTS.iter().position(|(o, _)| *o == current).unwrap_or(0);
+    let items: Vec<ListItem<'_>> = OPTS
+        .iter()
+        .map(|(_, label)| ListItem::new(Line::raw(label.to_string())))
+        .collect();
+    let mut state = ListState::default();
+    state.select(Some(selected));
+    let r = modal_rect(area, 36, 6);
+    f.render_widget(Clear, r);
+    f.render_stateful_widget(
+        List::new(items)
+            .block(Block::bordered().title(" Bar orientation (j/k · Enter · Esc) "))
+            .highlight_style(Style::new().reversed())
+            .highlight_symbol("▶ "),
+        r,
+        &mut state,
+    );
+}
+
+// ── Graph context-menu draw helpers ──────────────────────────────────────────
+
+fn draw_graph_add_one_series(
+    f: &mut Frame,
+    area: Rect,
+    app: &App,
+    card_idx: usize,
+    query: &str,
+    selected: usize,
+) {
+    // Determine instance from card
+    let instance = app
+        .editor
+        .as_ref()
+        .and_then(|ed| app.dashboards.get(ed.dash_idx))
+        .and_then(|d| d.cards.get(card_idx))
+        .and_then(|c| {
+            if let crate::dashboard::CardKind::Graph { instance, .. } = &c.kind {
+                Some(instance.clone())
+            } else {
+                None
+            }
+        })
+        .unwrap_or_default();
+
+    let w = 80u16.min(area.width.saturating_sub(2));
+    let h = 24u16.min(area.height.saturating_sub(2));
+    let x = area.x + area.width.saturating_sub(w) / 2;
+    let y = area.y + area.height.saturating_sub(h) / 2;
+    let r = Rect {
+        x,
+        y,
+        width: w,
+        height: h,
+    };
+    f.render_widget(Clear, r);
+    let color = app.theme.instance_color(&instance);
+    f.render_widget(
+        Block::bordered().title(format!(
+            " Add series → {}  (type to search, ⏎ pick, Esc cancel) ",
+            instance
+        )),
+        r,
+    );
+
+    let inner = Rect {
+        x: r.x + 1,
+        y: r.y + 1,
+        width: r.width.saturating_sub(2),
+        height: r.height.saturating_sub(2),
+    };
+    let search_row = Rect {
+        x: inner.x,
+        y: inner.y,
+        width: inner.width,
+        height: 1,
+    };
+    let list_row = Rect {
+        x: inner.x,
+        y: inner.y + 2,
+        width: inner.width,
+        height: inner.height.saturating_sub(3),
+    };
+    f.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("search: ", Style::new().dim()),
+            Span::styled(query.to_string(), Style::new().fg(color).bold()),
+            Span::styled("_", Style::new().fg(color).rapid_blink()),
+        ])),
+        search_row,
+    );
+    let rows = crate::app::entity_search(&app.instances, &instance, query);
+    let items: Vec<ListItem<'_>> = rows
+        .iter()
+        .map(|p| {
+            let primary = if p.friendly_name.is_empty() {
+                p.entity_id.clone()
+            } else {
+                p.friendly_name.clone()
+            };
+            ListItem::new(Line::from(vec![
+                Span::styled(primary, Style::new().fg(color).bold()),
+                Span::raw("  "),
+                Span::styled(p.entity_id.clone(), Style::new().dim()),
+            ]))
+        })
+        .collect();
+    let mut state = ListState::default();
+    if !items.is_empty() {
+        state.select(Some(selected.min(items.len() - 1)));
+    }
+    f.render_stateful_widget(
+        List::new(items)
+            .highlight_style(Style::new().reversed())
+            .highlight_symbol("▶ "),
+        list_row,
+        &mut state,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_graph_pick_series(
+    f: &mut Frame,
+    area: Rect,
+    _app: &App,
+    editor: &crate::dashboard::editor::EditorState,
+    dash: &crate::dashboard::Dashboard,
+    card_idx: usize,
+    op: SeriesIndexOp,
+    selected: usize,
+) {
+    let entities: Vec<String> = dash
+        .cards
+        .get(card_idx)
+        .and_then(|c| {
+            if let crate::dashboard::CardKind::Graph { entities, .. } = &c.kind {
+                Some(
+                    entities
+                        .iter()
+                        .map(|s| s.label.clone().unwrap_or_else(|| s.entity.clone()))
+                        .collect(),
+                )
+            } else {
+                None
+            }
+        })
+        .unwrap_or_default();
+
+    let op_label = match op {
+        SeriesIndexOp::Remove => "Remove series",
+        SeriesIndexOp::SetColor => "Set series colour",
+        SeriesIndexOp::SetLabel => "Set series label",
+    };
+    let h = (entities.len() as u16 + 4)
+        .max(6)
+        .min(area.height.saturating_sub(4));
+    let r = modal_rect(area, 60, h);
+    f.render_widget(Clear, r);
+    let items: Vec<ListItem<'_>> = entities
+        .iter()
+        .map(|label| ListItem::new(Line::raw(label.clone())))
+        .collect();
+    let mut state = ListState::default();
+    if !items.is_empty() {
+        state.select(Some(selected.min(items.len() - 1)));
+        let _ = editor.dash_idx; // suppress unused warning
+    }
+    f.render_stateful_widget(
+        List::new(items)
+            .block(
+                Block::bordered()
+                    .title(format!(" {} — pick series (j/k · Enter · Esc) ", op_label)),
+            )
+            .highlight_style(Style::new().reversed())
+            .highlight_symbol("▶ "),
+        r,
+        &mut state,
+    );
+}
+
+fn draw_graph_series_color(f: &mut Frame, area: Rect, buf: &str) {
+    let r = modal_rect(area, 64, 5);
+    f.render_widget(Clear, r);
+    let lines = vec![
+        Line::styled(
+            "Enter named color or #rrggbb · empty to clear · Esc cancel",
+            Style::new().dim(),
+        ),
+        Line::raw(""),
+        Line::from(vec![
+            Span::raw("> "),
+            Span::styled(buf.to_string(), Style::new().bold()),
+            Span::styled("_", Style::new().rapid_blink()),
+        ]),
+    ];
+    f.render_widget(
+        Paragraph::new(lines).block(Block::bordered().title(" Series colour ")),
+        r,
+    );
+}
+
+fn draw_graph_series_label(f: &mut Frame, area: Rect, buf: &str) {
+    let r = modal_rect(area, 64, 5);
+    f.render_widget(Clear, r);
+    let lines = vec![
+        Line::styled(
+            "Enter label · empty to clear · Esc cancel",
+            Style::new().dim(),
+        ),
+        Line::raw(""),
+        Line::from(vec![
+            Span::raw("> "),
+            Span::styled(buf.to_string(), Style::new().bold()),
+            Span::styled("_", Style::new().rapid_blink()),
+        ]),
+    ];
+    f.render_widget(
+        Paragraph::new(lines).block(Block::bordered().title(" Series label ")),
+        r,
+    );
+}
+
+fn draw_graph_pick_orientation(f: &mut Frame, area: Rect, current: BarOrientation) {
+    const OPTS: [(BarOrientation, &str); 2] = [
+        (BarOrientation::Vertical, "Vertical"),
+        (BarOrientation::Horizontal, "Horizontal"),
+    ];
+    let selected = OPTS.iter().position(|(o, _)| *o == current).unwrap_or(0);
+    let items: Vec<ListItem<'_>> = OPTS
+        .iter()
+        .map(|(_, label)| ListItem::new(Line::raw(label.to_string())))
+        .collect();
+    let mut state = ListState::default();
+    state.select(Some(selected));
+    let r = modal_rect(area, 36, 6);
+    f.render_widget(Clear, r);
+    f.render_stateful_widget(
+        List::new(items)
+            .block(Block::bordered().title(" Bar orientation (j/k · Enter · Esc) "))
             .highlight_style(Style::new().reversed())
             .highlight_symbol("▶ "),
         r,

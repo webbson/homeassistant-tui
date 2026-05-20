@@ -1,4 +1,6 @@
-use crate::dashboard::{Card, CardKind, CardSize, Dashboard, Pos};
+use crate::dashboard::{
+    BarOrientation, Card, CardKind, CardSize, Dashboard, GraphSeries, GraphType, Pos,
+};
 
 const MAX_UNDO: usize = 32;
 
@@ -109,6 +111,83 @@ pub enum EditorMode {
         card_idx: usize,
         current: CardSize,
     },
+    // ---- Graph add-flow ----
+    /// Step 1: pick Line / Bar / Pie.
+    GraphPickType,
+    /// Step 2: pick HA instance.
+    GraphPickInstance {
+        graph_type: GraphType,
+        selected: usize,
+    },
+    /// Step 3: pick entities one by one; loop until user says "done".
+    GraphAddEntities {
+        instance: String,
+        graph_type: GraphType,
+        accumulated: Vec<GraphSeries>,
+        query: String,
+        selected: usize,
+        /// true while we're showing the "add another? (y/n)" prompt
+        asking_more: bool,
+    },
+    /// Step 4a (Line): enter window string.
+    GraphEditWindowAdd {
+        instance: String,
+        graph_type: GraphType,
+        series: Vec<GraphSeries>,
+        window_buf: String,
+        title_buf: String,
+        title_stage: bool,
+    },
+    /// Step 4b (Bar): pick orientation.
+    GraphPickOrientationAdd {
+        instance: String,
+        series: Vec<GraphSeries>,
+        current: BarOrientation,
+        title_buf: String,
+        title_stage: bool,
+    },
+    // ---- Graph context-menu flows ----
+    /// Add one series to an existing Graph card.
+    GraphAddOneSeries {
+        card_idx: usize,
+        query: String,
+        selected: usize,
+    },
+    /// Pick which series to operate on.
+    GraphPickSeriesIndex {
+        card_idx: usize,
+        op: SeriesIndexOp,
+        selected: usize,
+    },
+    /// Edit the color of one series.
+    GraphEditSeriesColor {
+        card_idx: usize,
+        series_idx: usize,
+        buf: String,
+    },
+    /// Edit the label of one series.
+    GraphEditSeriesLabel {
+        card_idx: usize,
+        series_idx: usize,
+        buf: String,
+    },
+    /// Edit window on an existing Graph card (from menu).
+    GraphEditWindow {
+        card_idx: usize,
+        buf: String,
+    },
+    /// Pick orientation on an existing Bar Graph card (from menu).
+    GraphPickOrientation {
+        card_idx: usize,
+        current: BarOrientation,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SeriesIndexOp {
+    Remove,
+    SetColor,
+    SetLabel,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -128,6 +207,7 @@ pub enum MenuContext {
 pub enum MenuAction {
     RenameCard,
     ChangeEntity,
+    #[allow(dead_code)]
     EditWindow,
     EditQuery,
     ToggleHideState,
@@ -138,6 +218,14 @@ pub enum MenuAction {
     DeleteCard,
     RenameDashboard,
     ResizeGrid,
+    // Graph-specific actions
+    AddGraphSeries,
+    RemoveGraphSeries,
+    SetGraphSeriesColor,
+    SetGraphSeriesLabel,
+    CycleGraphType,
+    EditGraphWindow,
+    EditGraphOrientation,
 }
 
 #[derive(Debug, Clone)]
@@ -154,8 +242,9 @@ pub fn card_menu_items(card: &Card) -> Vec<MenuItem> {
     });
     let entity_change_label = match &card.kind {
         CardKind::EntityList { .. } => Some("Change entities"),
-        CardKind::FilteredEntityList { .. } => None,
-        CardKind::Text { .. } => None,
+        CardKind::FilteredEntityList { .. } | CardKind::Graph { .. } | CardKind::Text { .. } => {
+            None
+        }
         _ => Some("Change entity"),
     };
     if let Some(label) = entity_change_label {
@@ -164,11 +253,46 @@ pub fn card_menu_items(card: &Card) -> Vec<MenuItem> {
             label,
         });
     }
-    if matches!(card.kind, CardKind::Graph { .. }) {
+    if let CardKind::Graph {
+        graph_type,
+        entities,
+        ..
+    } = &card.kind
+    {
         items.push(MenuItem {
-            action: MenuAction::EditWindow,
-            label: "Set history window",
+            action: MenuAction::AddGraphSeries,
+            label: "Add series",
         });
+        if entities.len() > 1 {
+            items.push(MenuItem {
+                action: MenuAction::RemoveGraphSeries,
+                label: "Remove series",
+            });
+        }
+        items.push(MenuItem {
+            action: MenuAction::SetGraphSeriesColor,
+            label: "Set series colour",
+        });
+        items.push(MenuItem {
+            action: MenuAction::SetGraphSeriesLabel,
+            label: "Set series label",
+        });
+        items.push(MenuItem {
+            action: MenuAction::CycleGraphType,
+            label: "Change type",
+        });
+        if *graph_type == GraphType::Line {
+            items.push(MenuItem {
+                action: MenuAction::EditGraphWindow,
+                label: "Window",
+            });
+        }
+        if *graph_type == GraphType::Bar {
+            items.push(MenuItem {
+                action: MenuAction::EditGraphOrientation,
+                label: "Orientation",
+            });
+        }
     }
     if let CardKind::FilteredEntityList {
         hide_when_empty, ..

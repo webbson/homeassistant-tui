@@ -801,6 +801,624 @@ impl App {
                 }
                 return;
             }
+            // ── Graph add-flow ────────────────────────────────────────────────────
+            EditorMode::GraphPickType => {
+                match k.code {
+                    KeyCode::Char('1') => {
+                        self.start_graph_after_type(crate::dashboard::GraphType::Line);
+                    }
+                    KeyCode::Char('2') => {
+                        self.start_graph_after_type(crate::dashboard::GraphType::Bar);
+                    }
+                    KeyCode::Char('3') => {
+                        self.start_graph_after_type(crate::dashboard::GraphType::Pie);
+                    }
+                    KeyCode::Esc => {
+                        editor.mode = EditorMode::Browse;
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::GraphPickInstance {
+                graph_type,
+                selected,
+            } => {
+                let aliases: Vec<String> = self.instances.runtimes.keys().cloned().collect();
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Up | KeyCode::Char('k') if *selected > 0 => *selected -= 1,
+                    KeyCode::Down | KeyCode::Char('j') if *selected + 1 < aliases.len() => {
+                        *selected += 1;
+                    }
+                    KeyCode::Enter => {
+                        if let Some(inst) = aliases.get(*selected) {
+                            let gt = *graph_type;
+                            let inst = inst.clone();
+                            editor.mode = EditorMode::GraphAddEntities {
+                                instance: inst,
+                                graph_type: gt,
+                                accumulated: Vec::new(),
+                                query: String::new(),
+                                selected: 0,
+                                asking_more: false,
+                            };
+                        }
+                    }
+                    KeyCode::Char(c) if c.is_ascii_digit() => {
+                        let i = c.to_digit(10).unwrap() as usize;
+                        if i >= 1 && i <= aliases.len() {
+                            let gt = *graph_type;
+                            let inst = aliases[i - 1].clone();
+                            editor.mode = EditorMode::GraphAddEntities {
+                                instance: inst,
+                                graph_type: gt,
+                                accumulated: Vec::new(),
+                                query: String::new(),
+                                selected: 0,
+                                asking_more: false,
+                            };
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::GraphAddEntities {
+                instance,
+                graph_type,
+                accumulated,
+                query,
+                selected,
+                asking_more,
+            } => {
+                if *asking_more {
+                    match k.code {
+                        KeyCode::Char('y') | KeyCode::Char('Y') => {
+                            *asking_more = false;
+                            *query = String::new();
+                            *selected = 0;
+                        }
+                        KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                            if !accumulated.is_empty() {
+                                let inst = instance.clone();
+                                let gt = *graph_type;
+                                let series = accumulated.clone();
+                                self.advance_graph_to_config(inst, gt, series);
+                            } else {
+                                if let Some(ed) = self.editor.as_mut() {
+                                    ed.mode = EditorMode::Browse;
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                    return;
+                }
+                let rows = entity_search(&self.instances, instance, query);
+                match k.code {
+                    KeyCode::Esc => {
+                        // Esc with at least one entity = done
+                        if !accumulated.is_empty() {
+                            let inst = instance.clone();
+                            let gt = *graph_type;
+                            let series = accumulated.clone();
+                            self.advance_graph_to_config(inst, gt, series);
+                        } else {
+                            editor.mode = EditorMode::Browse;
+                        }
+                    }
+                    KeyCode::Backspace => {
+                        query.pop();
+                        *selected = 0;
+                    }
+                    KeyCode::Up | KeyCode::Char('k') if *selected > 0 => *selected -= 1,
+                    KeyCode::Down | KeyCode::Char('j') if *selected + 1 < rows.len() => {
+                        *selected += 1;
+                    }
+                    KeyCode::Char(c) => {
+                        query.push(c);
+                        *selected = 0;
+                    }
+                    KeyCode::Enter => {
+                        if let Some(pick) = rows.get(*selected) {
+                            let eid = pick.entity_id.clone();
+                            accumulated.push(crate::dashboard::GraphSeries {
+                                entity: eid,
+                                label: None,
+                                color: None,
+                            });
+                            *asking_more = true;
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::GraphEditWindowAdd {
+                instance,
+                graph_type,
+                series,
+                window_buf,
+                title_buf,
+                title_stage,
+            } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        if *title_stage {
+                            title_buf.pop();
+                        } else {
+                            window_buf.pop();
+                        }
+                    }
+                    KeyCode::Char(c) => {
+                        if *title_stage {
+                            title_buf.push(c);
+                        } else {
+                            window_buf.push(c);
+                        }
+                    }
+                    KeyCode::Enter => {
+                        if *title_stage {
+                            let inst = instance.clone();
+                            let gt = *graph_type;
+                            let s = series.clone();
+                            let w = if window_buf.trim().is_empty() {
+                                "1h".to_string()
+                            } else {
+                                window_buf.trim().to_string()
+                            };
+                            let title = if title_buf.trim().is_empty() {
+                                None
+                            } else {
+                                Some(title_buf.trim().to_string())
+                            };
+                            editor.mode = EditorMode::Browse;
+                            let kind = crate::dashboard::CardKind::Graph {
+                                instance: inst,
+                                entity: None,
+                                entities: s,
+                                graph_type: gt,
+                                window: w,
+                                orientation: crate::dashboard::BarOrientation::default(),
+                                title,
+                            };
+                            let Some(dash) = self.dashboards.get_mut(dash_idx) else {
+                                return;
+                            };
+                            let Some(ed) = self.editor.as_mut() else {
+                                return;
+                            };
+                            ed.snapshot(dash);
+                            ed.add_card(dash, kind);
+                        } else {
+                            *title_stage = true;
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::GraphPickOrientationAdd {
+                instance,
+                series,
+                current,
+                title_buf,
+                title_stage,
+            } => {
+                const OPTS: [crate::dashboard::BarOrientation; 2] = [
+                    crate::dashboard::BarOrientation::Vertical,
+                    crate::dashboard::BarOrientation::Horizontal,
+                ];
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Up | KeyCode::Char('k') if !*title_stage => {
+                        let pos = OPTS.iter().position(|o| o == current).unwrap_or(0);
+                        if pos > 0 {
+                            *current = OPTS[pos - 1];
+                        }
+                    }
+                    KeyCode::Down | KeyCode::Char('j') if !*title_stage => {
+                        let pos = OPTS.iter().position(|o| o == current).unwrap_or(0);
+                        if pos + 1 < OPTS.len() {
+                            *current = OPTS[pos + 1];
+                        }
+                    }
+                    KeyCode::Backspace => {
+                        title_buf.pop();
+                    }
+                    KeyCode::Char(c) if *title_stage => {
+                        title_buf.push(c);
+                    }
+                    KeyCode::Enter => {
+                        if *title_stage {
+                            let inst = instance.clone();
+                            let s = series.clone();
+                            let ori = *current;
+                            let title = if title_buf.trim().is_empty() {
+                                None
+                            } else {
+                                Some(title_buf.trim().to_string())
+                            };
+                            editor.mode = EditorMode::Browse;
+                            let kind = crate::dashboard::CardKind::Graph {
+                                instance: inst,
+                                entity: None,
+                                entities: s,
+                                graph_type: crate::dashboard::GraphType::Bar,
+                                window: "1h".to_string(),
+                                orientation: ori,
+                                title,
+                            };
+                            let Some(dash) = self.dashboards.get_mut(dash_idx) else {
+                                return;
+                            };
+                            let Some(ed) = self.editor.as_mut() else {
+                                return;
+                            };
+                            ed.snapshot(dash);
+                            ed.add_card(dash, kind);
+                        } else {
+                            *title_stage = true;
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            // ── Graph context-menu handlers ───────────────────────────────────────
+            EditorMode::GraphAddOneSeries {
+                card_idx,
+                query,
+                selected,
+            } => {
+                let instance = self
+                    .dashboards
+                    .get(dash_idx)
+                    .and_then(|d| d.cards.get(*card_idx))
+                    .and_then(|c| {
+                        if let crate::dashboard::CardKind::Graph { instance, .. } = &c.kind {
+                            Some(instance.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_default();
+                let rows = entity_search(&self.instances, &instance, query);
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        query.pop();
+                        *selected = 0;
+                    }
+                    KeyCode::Up | KeyCode::Char('k') if *selected > 0 => *selected -= 1,
+                    KeyCode::Down | KeyCode::Char('j') if *selected + 1 < rows.len() => {
+                        *selected += 1
+                    }
+                    KeyCode::Char(c) => {
+                        query.push(c);
+                        *selected = 0;
+                    }
+                    KeyCode::Enter => {
+                        if let Some(pick) = rows.get(*selected) {
+                            let idx = *card_idx;
+                            let eid = pick.entity_id.clone();
+                            editor.mode = EditorMode::Browse;
+                            if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                                if let Some(ed) = self.editor.as_mut() {
+                                    ed.snapshot(dash);
+                                }
+                                if let Some(card) = self
+                                    .dashboards
+                                    .get_mut(dash_idx)
+                                    .and_then(|d| d.cards.get_mut(idx))
+                                {
+                                    if let crate::dashboard::CardKind::Graph { entities, .. } =
+                                        &mut card.kind
+                                    {
+                                        entities.push(crate::dashboard::GraphSeries {
+                                            entity: eid,
+                                            label: None,
+                                            color: None,
+                                        });
+                                    }
+                                }
+                                if let Some(ed) = self.editor.as_mut() {
+                                    ed.dirty = true;
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::GraphPickSeriesIndex {
+                card_idx,
+                op,
+                selected,
+            } => {
+                let count = self
+                    .dashboards
+                    .get(dash_idx)
+                    .and_then(|d| d.cards.get(*card_idx))
+                    .map(|c| {
+                        if let crate::dashboard::CardKind::Graph { entities, .. } = &c.kind {
+                            entities.len()
+                        } else {
+                            0
+                        }
+                    })
+                    .unwrap_or(0);
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Up | KeyCode::Char('k') if *selected > 0 => *selected -= 1,
+                    KeyCode::Down | KeyCode::Char('j') if *selected + 1 < count => *selected += 1,
+                    KeyCode::Enter => {
+                        let idx = *card_idx;
+                        let sidx = *selected;
+                        let op = *op;
+                        match op {
+                            crate::dashboard::editor::SeriesIndexOp::Remove => {
+                                editor.mode = EditorMode::Browse;
+                                if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                                    if let Some(ed) = self.editor.as_mut() {
+                                        ed.snapshot(dash);
+                                    }
+                                    if let Some(card) = self
+                                        .dashboards
+                                        .get_mut(dash_idx)
+                                        .and_then(|d| d.cards.get_mut(idx))
+                                    {
+                                        if let crate::dashboard::CardKind::Graph {
+                                            entities, ..
+                                        } = &mut card.kind
+                                        {
+                                            if sidx < entities.len() {
+                                                entities.remove(sidx);
+                                            }
+                                        }
+                                    }
+                                    if let Some(ed) = self.editor.as_mut() {
+                                        ed.dirty = true;
+                                    }
+                                }
+                            }
+                            crate::dashboard::editor::SeriesIndexOp::SetColor => {
+                                let cur = self
+                                    .dashboards
+                                    .get(dash_idx)
+                                    .and_then(|d| d.cards.get(idx))
+                                    .and_then(|c| {
+                                        if let crate::dashboard::CardKind::Graph {
+                                            entities, ..
+                                        } = &c.kind
+                                        {
+                                            entities.get(sidx).and_then(|s| s.color.clone())
+                                        } else {
+                                            None
+                                        }
+                                    })
+                                    .unwrap_or_default();
+                                editor.mode = EditorMode::GraphEditSeriesColor {
+                                    card_idx: idx,
+                                    series_idx: sidx,
+                                    buf: cur,
+                                };
+                            }
+                            crate::dashboard::editor::SeriesIndexOp::SetLabel => {
+                                let cur = self
+                                    .dashboards
+                                    .get(dash_idx)
+                                    .and_then(|d| d.cards.get(idx))
+                                    .and_then(|c| {
+                                        if let crate::dashboard::CardKind::Graph {
+                                            entities, ..
+                                        } = &c.kind
+                                        {
+                                            entities.get(sidx).and_then(|s| s.label.clone())
+                                        } else {
+                                            None
+                                        }
+                                    })
+                                    .unwrap_or_default();
+                                editor.mode = EditorMode::GraphEditSeriesLabel {
+                                    card_idx: idx,
+                                    series_idx: sidx,
+                                    buf: cur,
+                                };
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::GraphEditSeriesColor {
+                card_idx,
+                series_idx,
+                buf,
+            } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        buf.pop();
+                    }
+                    KeyCode::Char(c) => buf.push(c),
+                    KeyCode::Enter => {
+                        let idx = *card_idx;
+                        let sidx = *series_idx;
+                        let trimmed = buf.trim().to_string();
+                        if !trimmed.is_empty() && crate::ui::theme::parse_color(&trimmed).is_none()
+                        {
+                            self.last_error = Some(format!(
+                                "invalid color \"{trimmed}\" — use a named color or #rrggbb"
+                            ));
+                            return;
+                        }
+                        editor.mode = EditorMode::Browse;
+                        let color_val = if trimmed.is_empty() {
+                            None
+                        } else {
+                            Some(trimmed)
+                        };
+                        if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.snapshot(dash);
+                            }
+                            if let Some(card) = self
+                                .dashboards
+                                .get_mut(dash_idx)
+                                .and_then(|d| d.cards.get_mut(idx))
+                            {
+                                if let crate::dashboard::CardKind::Graph { entities, .. } =
+                                    &mut card.kind
+                                {
+                                    if let Some(s) = entities.get_mut(sidx) {
+                                        s.color = color_val;
+                                    }
+                                }
+                            }
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.dirty = true;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::GraphEditSeriesLabel {
+                card_idx,
+                series_idx,
+                buf,
+            } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        buf.pop();
+                    }
+                    KeyCode::Char(c) => buf.push(c),
+                    KeyCode::Enter => {
+                        let idx = *card_idx;
+                        let sidx = *series_idx;
+                        let trimmed = buf.trim().to_string();
+                        editor.mode = EditorMode::Browse;
+                        let label_val = if trimmed.is_empty() {
+                            None
+                        } else {
+                            Some(trimmed)
+                        };
+                        if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.snapshot(dash);
+                            }
+                            if let Some(card) = self
+                                .dashboards
+                                .get_mut(dash_idx)
+                                .and_then(|d| d.cards.get_mut(idx))
+                            {
+                                if let crate::dashboard::CardKind::Graph { entities, .. } =
+                                    &mut card.kind
+                                {
+                                    if let Some(s) = entities.get_mut(sidx) {
+                                        s.label = label_val;
+                                    }
+                                }
+                            }
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.dirty = true;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::GraphEditWindow { card_idx, buf } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        buf.pop();
+                    }
+                    KeyCode::Char(c) => buf.push(c),
+                    KeyCode::Enter => {
+                        let idx = *card_idx;
+                        let new_window = buf.trim().to_string();
+                        editor.mode = EditorMode::Browse;
+                        if !new_window.is_empty() {
+                            if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                                if let Some(ed) = self.editor.as_mut() {
+                                    ed.snapshot(dash);
+                                }
+                                if let Some(card) = self
+                                    .dashboards
+                                    .get_mut(dash_idx)
+                                    .and_then(|d| d.cards.get_mut(idx))
+                                {
+                                    if let crate::dashboard::CardKind::Graph { window, .. } =
+                                        &mut card.kind
+                                    {
+                                        *window = new_window;
+                                    }
+                                }
+                                if let Some(ed) = self.editor.as_mut() {
+                                    ed.dirty = true;
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::GraphPickOrientation { card_idx, current } => {
+                use crate::dashboard::BarOrientation;
+                const OPTS: [BarOrientation; 2] =
+                    [BarOrientation::Vertical, BarOrientation::Horizontal];
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        let pos = OPTS.iter().position(|o| o == current).unwrap_or(0);
+                        if pos > 0 {
+                            *current = OPTS[pos - 1];
+                        }
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        let pos = OPTS.iter().position(|o| o == current).unwrap_or(0);
+                        if pos + 1 < OPTS.len() {
+                            *current = OPTS[pos + 1];
+                        }
+                    }
+                    KeyCode::Enter => {
+                        let idx = *card_idx;
+                        let ori = *current;
+                        editor.mode = EditorMode::Browse;
+                        if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.snapshot(dash);
+                            }
+                            if let Some(card) = self
+                                .dashboards
+                                .get_mut(dash_idx)
+                                .and_then(|d| d.cards.get_mut(idx))
+                            {
+                                if let crate::dashboard::CardKind::Graph { orientation, .. } =
+                                    &mut card.kind
+                                {
+                                    *orientation = ori;
+                                }
+                            }
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.dirty = true;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
             EditorMode::Browse => {}
         }
 
@@ -1133,6 +1751,109 @@ impl App {
                     };
                 }
             }
+            (A::AddGraphSeries, C::Card(idx)) => {
+                if let Some(ed) = self.editor.as_mut() {
+                    ed.selected_card = Some(idx);
+                    ed.mode = EditorMode::GraphAddOneSeries {
+                        card_idx: idx,
+                        query: String::new(),
+                        selected: 0,
+                    };
+                }
+            }
+            (A::RemoveGraphSeries, C::Card(idx)) => {
+                if let Some(ed) = self.editor.as_mut() {
+                    ed.selected_card = Some(idx);
+                    ed.mode = EditorMode::GraphPickSeriesIndex {
+                        card_idx: idx,
+                        op: crate::dashboard::editor::SeriesIndexOp::Remove,
+                        selected: 0,
+                    };
+                }
+            }
+            (A::SetGraphSeriesColor, C::Card(idx)) => {
+                if let Some(ed) = self.editor.as_mut() {
+                    ed.selected_card = Some(idx);
+                    ed.mode = EditorMode::GraphPickSeriesIndex {
+                        card_idx: idx,
+                        op: crate::dashboard::editor::SeriesIndexOp::SetColor,
+                        selected: 0,
+                    };
+                }
+            }
+            (A::SetGraphSeriesLabel, C::Card(idx)) => {
+                if let Some(ed) = self.editor.as_mut() {
+                    ed.selected_card = Some(idx);
+                    ed.mode = EditorMode::GraphPickSeriesIndex {
+                        card_idx: idx,
+                        op: crate::dashboard::editor::SeriesIndexOp::SetLabel,
+                        selected: 0,
+                    };
+                }
+            }
+            (A::CycleGraphType, C::Card(idx)) => {
+                if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                    if let Some(ed) = self.editor.as_mut() {
+                        ed.snapshot(dash);
+                        ed.selected_card = Some(idx);
+                    }
+                    if let Some(card) = dash.cards.get_mut(idx) {
+                        if let crate::dashboard::CardKind::Graph { graph_type, .. } = &mut card.kind
+                        {
+                            *graph_type = match graph_type {
+                                crate::dashboard::GraphType::Line => {
+                                    crate::dashboard::GraphType::Bar
+                                }
+                                crate::dashboard::GraphType::Bar => {
+                                    crate::dashboard::GraphType::Pie
+                                }
+                                crate::dashboard::GraphType::Pie => {
+                                    crate::dashboard::GraphType::Line
+                                }
+                            };
+                        }
+                    }
+                    if let Some(ed) = self.editor.as_mut() {
+                        ed.dirty = true;
+                    }
+                }
+            }
+            (A::EditGraphWindow, C::Card(idx)) => {
+                let current = self
+                    .dashboards
+                    .get(dash_idx)
+                    .and_then(|d| d.cards.get(idx))
+                    .and_then(|c| match &c.kind {
+                        crate::dashboard::CardKind::Graph { window, .. } => Some(window.clone()),
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| "1h".to_string());
+                if let Some(ed) = self.editor.as_mut() {
+                    ed.selected_card = Some(idx);
+                    ed.mode = EditorMode::GraphEditWindow {
+                        card_idx: idx,
+                        buf: current,
+                    };
+                }
+            }
+            (A::EditGraphOrientation, C::Card(idx)) => {
+                let current_ori = self
+                    .dashboards
+                    .get(dash_idx)
+                    .and_then(|d| d.cards.get(idx))
+                    .and_then(|c| match &c.kind {
+                        crate::dashboard::CardKind::Graph { orientation, .. } => Some(*orientation),
+                        _ => None,
+                    })
+                    .unwrap_or_default();
+                if let Some(ed) = self.editor.as_mut() {
+                    ed.selected_card = Some(idx);
+                    ed.mode = EditorMode::GraphPickOrientation {
+                        card_idx: idx,
+                        current: current_ori,
+                    };
+                }
+            }
             _ => {
                 self.last_error = Some("menu action not valid in this context".into());
             }
@@ -1218,6 +1939,12 @@ impl App {
             };
             return;
         }
+        // Graph has its own multi-step flow: type → instance → entities → config.
+        // Always route through GraphPickType first, regardless of instance count.
+        if matches!(kind, CardTypeStub::Graph) {
+            editor.mode = EditorMode::GraphPickType;
+            return;
+        }
         let aliases: Vec<String> = self.instances.runtimes.keys().cloned().collect();
         match aliases.len() {
             0 => {
@@ -1233,6 +1960,82 @@ impl App {
                 editor.mode = EditorMode::PickingInstance {
                     card_type: kind,
                     selected: 0,
+                };
+            }
+        }
+    }
+
+    fn start_graph_after_type(&mut self, graph_type: crate::dashboard::GraphType) {
+        let aliases: Vec<String> = self.instances.runtimes.keys().cloned().collect();
+        let Some(editor) = self.editor.as_mut() else {
+            return;
+        };
+        match aliases.len() {
+            0 => {
+                self.last_error = Some("no instances connected".into());
+                editor.mode = EditorMode::Browse;
+            }
+            1 => {
+                let inst = aliases.into_iter().next().unwrap();
+                editor.mode = EditorMode::GraphAddEntities {
+                    instance: inst,
+                    graph_type,
+                    accumulated: Vec::new(),
+                    query: String::new(),
+                    selected: 0,
+                    asking_more: false,
+                };
+            }
+            _ => {
+                editor.mode = EditorMode::GraphPickInstance {
+                    graph_type,
+                    selected: 0,
+                };
+            }
+        }
+    }
+
+    fn advance_graph_to_config(
+        &mut self,
+        instance: String,
+        graph_type: crate::dashboard::GraphType,
+        series: Vec<crate::dashboard::GraphSeries>,
+    ) {
+        let Some(editor) = self.editor.as_mut() else {
+            return;
+        };
+        match graph_type {
+            crate::dashboard::GraphType::Line => {
+                editor.mode = EditorMode::GraphEditWindowAdd {
+                    instance,
+                    graph_type,
+                    series,
+                    window_buf: String::new(),
+                    title_buf: String::new(),
+                    title_stage: false,
+                };
+            }
+            crate::dashboard::GraphType::Bar => {
+                editor.mode = EditorMode::GraphPickOrientationAdd {
+                    instance,
+                    series,
+                    current: crate::dashboard::BarOrientation::default(),
+                    title_buf: String::new(),
+                    title_stage: false,
+                };
+            }
+            crate::dashboard::GraphType::Pie => {
+                // Pie: no extra config — just prompt for title then commit.
+                // Reuse GraphEditWindowAdd with empty window (we won't show a window prompt,
+                // but this avoids another mode variant). Instead use a dedicated commit path.
+                // Immediately go to title stage with a dummy window.
+                editor.mode = EditorMode::GraphEditWindowAdd {
+                    instance,
+                    graph_type,
+                    series,
+                    window_buf: "1h".to_string(),
+                    title_buf: String::new(),
+                    title_stage: true, // skip window prompt, go straight to title
                 };
             }
         }
