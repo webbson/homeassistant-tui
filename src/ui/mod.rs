@@ -11,7 +11,7 @@ use crate::app::App;
 use crate::screens::entities;
 use crate::screens::Screen;
 
-pub fn draw(f: &mut Frame, app: &App) {
+pub fn draw(f: &mut Frame, app: &mut App) {
     let area = f.area();
     let [header, body, footer] = Layout::vertical([
         Constraint::Length(1),
@@ -21,18 +21,18 @@ pub fn draw(f: &mut Frame, app: &App) {
     .areas(area);
 
     widgets::instance_bar::render(f, header, app.instances.runtimes.values(), &app.theme);
-    draw_body(f, body, app);
     draw_footer(f, footer, app);
     if app.show_help {
         widgets::help::render(f, area);
     }
+    draw_body(f, body, app);
 }
 
-fn draw_body(f: &mut Frame, area: ratatui::layout::Rect, app: &App) {
-    match &app.screen {
+fn draw_body(f: &mut Frame, area: ratatui::layout::Rect, app: &mut App) {
+    match app.screen.clone() {
         Screen::Entities {
-            instance_filter,
-            search,
+            ref instance_filter,
+            ref search,
             selected,
         } => {
             let multi = app.instances.runtimes.len() > 1;
@@ -50,8 +50,8 @@ fn draw_body(f: &mut Frame, area: ratatui::layout::Rect, app: &App) {
                 .map(|f| format!(" filter:{f}"))
                 .unwrap_or_default();
             let title = format!("Entities ({}){filter_tag}", rows.len());
-            widgets::entity_list::render(f, cols[0], &rows, *selected, multi, &title, &app.theme);
-            let sel_state = rows.get(*selected).map(|r| r.state);
+            widgets::entity_list::render(f, cols[0], &rows, selected, multi, &title, &app.theme);
+            let sel_state = rows.get(selected).map(|r| r.state);
             widgets::entity_detail::render(f, cols[1], sel_state);
         }
         Screen::Instances { selected } => {
@@ -59,7 +59,7 @@ fn draw_body(f: &mut Frame, area: ratatui::layout::Rect, app: &App) {
                 f,
                 area,
                 app.instances.runtimes.values(),
-                *selected,
+                selected,
                 &app.theme,
             );
         }
@@ -68,7 +68,7 @@ fn draw_body(f: &mut Frame, area: ratatui::layout::Rect, app: &App) {
             selected_card,
             sub_index,
         } => {
-            crate::screens::dashboard::draw(f, area, app, *idx, *selected_card, Some(*sub_index));
+            crate::screens::dashboard::draw(f, area, app, idx, selected_card, Some(sub_index));
         }
         Screen::Editor => {
             crate::screens::editor::draw(f, area, app);

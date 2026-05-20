@@ -278,6 +278,28 @@ pub enum EditorMode {
         card_idx: usize,
         buf: String,
     },
+    // ---- Image add-flow ----
+    /// Step 1: pick source kind — 1 = image entity, 2 = camera.
+    ImagePickSourceKind {
+        selected: usize,
+    },
+    /// Step 2 (camera only): optional refresh interval in seconds.
+    ImageEditRefreshSeconds {
+        instance: String,
+        entity: String,
+        friendly_name: String,
+        is_camera: bool,
+        buf: String,
+    },
+    /// Step 3: optional title override.
+    ImageEditTitleAdd {
+        instance: String,
+        entity: String,
+        friendly_name: String,
+        is_camera: bool,
+        refresh_seconds: Option<u32>,
+        buf: String,
+    },
 }
 
 /// Accumulates the first two threshold values while collecting severity input.
@@ -514,6 +536,7 @@ pub enum CardTypeStub {
     Clock,
     Statistics,
     MediaPlayer,
+    Image,
 }
 
 impl CardTypeStub {
@@ -528,6 +551,7 @@ impl CardTypeStub {
         CardTypeStub::Clock,
         CardTypeStub::Statistics,
         CardTypeStub::MediaPlayer,
+        CardTypeStub::Image,
     ];
     pub fn label(self) -> &'static str {
         match self {
@@ -541,6 +565,7 @@ impl CardTypeStub {
             CardTypeStub::Clock => "clock",
             CardTypeStub::Statistics => "statistics",
             CardTypeStub::MediaPlayer => "media player",
+            CardTypeStub::Image => "image / camera",
         }
     }
 }

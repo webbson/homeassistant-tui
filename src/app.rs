@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -18,7 +18,7 @@ use crate::config::{self, Alias, Config};
 use crate::dashboard::editor::{CardTypeStub, EditorMode, EditorState};
 use crate::dashboard::{self, CardKind, Dashboard};
 use crate::event::AppEvent;
-use crate::ha::{client, EntityId, InstanceRegistry, InstanceRuntime};
+use crate::ha::{client, EntityId, ImageFetchKind, InstanceRegistry, InstanceRuntime};
 use crate::screens::Screen;
 use crate::ui;
 use crate::ui::theme::Theme;
@@ -44,6 +44,17 @@ pub struct App {
     pub last_error: Option<String>,
     #[allow(dead_code)]
     pub tx: mpsc::UnboundedSender<AppEvent>,
+    /// Decoded image cache keyed by (instance, entity).
+    pub image_cache: HashMap<(Alias, EntityId), ImageCacheEntry>,
+    /// Entities currently being fetched — prevents duplicate in-flight requests.
+    pub image_inflight: HashSet<(Alias, EntityId)>,
+    /// ratatui-image protocol picker; None when terminal doesn't support graphics.
+    pub image_picker: Option<ratatui_image::picker::Picker>,
+}
+
+pub struct ImageCacheEntry {
+    pub protocol: ratatui_image::protocol::StatefulProtocol,
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -72,6 +83,9 @@ impl App {
             status_msg: None,
             last_error: None,
             tx,
+            image_cache: HashMap::new(),
+            image_inflight: HashSet::new(),
+            image_picker: None,
         }
     }
 
@@ -239,6 +253,27 @@ impl App {
                                     friendly_name: fname,
                                     selected: 0,
                                 };
+                            } else if ct == CardTypeStub::Image {
+                                let is_camera = eid.starts_with("camera.");
+                                if is_camera {
+                                    editor.mode = EditorMode::ImageEditRefreshSeconds {
+                                        instance: inst,
+                                        entity: eid,
+                                        friendly_name: fname,
+                                        is_camera: true,
+                                        buf: String::new(),
+                                    };
+                                } else {
+                                    // image entity — skip refresh_seconds step
+                                    editor.mode = EditorMode::ImageEditTitleAdd {
+                                        instance: inst,
+                                        entity: eid,
+                                        friendly_name: fname,
+                                        is_camera: false,
+                                        refresh_seconds: None,
+                                        buf: String::new(),
+                                    };
+                                }
                             } else {
                                 editor.mode = EditorMode::EditingTitle {
                                     card_type: ct,
@@ -2025,6 +2060,111 @@ impl App {
                 }
                 return;
             }
+            // ---- Image add-flow ----
+            EditorMode::ImagePickSourceKind { selected } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Char('1') => {
+                        *selected = 0;
+                        // image entity — go directly to instance picker
+                        editor.mode = EditorMode::PickingInstance {
+                            card_type: CardTypeStub::Image,
+                            selected: 0,
+                        };
+                    }
+                    KeyCode::Char('2') => {
+                        *selected = 1;
+                        // camera — go to instance picker
+                        editor.mode = EditorMode::PickingInstance {
+                            card_type: CardTypeStub::Image,
+                            selected: 0,
+                        };
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::ImageEditRefreshSeconds {
+                instance,
+                entity,
+                friendly_name,
+                is_camera,
+                buf,
+            } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        buf.pop();
+                    }
+                    KeyCode::Char(c) if c.is_ascii_digit() => buf.push(c),
+                    KeyCode::Enter => {
+                        let secs_raw = buf.trim().to_string();
+                        let refresh_seconds = secs_raw.parse::<u32>().ok().filter(|&s| s > 0);
+                        editor.mode = EditorMode::ImageEditTitleAdd {
+                            instance: instance.clone(),
+                            entity: entity.clone(),
+                            friendly_name: friendly_name.clone(),
+                            is_camera: *is_camera,
+                            refresh_seconds,
+                            buf: String::new(),
+                        };
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::ImageEditTitleAdd {
+                instance,
+                entity,
+                friendly_name,
+                is_camera,
+                refresh_seconds,
+                buf,
+            } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        buf.pop();
+                    }
+                    KeyCode::Char(c) => buf.push(c),
+                    KeyCode::Enter => {
+                        let title_raw = buf.trim().to_string();
+                        let title = if title_raw.is_empty() {
+                            if friendly_name.is_empty() {
+                                None
+                            } else {
+                                Some(friendly_name.clone())
+                            }
+                        } else {
+                            Some(title_raw)
+                        };
+                        let source = if *is_camera {
+                            crate::dashboard::ImageSource::Camera {
+                                entity: entity.clone(),
+                            }
+                        } else {
+                            crate::dashboard::ImageSource::ImageEntity {
+                                entity: entity.clone(),
+                            }
+                        };
+                        let kind = CardKind::Image {
+                            instance: instance.clone(),
+                            source,
+                            refresh_seconds: *refresh_seconds,
+                            title,
+                        };
+                        editor.mode = EditorMode::Browse;
+                        if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.snapshot(dash);
+                                ed.add_card(dash, kind);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
             EditorMode::Browse => {}
         }
 
@@ -2740,6 +2880,11 @@ impl App {
             editor.mode = EditorMode::GraphPickType;
             return;
         }
+        // Image: pick source kind (image entity vs camera) first, then instance + entity.
+        if matches!(kind, CardTypeStub::Image) {
+            editor.mode = EditorMode::ImagePickSourceKind { selected: 0 };
+            return;
+        }
         let aliases: Vec<String> = self.instances.runtimes.keys().cloned().collect();
         match aliases.len() {
             0 => {
@@ -3180,6 +3325,7 @@ impl App {
                 }
                 self.last_error = None;
                 self.fetch_sparkline_history(&instance);
+                self.fetch_image_cards(&instance);
             }
             AppEvent::HaEntityUpdated { instance, state } => {
                 if let Some(rt) = self.instances.get_mut(&instance) {
@@ -3187,6 +3333,8 @@ impl App {
                     rt.last_update = Some(std::time::Instant::now());
                 }
                 self.record_history(&instance, &state.entity_id, &state.state);
+                // Re-fetch image/camera cards when their entity state changes.
+                self.refresh_image_card_if_needed(&instance, &state.entity_id.clone());
             }
             AppEvent::HaServiceError { instance, error } => {
                 self.last_error = Some(format!("{instance}: {error}"));
@@ -3207,20 +3355,126 @@ impl App {
                 instance,
                 entity,
                 result,
-            } => match result {
-                Ok(bytes) => {
-                    tracing::debug!(
-                        instance = %instance,
-                        entity = %entity,
-                        bytes = bytes.len(),
-                        "image fetch succeeded"
-                    );
-                    // TODO(8.4): decode + cache
+            } => {
+                let key = (instance.clone(), entity.clone());
+                self.image_inflight.remove(&key);
+                match result {
+                    Ok(bytes) => {
+                        tracing::debug!(
+                            instance = %instance,
+                            entity = %entity,
+                            bytes = bytes.len(),
+                            "image fetch succeeded"
+                        );
+                        if let Some(picker) = &mut self.image_picker {
+                            match image::load_from_memory(&bytes) {
+                                Ok(img) => {
+                                    let protocol = picker.new_resize_protocol(img);
+                                    self.image_cache.insert(
+                                        key,
+                                        ImageCacheEntry {
+                                            protocol,
+                                            error: None,
+                                        },
+                                    );
+                                }
+                                Err(e) => {
+                                    tracing::warn!(entity = %entity, error = %e, "image decode failed");
+                                    // Keep any existing cached frame; only log the error.
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(entity = %entity, error = %e, "image fetch failed");
+                        self.last_error = Some(format!("image fetch {entity}: {e}"));
+                    }
                 }
-                Err(e) => {
-                    self.last_error = Some(format!("image fetch {entity}: {e}"));
+            }
+            AppEvent::RefreshImageCard { instance, entity } => {
+                self.send_image_fetch(&instance, &entity.clone());
+            }
+        }
+    }
+
+    /// Trigger an image fetch for all Image cards on dashboards matching `instance`,
+    /// parallel to `fetch_sparkline_history`.
+    fn fetch_image_cards(&mut self, instance: &Alias) {
+        let mut entities: Vec<String> = Vec::new();
+        for dash in &self.dashboards {
+            for card in &dash.cards {
+                if let crate::dashboard::CardKind::Image {
+                    instance: card_inst,
+                    source,
+                    ..
+                } = &card.kind
+                {
+                    if card_inst == instance {
+                        let entity = match source {
+                            crate::dashboard::ImageSource::ImageEntity { entity } => entity.clone(),
+                            crate::dashboard::ImageSource::Camera { entity } => entity.clone(),
+                        };
+                        entities.push(entity);
+                    }
                 }
+            }
+        }
+        for entity in entities {
+            self.send_image_fetch(instance, &entity);
+        }
+    }
+
+    /// Send a `FetchImageBytes` command if not already in-flight.
+    fn send_image_fetch(&mut self, instance: &Alias, entity: &EntityId) {
+        let key = (instance.clone(), entity.clone());
+        if self.image_inflight.contains(&key) {
+            return;
+        }
+        // Determine kind from the card definition.
+        let kind = self.image_fetch_kind_for(instance, entity);
+        let Some(kind) = kind else { return };
+        self.image_inflight.insert(key);
+        let _ = self.instances.send(
+            instance,
+            crate::ha::HaCommand::FetchImageBytes {
+                entity: entity.clone(),
+                kind,
             },
+        );
+    }
+
+    /// Look up whether an entity is an image or camera source across all dashboards.
+    fn image_fetch_kind_for(&self, instance: &Alias, entity: &EntityId) -> Option<ImageFetchKind> {
+        for dash in &self.dashboards {
+            for card in &dash.cards {
+                if let crate::dashboard::CardKind::Image {
+                    instance: card_inst,
+                    source,
+                    ..
+                } = &card.kind
+                {
+                    if card_inst != instance {
+                        continue;
+                    }
+                    match source {
+                        crate::dashboard::ImageSource::ImageEntity { entity: e } if e == entity => {
+                            return Some(ImageFetchKind::Image);
+                        }
+                        crate::dashboard::ImageSource::Camera { entity: e } if e == entity => {
+                            return Some(ImageFetchKind::Camera);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Re-fetch an image card if the updated entity is an image/camera source.
+    fn refresh_image_card_if_needed(&mut self, instance: &Alias, entity: &EntityId) {
+        if self.image_fetch_kind_for(instance, entity).is_some() {
+            self.send_image_fetch(instance, entity);
         }
     }
 
@@ -3360,6 +3614,7 @@ pub fn list_entities(
 pub fn domain_prefix_for_type(kind: CardTypeStub) -> Option<&'static str> {
     match kind {
         CardTypeStub::MediaPlayer => Some("media_player."),
+        // Image cards accept both `image.` and `camera.` entities — no single prefix filter.
         _ => None,
     }
 }
@@ -3443,6 +3698,9 @@ fn build_typed_card(
         CardTypeStub::Statistics => {
             unreachable!("Statistics is built via StatsPickMetric flow, not build_typed_card")
         }
+        CardTypeStub::Image => {
+            unreachable!("Image is built via ImagePickSourceKind flow, not build_typed_card")
+        }
         CardTypeStub::MediaPlayer => CardKind::MediaPlayer {
             instance,
             entity,
@@ -3508,10 +3766,48 @@ fn build_card_kind(kind: CardTypeStub, buf: &str, default_alias: Option<&str>) -
         | CardTypeStub::EntityList
         | CardTypeStub::FilteredEntityList
         | CardTypeStub::Clock
-        | CardTypeStub::Statistics => {
+        | CardTypeStub::Statistics
+        | CardTypeStub::Image => {
             unreachable!()
         }
     })
+}
+
+/// Spawn one tokio task per Camera card that has `refresh_seconds` set.
+/// Each task sends `AppEvent::RefreshImageCard` on the given interval.
+pub fn spawn_camera_timers(dashboards: &[Dashboard], tx: &mpsc::UnboundedSender<AppEvent>) {
+    for dash in dashboards {
+        for card in &dash.cards {
+            if let crate::dashboard::CardKind::Image {
+                instance,
+                source: crate::dashboard::ImageSource::Camera { entity },
+                refresh_seconds: Some(secs),
+                ..
+            } = &card.kind
+            {
+                let instance = instance.clone();
+                let entity = entity.clone();
+                let secs = *secs;
+                let tx = tx.clone();
+                tokio::spawn(async move {
+                    let mut interval = tokio::time::interval(Duration::from_secs(secs as u64));
+                    interval.tick().await; // skip the immediate first tick
+                    loop {
+                        interval.tick().await;
+                        if tx
+                            .send(AppEvent::RefreshImageCard {
+                                instance: instance.clone(),
+                                entity: entity.clone(),
+                            })
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                });
+            }
+        }
+    }
 }
 
 fn mouse_to_cell(area: Rect, dash: &Dashboard, mx: u16, my: u16) -> Option<(u16, u16)> {
@@ -3565,9 +3861,15 @@ pub async fn run(
     let mut term_events = EventStream::new();
     let mut tick = tokio::time::interval(Duration::from_millis(250));
 
+    // Init ratatui-image picker after terminal setup (must not run in tests).
+    app.image_picker = ratatui_image::picker::Picker::from_query_stdio().ok();
+
+    // Spawn interval refresh timers for Camera cards that have refresh_seconds set.
+    spawn_camera_timers(&app.dashboards, &tx);
+
     let initial = terminal.size().unwrap_or_default();
     app.last_terminal_size = (initial.width, initial.height);
-    terminal.draw(|f| ui::draw(f, &app))?;
+    terminal.draw(|f| ui::draw(f, &mut app))?;
 
     let result: Result<()> = async {
         loop {
@@ -3579,7 +3881,7 @@ pub async fn run(
             if app.should_quit {
                 break;
             }
-            terminal.draw(|f| ui::draw(f, &app))?;
+            terminal.draw(|f| ui::draw(f, &mut app))?;
         }
         Ok(())
     }

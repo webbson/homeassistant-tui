@@ -11,12 +11,29 @@ use crate::dashboard::editor::{CardTypeStub, EditorMode, SeriesIndexOp};
 use crate::dashboard::layout::cell_to_rect;
 use crate::dashboard::{BarOrientation, CardSize};
 
-pub fn draw(f: &mut Frame, area: Rect, app: &App) {
-    let Some(editor) = app.editor.as_ref() else {
-        return;
-    };
-    let Some(dash) = app.dashboards.get(editor.dash_idx) else {
-        return;
+pub fn draw(f: &mut Frame, area: Rect, app: &mut App) {
+    // Extract the scalar values we need from editor+dash before the &mut dashboard draw.
+    let (dash_idx, dirty, dash_name, cursor_col, cursor_row, _selected_card, dash_grid, card_pos) = {
+        let Some(editor) = app.editor.as_ref() else {
+            return;
+        };
+        let Some(dash) = app.dashboards.get(editor.dash_idx) else {
+            return;
+        };
+        let card_pos = editor
+            .selected_card
+            .and_then(|i| dash.cards.get(i))
+            .map(|c| c.pos);
+        (
+            editor.dash_idx,
+            editor.dirty,
+            dash.name.clone(),
+            editor.cursor_col,
+            editor.cursor_row,
+            editor.selected_card,
+            dash.grid,
+            card_pos,
+        )
     };
 
     let bar_rect = Rect {
@@ -25,15 +42,15 @@ pub fn draw(f: &mut Frame, area: Rect, app: &App) {
         width: area.width,
         height: 1,
     };
-    let dirty = if editor.dirty { "*" } else { "" };
+    let dirty_mark = if dirty { "*" } else { "" };
     let title = Line::from(vec![
         Span::styled(
-            format!("◆ editing: {}{}", dash.name, dirty),
+            format!("◆ editing: {}{}", dash_name, dirty_mark),
             Style::new().bold(),
         ),
         Span::raw("    "),
         Span::styled(
-            format!("cursor: {},{}", editor.cursor_col, editor.cursor_row),
+            format!("cursor: {},{}", cursor_col, cursor_row),
             Style::new().dim(),
         ),
     ]);
@@ -46,14 +63,14 @@ pub fn draw(f: &mut Frame, area: Rect, app: &App) {
         height: area.height.saturating_sub(1),
     };
 
-    crate::screens::dashboard::draw(f, body_rect, app, editor.dash_idx, usize::MAX, None);
+    crate::screens::dashboard::draw(f, body_rect, app, dash_idx, usize::MAX, None);
 
     let cur_rect = cell_to_rect(
         body_rect,
-        dash.grid,
+        dash_grid,
         crate::dashboard::Pos {
-            col: editor.cursor_col,
-            row: editor.cursor_row,
+            col: cursor_col,
+            row: cursor_row,
             w: 1,
             h: 1,
         },
@@ -65,15 +82,21 @@ pub fn draw(f: &mut Frame, area: Rect, app: &App) {
         );
     }
 
-    if let Some(i) = editor.selected_card {
-        if let Some(card) = dash.cards.get(i) {
-            let r = cell_to_rect(body_rect, dash.grid, card.pos);
-            f.render_widget(
-                Block::bordered().border_style(Style::new().fg(Color::Yellow).bold()),
-                r,
-            );
-        }
+    if let Some(pos) = card_pos {
+        let r = cell_to_rect(body_rect, dash_grid, pos);
+        f.render_widget(
+            Block::bordered().border_style(Style::new().fg(Color::Yellow).bold()),
+            r,
+        );
     }
+
+    // Re-borrow editor and dash after the &mut dashboard draw.
+    let Some(editor) = app.editor.as_ref() else {
+        return;
+    };
+    let Some(dash) = app.dashboards.get(editor.dash_idx) else {
+        return;
+    };
 
     match &editor.mode {
         EditorMode::PickingType => draw_palette(f, area),
@@ -331,8 +354,56 @@ pub fn draw(f: &mut Frame, area: Rect, app: &App) {
                 buf,
             );
         }
+        // Image add-flow
+        EditorMode::ImagePickSourceKind { selected } => {
+            draw_image_pick_source(f, area, *selected);
+        }
+        EditorMode::ImageEditRefreshSeconds { buf, .. } => {
+            draw_text_input(
+                f,
+                area,
+                " New image card (3/4) ",
+                "Refresh interval in seconds (Enter to skip)",
+                buf,
+            );
+        }
+        EditorMode::ImageEditTitleAdd { buf, .. } => {
+            draw_text_input(
+                f,
+                area,
+                " New image card (4/4) ",
+                "Title (optional — Enter to use entity name)",
+                buf,
+            );
+        }
         EditorMode::Browse => {}
     }
+}
+
+fn draw_image_pick_source(f: &mut Frame, area: Rect, selected: usize) {
+    let r = modal_rect(area, 44, 6);
+    f.render_widget(Clear, r);
+    let block = Block::bordered().title(" New image card (1/4) ");
+    let inner = block.inner(r);
+    f.render_widget(block, r);
+    let items: [(&str, &str); 2] = [
+        ("1", "Image entity  (image.*)"),
+        ("2", "Camera stream (camera.*)"),
+    ];
+    let list_items: Vec<ListItem> = items
+        .iter()
+        .enumerate()
+        .map(|(i, (key, label))| {
+            let style = if i == selected {
+                Style::new().bold().fg(Color::Yellow)
+            } else {
+                Style::new()
+            };
+            ListItem::new(format!("[{key}] {label}")).style(style)
+        })
+        .collect();
+    let list = List::new(list_items);
+    f.render_widget(list, inner);
 }
 
 fn modal_rect(parent: Rect, w: u16, h: u16) -> Rect {

@@ -35,4 +35,8 @@ pub enum AppEvent {
         entity: EntityId,
         result: Result<Vec<u8>, String>,
     },
+    RefreshImageCard {
+        instance: Alias,
+        entity: EntityId,
+    },
 }

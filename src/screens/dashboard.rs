@@ -14,20 +14,22 @@ use crate::util::history::RingBuf;
 pub fn draw(
     f: &mut Frame,
     area: Rect,
-    app: &App,
+    app: &mut App,
     idx: usize,
     selected_card: usize,
     sub_index: Option<usize>,
 ) {
     let in_editor = app.editor.is_some();
-    let Some(dash) = app.dashboards.get(idx) else {
+    // Clone the dashboard so we can mutably borrow `app` inside `render_card` (needed for
+    // stateful image rendering via `&mut StatefulProtocol`).
+    let Some(dash) = app.dashboards.get(idx).cloned() else {
         f.render_widget(
             Paragraph::new("no dashboard").block(Block::bordered()),
             area,
         );
         return;
     };
-    draw_title(f, area, dash);
+    draw_title(f, area, &dash);
     let inner = Rect {
         x: area.x,
         y: area.y + 1,
@@ -62,7 +64,7 @@ fn render_card(
     f: &mut Frame,
     rect: Rect,
     card: &crate::dashboard::Card,
-    app: &App,
+    app: &mut App,
     selected: bool,
     sub_index: Option<usize>,
     in_editor: bool,
@@ -330,11 +332,31 @@ fn render_card(
                 selected,
             );
         }
-        // TODO(8.4): decode + cache image bytes and render via ratatui-image Picker
-        CardKind::Image { .. } => {
-            use ratatui::widgets::{Block, Borders, Paragraph};
-            let block = Block::default().title(title.as_ref()).borders(Borders::ALL);
-            f.render_widget(Paragraph::new("image").block(block), rect);
+        CardKind::Image {
+            instance, source, ..
+        } => {
+            let entity = match source {
+                crate::dashboard::ImageSource::ImageEntity { entity } => entity.clone(),
+                crate::dashboard::ImageSource::Camera { entity } => entity.clone(),
+            };
+            let key = (instance.clone(), entity.clone());
+            let error = app
+                .image_cache
+                .get(&key)
+                .and_then(|e| e.error.as_deref())
+                .map(str::to_string);
+            let protocol = app.image_cache.get_mut(&key).map(|e| &mut e.protocol);
+            widgets::card_image::render(
+                f,
+                rect,
+                &title,
+                instance,
+                protocol,
+                error.as_deref(),
+                card.color.as_deref(),
+                &app.theme,
+                selected,
+            );
         }
     }
 }
