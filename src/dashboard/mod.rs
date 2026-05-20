@@ -3,7 +3,10 @@ pub mod layout;
 pub mod persist;
 pub mod query;
 
-use serde::{Deserialize, Serialize};
+use std::fmt;
+
+use serde::de::Visitor;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::config::Alias;
 use crate::ha::EntityId;
@@ -78,6 +81,96 @@ impl Dashboard {
 pub struct Grid {
     pub cols: u16,
     pub rows: u16,
+}
+
+// ── Grid-layout types ──────────────────────────────────────────────────────
+
+/// Row height: either a fixed number of terminal rows, or auto (fills remaining).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RowHeight {
+    Fixed(u16),
+    Auto,
+}
+
+impl Serialize for RowHeight {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        match self {
+            RowHeight::Fixed(n) => s.serialize_u16(*n),
+            RowHeight::Auto => s.serialize_str("auto"),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for RowHeight {
+    fn deserialize<D: Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
+        struct V;
+        impl<'de> Visitor<'de> for V {
+            type Value = RowHeight;
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                write!(f, "an integer row height or the string \"auto\"")
+            }
+            fn visit_u64<E: serde::de::Error>(self, v: u64) -> Result<RowHeight, E> {
+                Ok(RowHeight::Fixed(v as u16))
+            }
+            fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<RowHeight, E> {
+                if v > 0 {
+                    Ok(RowHeight::Fixed(v as u16))
+                } else {
+                    Err(E::custom("row height must be positive"))
+                }
+            }
+            fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<RowHeight, E> {
+                if v.eq_ignore_ascii_case("auto") {
+                    Ok(RowHeight::Auto)
+                } else {
+                    Err(E::custom(format!("expected \"auto\" or integer, got {:?}", v)))
+                }
+            }
+        }
+        de.deserialize_any(V)
+    }
+}
+
+/// One column inside a `GridRow`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GridColumn {
+    /// Override `fill_height` from the parent row. `None` inherits the row default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fill_height: Option<bool>,
+    #[serde(default)]
+    pub cards: Vec<Card>,
+}
+
+impl GridColumn {
+    /// Resolve fill_height, falling back to the row-level default.
+    pub fn effective_fill_height(&self, row_default: bool) -> bool {
+        self.fill_height.unwrap_or(row_default)
+    }
+}
+
+/// One horizontal band of columns in a grid-layout dashboard.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GridRow {
+    pub height: RowHeight,
+    /// Default `fill_height` for all columns in this row; overrideable per column.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fill_height: Option<bool>,
+    pub columns: Vec<GridColumn>,
+}
+
+impl GridRow {
+    pub fn fill_height_default(&self) -> bool {
+        self.fill_height.unwrap_or(false)
+    }
+}
+
+// ── Dashboard layout ────────────────────────────────────────────────────────
+
+/// Discriminant used in the custom `Dashboard` serde impl.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LayoutKind {
+    Free,
+    Grid,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
