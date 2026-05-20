@@ -231,6 +231,53 @@ pub fn draw(f: &mut Frame, area: Rect, app: &App) {
                 accum,
             );
         }
+        // Clock add-flow
+        EditorMode::ClockAddTitle { title_buffer } => {
+            draw_text_input(
+                f,
+                area,
+                " New clock card (1/3) ",
+                "Title (optional — Enter to skip)",
+                title_buffer,
+            );
+        }
+        EditorMode::ClockAddFormat { format_buffer, .. } => {
+            draw_text_input(
+                f,
+                area,
+                " New clock card (2/3) ",
+                "Format string (e.g. %H:%M:%S)",
+                format_buffer,
+            );
+        }
+        EditorMode::ClockAddTimezone { tz_buffer, .. } => {
+            draw_text_input(
+                f,
+                area,
+                " New clock card (3/3) ",
+                "Timezone (e.g. Europe/London — Enter to use local)",
+                tz_buffer,
+            );
+        }
+        // Clock context-menu flows
+        EditorMode::ClockEditFormat { buf, .. } => {
+            draw_text_input(
+                f,
+                area,
+                " Edit clock format ",
+                "Format string (e.g. %H:%M:%S)",
+                buf,
+            );
+        }
+        EditorMode::ClockEditTimezone { buf, .. } => {
+            draw_text_input(
+                f,
+                area,
+                " Edit clock timezone ",
+                "Timezone (e.g. Europe/London — Enter to clear)",
+                buf,
+            );
+        }
         EditorMode::Browse => {}
     }
 }
@@ -249,7 +296,7 @@ fn modal_rect(parent: Rect, w: u16, h: u16) -> Rect {
 }
 
 fn draw_palette(f: &mut Frame, area: Rect) {
-    let r = modal_rect(area, 32, 9);
+    let r = modal_rect(area, 40, 10);
     f.render_widget(Clear, r);
     let lines: Vec<Line<'_>> = CardTypeStub::ALL
         .iter()
@@ -627,6 +674,25 @@ fn draw_rename(f: &mut Frame, area: Rect, buffer: &str) {
     ];
     f.render_widget(
         Paragraph::new(lines).block(Block::bordered().title(" Rename (Enter=save, Esc=cancel) ")),
+        r,
+    );
+}
+
+fn draw_text_input(f: &mut Frame, area: Rect, title: &str, hint: &str, buffer: &str) {
+    let r = modal_rect(area, 64, 6);
+    f.render_widget(Clear, r);
+    let lines = vec![
+        Line::raw(hint.to_string()),
+        Line::raw(""),
+        Line::from(vec![
+            Span::raw("> "),
+            Span::styled(buffer.to_string(), Style::new().bold()),
+            Span::styled("_", Style::new().rapid_blink()),
+        ]),
+    ];
+    f.render_widget(
+        Paragraph::new(lines)
+            .block(Block::bordered().title(format!(" {} (Enter=apply, Esc=cancel) ", title))),
         r,
     );
 }

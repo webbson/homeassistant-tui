@@ -214,6 +214,20 @@ fn render_card(
         CardKind::Text { markdown, .. } => {
             widgets::card_text::render(f, rect, &title, markdown, card.color.as_deref(), selected);
         }
+        CardKind::Clock {
+            format, timezone, ..
+        } => {
+            widgets::card_clock::render(
+                f,
+                rect,
+                &title,
+                format,
+                timezone.as_deref(),
+                card.color.as_deref(),
+                card.size,
+                selected,
+            );
+        }
         CardKind::EntityList {
             instance, entities, ..
         } => {

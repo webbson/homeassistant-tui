@@ -164,10 +164,22 @@ pub enum CardKind {
         #[serde(default)]
         title: Option<String>,
     },
+    Clock {
+        #[serde(default = "default_clock_format")]
+        format: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        timezone: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+    },
 }
 
 fn default_window() -> String {
     "1h".into()
+}
+
+fn default_clock_format() -> String {
+    "%H:%M:%S".into()
 }
 
 impl Card {
@@ -191,6 +203,7 @@ impl Card {
             CardKind::Text { title, .. } => title.as_deref().unwrap_or("Text"),
             CardKind::EntityList { title, .. } => title.as_deref().unwrap_or("Entities"),
             CardKind::FilteredEntityList { title, .. } => title.as_deref().unwrap_or("Filtered"),
+            CardKind::Clock { title, .. } => title.as_deref().unwrap_or("Clock"),
         }
     }
 
@@ -221,7 +234,8 @@ impl Card {
             }
             CardKind::Text { .. }
             | CardKind::EntityList { .. }
-            | CardKind::FilteredEntityList { .. } => None,
+            | CardKind::FilteredEntityList { .. }
+            | CardKind::Clock { .. } => None,
         }
     }
 
@@ -423,5 +437,56 @@ pos: { col: 0, row: 0, w: 6, h: 4 }
         } else {
             panic!("wrong variant");
         }
+    }
+
+    #[test]
+    fn clock_round_trip() {
+        let yaml = r#"
+type: clock
+format: "%H:%M"
+timezone: "Europe/London"
+title: "My Clock"
+pos: { col: 0, row: 0, w: 4, h: 3 }
+"#;
+        let card: Card = serde_yaml::from_str(yaml).unwrap();
+        if let CardKind::Clock {
+            format,
+            timezone,
+            title,
+        } = &card.kind
+        {
+            assert_eq!(format, "%H:%M");
+            assert_eq!(timezone.as_deref(), Some("Europe/London"));
+            assert_eq!(title.as_deref(), Some("My Clock"));
+        } else {
+            panic!("wrong variant");
+        }
+        let back = serde_yaml::to_string(&card).unwrap();
+        assert!(back.contains("type: clock"));
+        assert!(back.contains("format: '%H:%M'") || back.contains("format: \"%H:%M\""));
+    }
+
+    #[test]
+    fn clock_defaults() {
+        let yaml = r#"
+type: clock
+pos: { col: 0, row: 0, w: 4, h: 3 }
+"#;
+        let card: Card = serde_yaml::from_str(yaml).unwrap();
+        if let CardKind::Clock {
+            format,
+            timezone,
+            title,
+        } = &card.kind
+        {
+            assert_eq!(format, "%H:%M:%S");
+            assert!(timezone.is_none());
+            assert!(title.is_none());
+        } else {
+            panic!("wrong variant");
+        }
+        let back = serde_yaml::to_string(&card).unwrap();
+        assert!(!back.contains("timezone:"));
+        assert!(!back.contains("title:"));
     }
 }

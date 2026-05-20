@@ -30,6 +30,7 @@ clap = { version = "4", features = ["derive"] }
 indexmap = { version = "2", features = ["serde"] }
 # directories dep removed in favor of util::paths (XDG-style on macOS too)
 chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = "0.10"
 
 [dev-dependencies]
 insta = "1"

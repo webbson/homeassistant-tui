@@ -1554,6 +1554,173 @@ impl App {
                 }
                 return;
             }
+            // ---- Clock add-flow ----
+            EditorMode::ClockAddTitle { title_buffer } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        title_buffer.pop();
+                    }
+                    KeyCode::Char(c) => title_buffer.push(c),
+                    KeyCode::Enter => {
+                        let title = {
+                            let t = title_buffer.trim().to_string();
+                            if t.is_empty() {
+                                None
+                            } else {
+                                Some(t)
+                            }
+                        };
+                        editor.mode = EditorMode::ClockAddFormat {
+                            title,
+                            format_buffer: "%H:%M:%S".into(),
+                        };
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::ClockAddFormat {
+                title,
+                format_buffer,
+            } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        format_buffer.pop();
+                    }
+                    KeyCode::Char(c) => format_buffer.push(c),
+                    KeyCode::Enter => {
+                        let fmt = format_buffer.trim().to_string();
+                        let fmt = if fmt.is_empty() {
+                            "%H:%M:%S".into()
+                        } else {
+                            fmt
+                        };
+                        editor.mode = EditorMode::ClockAddTimezone {
+                            title: title.clone(),
+                            format: fmt,
+                            tz_buffer: String::new(),
+                        };
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::ClockAddTimezone {
+                title,
+                format,
+                tz_buffer,
+            } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        tz_buffer.pop();
+                    }
+                    KeyCode::Char(c) => tz_buffer.push(c),
+                    KeyCode::Enter => {
+                        let tz_raw = tz_buffer.trim().to_string();
+                        let timezone = if tz_raw.is_empty() {
+                            None
+                        } else {
+                            Some(tz_raw)
+                        };
+                        let kind = CardKind::Clock {
+                            format: format.clone(),
+                            timezone,
+                            title: title.clone(),
+                        };
+                        editor.mode = EditorMode::Browse;
+                        if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.snapshot(dash);
+                                ed.add_card(dash, kind);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            // ---- Clock context-menu flows ----
+            EditorMode::ClockEditFormat { card_idx, buf } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        buf.pop();
+                    }
+                    KeyCode::Char(c) => buf.push(c),
+                    KeyCode::Enter => {
+                        let idx = *card_idx;
+                        let new_fmt = {
+                            let s = buf.trim().to_string();
+                            if s.is_empty() {
+                                "%H:%M:%S".into()
+                            } else {
+                                s
+                            }
+                        };
+                        editor.mode = EditorMode::Browse;
+                        if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.snapshot(dash);
+                            }
+                            if let Some(card) = self
+                                .dashboards
+                                .get_mut(dash_idx)
+                                .and_then(|d| d.cards.get_mut(idx))
+                            {
+                                if let CardKind::Clock { format, .. } = &mut card.kind {
+                                    *format = new_fmt;
+                                }
+                            }
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.dirty = true;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::ClockEditTimezone { card_idx, buf } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        buf.pop();
+                    }
+                    KeyCode::Char(c) => buf.push(c),
+                    KeyCode::Enter => {
+                        let idx = *card_idx;
+                        let tz_raw = buf.trim().to_string();
+                        let new_tz = if tz_raw.is_empty() {
+                            None
+                        } else {
+                            Some(tz_raw)
+                        };
+                        editor.mode = EditorMode::Browse;
+                        if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.snapshot(dash);
+                            }
+                            if let Some(card) = self
+                                .dashboards
+                                .get_mut(dash_idx)
+                                .and_then(|d| d.cards.get_mut(idx))
+                            {
+                                if let CardKind::Clock { timezone, .. } = &mut card.kind {
+                                    *timezone = new_tz;
+                                }
+                            }
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.dirty = true;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
             EditorMode::Browse => {}
         }
 
@@ -1708,9 +1875,8 @@ impl App {
                         | crate::dashboard::CardKind::Graph { title, .. }
                         | crate::dashboard::CardKind::Text { title, .. }
                         | crate::dashboard::CardKind::EntityList { title, .. }
-                        | crate::dashboard::CardKind::FilteredEntityList { title, .. } => {
-                            title.clone()
-                        }
+                        | crate::dashboard::CardKind::FilteredEntityList { title, .. }
+                        | crate::dashboard::CardKind::Clock { title, .. } => title.clone(),
                     })
                     .unwrap_or_default();
                 if let Some(ed) = self.editor.as_mut() {
@@ -2039,6 +2205,48 @@ impl App {
                     }
                 }
             }
+            (A::ClockEditFormat, C::Card(idx)) => {
+                let current = self
+                    .dashboards
+                    .get(dash_idx)
+                    .and_then(|d| d.cards.get(idx))
+                    .and_then(|c| {
+                        if let CardKind::Clock { format, .. } = &c.kind {
+                            Some(format.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_else(|| "%H:%M:%S".into());
+                if let Some(ed) = self.editor.as_mut() {
+                    ed.selected_card = Some(idx);
+                    ed.mode = EditorMode::ClockEditFormat {
+                        card_idx: idx,
+                        buf: current,
+                    };
+                }
+            }
+            (A::ClockEditTimezone, C::Card(idx)) => {
+                let current = self
+                    .dashboards
+                    .get(dash_idx)
+                    .and_then(|d| d.cards.get(idx))
+                    .and_then(|c| {
+                        if let CardKind::Clock { timezone, .. } = &c.kind {
+                            timezone.clone()
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_default();
+                if let Some(ed) = self.editor.as_mut() {
+                    ed.selected_card = Some(idx);
+                    ed.mode = EditorMode::ClockEditTimezone {
+                        card_idx: idx,
+                        buf: current,
+                    };
+                }
+            }
             _ => {
                 self.last_error = Some("menu action not valid in this context".into());
             }
@@ -2093,6 +2301,10 @@ impl App {
                 );
                 return;
             }
+            CardKind::Clock { .. } => {
+                self.last_error = Some("clock cards have no entity to change".into());
+                return;
+            }
         };
         editor.edit_target = Some(idx);
         editor.mode = if let Some(picked) = prefill {
@@ -2121,6 +2333,13 @@ impl App {
                 title_buffer: String::new(),
                 body_buffer: String::new(),
                 focus_body: false,
+            };
+            return;
+        }
+        // Clock has no instance or entity — go straight to title input.
+        if matches!(kind, CardTypeStub::Clock) {
+            editor.mode = EditorMode::ClockAddTitle {
+                title_buffer: String::new(),
             };
             return;
         }
@@ -2725,6 +2944,9 @@ fn build_typed_card(
         CardTypeStub::FilteredEntityList => unreachable!(
             "FilteredEntityList is built via EditingFilterQuery flow, not build_typed_card"
         ),
+        CardTypeStub::Clock => {
+            unreachable!("Clock is built via ClockAddTitle flow, not build_typed_card")
+        }
     }
 }
 
@@ -2776,7 +2998,10 @@ fn build_card_kind(kind: CardTypeStub, buf: &str, default_alias: Option<&str>) -
             orientation: crate::dashboard::BarOrientation::default(),
             title: None,
         },
-        CardTypeStub::Text | CardTypeStub::EntityList | CardTypeStub::FilteredEntityList => {
+        CardTypeStub::Text
+        | CardTypeStub::EntityList
+        | CardTypeStub::FilteredEntityList
+        | CardTypeStub::Clock => {
             unreachable!()
         }
     })

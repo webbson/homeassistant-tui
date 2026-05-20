@@ -200,6 +200,33 @@ pub enum EditorMode {
         buf: String,
         accum: SeverityAccum,
     },
+    // ---- Clock add-flow ----
+    /// Step 1: optional title.
+    ClockAddTitle {
+        title_buffer: String,
+    },
+    /// Step 2: strftime format string.
+    ClockAddFormat {
+        title: Option<String>,
+        format_buffer: String,
+    },
+    /// Step 3: optional IANA timezone (empty = local).
+    ClockAddTimezone {
+        title: Option<String>,
+        format: String,
+        tz_buffer: String,
+    },
+    // ---- Clock context-menu flows ----
+    /// Edit the strftime format of an existing Clock card.
+    ClockEditFormat {
+        card_idx: usize,
+        buf: String,
+    },
+    /// Edit the timezone of an existing Clock card.
+    ClockEditTimezone {
+        card_idx: usize,
+        buf: String,
+    },
 }
 
 /// Accumulates the first two threshold values while collecting severity input.
@@ -255,6 +282,9 @@ pub enum MenuAction {
     // Gauge-specific actions
     EditSeverityThresholds,
     ToggleGaugeNeedle,
+    // Clock-specific actions
+    ClockEditFormat,
+    ClockEditTimezone,
 }
 
 #[derive(Debug, Clone)]
@@ -271,9 +301,10 @@ pub fn card_menu_items(card: &Card) -> Vec<MenuItem> {
     });
     let entity_change_label = match &card.kind {
         CardKind::EntityList { .. } => Some("Change entities"),
-        CardKind::FilteredEntityList { .. } | CardKind::Graph { .. } | CardKind::Text { .. } => {
-            None
-        }
+        CardKind::FilteredEntityList { .. }
+        | CardKind::Graph { .. }
+        | CardKind::Text { .. }
+        | CardKind::Clock { .. } => None,
         _ => Some("Change entity"),
     };
     if let Some(label) = entity_change_label {
@@ -358,6 +389,16 @@ pub fn card_menu_items(card: &Card) -> Vec<MenuItem> {
             label: needle_label,
         });
     }
+    if let CardKind::Clock { .. } = &card.kind {
+        items.push(MenuItem {
+            action: MenuAction::ClockEditFormat,
+            label: "Format",
+        });
+        items.push(MenuItem {
+            action: MenuAction::ClockEditTimezone,
+            label: "Timezone",
+        });
+    }
     if matches!(card.kind, CardKind::Entity { .. }) {
         items.push(MenuItem {
             action: MenuAction::ToggleTicker,
@@ -401,6 +442,7 @@ pub enum CardTypeStub {
     Text,
     EntityList,
     FilteredEntityList,
+    Clock,
 }
 
 impl CardTypeStub {
@@ -412,6 +454,7 @@ impl CardTypeStub {
         CardTypeStub::Text,
         CardTypeStub::EntityList,
         CardTypeStub::FilteredEntityList,
+        CardTypeStub::Clock,
     ];
     pub fn label(self) -> &'static str {
         match self {
@@ -422,6 +465,7 @@ impl CardTypeStub {
             CardTypeStub::Text => "text",
             CardTypeStub::EntityList => "entity list (multi)",
             CardTypeStub::FilteredEntityList => "filtered list (glob + filters)",
+            CardTypeStub::Clock => "clock",
         }
     }
 }
@@ -543,7 +587,8 @@ impl EditorState {
             | CardKind::Graph { title, .. }
             | CardKind::Text { title, .. }
             | CardKind::EntityList { title, .. }
-            | CardKind::FilteredEntityList { title, .. } => {
+            | CardKind::FilteredEntityList { title, .. }
+            | CardKind::Clock { title, .. } => {
                 *title = new_title;
             }
         }
