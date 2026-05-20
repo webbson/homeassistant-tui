@@ -592,7 +592,14 @@ fn draw_entity_picker(
         search_row,
     );
 
-    let domain_prefix = crate::app::domain_prefix_for_type(card_type);
+    let domain_prefix = match card_type {
+        CardTypeStub::Image => match app.editor.as_ref().and_then(|e| e.image_pending_is_camera) {
+            Some(true) => Some("camera."),
+            Some(false) => Some("image."),
+            None => None,
+        },
+        other => crate::app::domain_prefix_for_type(other),
+    };
     let rows = crate::app::entity_search_filtered(&app.instances, instance, query, domain_prefix);
     let items: Vec<ListItem<'_>> = rows
         .iter()
