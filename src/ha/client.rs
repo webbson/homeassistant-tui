@@ -13,7 +13,7 @@ use tracing::{debug, info, warn};
 use crate::config::{Alias, InstanceConfig};
 use crate::event::AppEvent;
 use crate::ha::protocol::{ClientMsg, RawState, ServerMsg, StateChangedData};
-use crate::ha::{ConnStatus, EntityId, EntityState, HaCommand};
+use crate::ha::{ConnStatus, EntityId, EntityState, HaCommand, ImageFetchKind};
 
 pub fn spawn(
     inst: InstanceConfig,
@@ -72,11 +72,13 @@ async fn connect_once(
     let token = inst
         .token
         .as_deref()
-        .ok_or_else(|| eyre!("token missing"))?;
+        .ok_or_else(|| eyre!("token missing"))?
+        .to_string();
+    let ws_url = inst.url.clone();
     send(
         &mut sink,
         &ClientMsg::Auth {
-            access_token: token,
+            access_token: &token,
         },
     )
     .await?;
@@ -120,7 +122,17 @@ async fn connect_once(
             }
             cmd = rx_cmd.recv() => {
                 let Some(cmd) = cmd else { return Ok(()); };
-                handle_cmd(cmd, &mut id_counter, &mut sink, &mut pending_history).await?;
+                handle_cmd(
+                    cmd,
+                    &mut id_counter,
+                    &mut sink,
+                    &mut pending_history,
+                    &ws_url,
+                    &token,
+                    &inst.alias,
+                    tx_app,
+                )
+                .await?;
             }
         }
     }
@@ -220,6 +232,10 @@ async fn handle_cmd(
     id_counter: &mut u64,
     sink: &mut (impl SinkExt<Message, Error = tokio_tungstenite::tungstenite::Error> + Unpin),
     pending_history: &mut HashMap<u64, EntityId>,
+    ws_url: &str,
+    token: &str,
+    alias: &Alias,
+    tx_app: &mpsc::UnboundedSender<AppEvent>,
 ) -> Result<()> {
     match cmd {
         HaCommand::CallService {
@@ -258,6 +274,31 @@ async fn handle_cmd(
                 },
             )
             .await?;
+        }
+        HaCommand::FetchImageBytes { entity, kind } => {
+            // Spawn a separate task so the WS loop is not blocked by HTTP.
+            let base_url = ws_url.to_string();
+            let tok = token.to_string();
+            let alias_clone = alias.clone();
+            let entity_clone = entity.clone();
+            let tx_clone = tx_app.clone();
+            tokio::spawn(async move {
+                let bytes_res = match kind {
+                    ImageFetchKind::Image => {
+                        crate::ha::rest::fetch_image_proxy(&base_url, entity_clone.as_str(), &tok)
+                            .await
+                    }
+                    ImageFetchKind::Camera => {
+                        crate::ha::rest::fetch_camera_proxy(&base_url, entity_clone.as_str(), &tok)
+                            .await
+                    }
+                };
+                let _ = tx_clone.send(crate::event::AppEvent::HaImageBytes {
+                    instance: alias_clone,
+                    entity: entity_clone,
+                    result: bytes_res,
+                });
+            });
         }
     }
     Ok(())

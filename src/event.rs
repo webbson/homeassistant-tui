@@ -30,4 +30,9 @@ pub enum AppEvent {
         entity_id: EntityId,
         samples: Vec<(DateTime<Utc>, f64)>,
     },
+    HaImageBytes {
+        instance: Alias,
+        entity: EntityId,
+        result: Result<Vec<u8>, String>,
+    },
 }

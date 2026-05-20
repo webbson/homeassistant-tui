@@ -55,6 +55,12 @@ impl InstanceRuntime {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum ImageFetchKind {
+    Image,
+    Camera,
+}
+
 #[derive(Debug, Clone)]
 pub enum HaCommand {
     CallService {
@@ -65,4 +71,9 @@ pub enum HaCommand {
     },
     /// Backfill history for one entity over the past `hours` hours.
     FetchHistory { entity_id: EntityId, hours: u32 },
+    /// Fetch image bytes from the HA REST API (image_proxy or camera_proxy).
+    FetchImageBytes {
+        entity: EntityId,
+        kind: ImageFetchKind,
+    },
 }

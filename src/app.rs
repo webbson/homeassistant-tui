@@ -3203,6 +3203,24 @@ impl App {
                     .or_insert_with(|| RingBuf::new(HISTORY_CAP));
                 buf.fill_from(samples.into_iter().map(|(_, v)| v));
             }
+            AppEvent::HaImageBytes {
+                instance,
+                entity,
+                result,
+            } => match result {
+                Ok(bytes) => {
+                    tracing::debug!(
+                        instance = %instance,
+                        entity = %entity,
+                        bytes = bytes.len(),
+                        "image fetch succeeded"
+                    );
+                    // TODO(8.4): decode + cache
+                }
+                Err(e) => {
+                    self.last_error = Some(format!("image fetch {entity}: {e}"));
+                }
+            },
         }
     }
 
