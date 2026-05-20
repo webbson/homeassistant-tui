@@ -104,6 +104,26 @@ Mouse in editor:
 
 `pos` units are grid cells, not characters. `grid` defaults to `{ cols: 12, rows: 24 }`.
 
+### Common card fields
+
+Every card supports two optional fields on the `Card` wrapper:
+
+| Field   | Type                         | Effect                                                                                                    |
+|---------|------------------------------|-----------------------------------------------------------------------------------------------------------|
+| `color` | `String` (named or `#rrggbb`) | Overrides the instance-derived border + value colour for this card.                                       |
+| `size`  | `small` / `normal` / `large` | Affects the content area only. `large` renders primary values (state / temp / time) via `tui-big-text`.   |
+
+```yaml
+- type: entity
+  instance: home
+  entity: light.kitchen
+  color: "#ff8800"
+  size: large
+  pos: { col: 0, row: 0, w: 6, h: 4 }
+```
+
+In the editor, press `m` on a selected card to set these via overlays.
+
 ### entity
 
 Displays state of any HA entity with optional live ticker animation.
@@ -130,7 +150,7 @@ On/off indicator card.
 
 ### gauge
 
-HA-style horizontal arc with severity zones and optional needle.
+HA-style horizontal arc with severity thresholds and optional needle.
 
 ```yaml
 - type: gauge
@@ -139,26 +159,31 @@ HA-style horizontal arc with severity zones and optional needle.
   min: -20
   max: 30
   unit: "°C"
-  needle: true                    # optional needle marker
-  severity:                       # optional color zones
-    - { from: -20, to: 0, color: blue }
-    - { from: 0,  to: 20, color: green }
-    - { from: 20, to: 30, color: red }
+  needle: true                    # optional; default true
+  severity:                       # optional thresholds — values below `yellow`
+    green: -20                    # render green, ≥ yellow render yellow,
+    yellow: 10                    # ≥ red render red
+    red: 22
   pos: { col: 0, row: 2, w: 4, h: 3 }
 ```
 
 ### graph
 
-Multi-series sparkline with history backfill from HA. Supports Line, Bar, and Pie chart styles.
+Multi-series chart card. Three render modes: `line` (history-backed), `bar` (current value per series), `pie` (current value per series).
 
 ```yaml
 - type: graph
   instance: home
-  entity: sensor.power
-  window: "1h"                    # history window: 1h, 6h, 24h, 7d, etc.
-  chart: line                     # line | bar | pie
+  graph_type: line                # line | bar | pie
+  window: "1h"                    # Line only — history window: 1h, 6h, 24h, 7d
+  orientation: vertical           # Bar only — vertical | horizontal
+  entities:
+    - { entity: sensor.power_in,  label: "In" }
+    - { entity: sensor.power_out, label: "Out", color: "#ff8800" }
   pos: { col: 0, row: 5, w: 6, h: 4 }
 ```
+
+Legacy `type: sparkline` YAML still loads (single-entity Line mode).
 
 ### text
 
@@ -193,11 +218,12 @@ Dynamic entity list using a glob + filter query, updated live.
 - type: filtered_entity_list
   instance: home
   query: "light.*[domain=light][state=on]"
+  hide_when_empty: true           # optional — hide whole card when no matches
   title: "Lights On"
   pos: { col: 4, row: 0, w: 4, h: 6 }
 ```
 
-Query syntax: `glob[filter][filter]...` — e.g. `sensor.*_temp[state>20]`.
+Query syntax: `glob[filter][filter]...` — e.g. `sensor.*_temp[state>20]`. With `hide_when_empty: true` the card auto-reappears within ≤250ms when an entity starts matching.
 
 ### clock
 
@@ -236,19 +262,41 @@ Now-playing card: title, artist, app name, and a volume gauge.
   pos: { col: 0, row: 10, w: 6, h: 3 }
 ```
 
+When the card is selected on a dashboard:
+
+| Key   | Service                  |
+|-------|--------------------------|
+| Space | `media_play_pause`       |
+| `n`   | `media_next_track`       |
+| `p`   | `media_previous_track`   |
+| `+`   | `volume_up`              |
+| `-`   | `volume_down`            |
+| `m`   | `volume_mute` (toggle)   |
+
 ### image
 
-Image entity or camera proxy with optional auto-refresh.
+Image entity (`image.*`) or camera proxy (`camera.*`) with optional auto-refresh.
 
 ```yaml
+# Camera with 10s refresh
 - type: image
   instance: home
-  entity: camera.front_door
-  refresh_interval: 10            # seconds; optional
+  source:
+    kind: camera
+    entity: camera.front_door
+  refresh_seconds: 10             # camera-only; omit for one-shot
   pos: { col: 6, row: 0, w: 6, h: 6 }
+
+# Image entity — refetched whenever HA publishes a new frame
+- type: image
+  instance: home
+  source:
+    kind: image_entity
+    entity: image.weather_radar
+  pos: { col: 6, row: 6, w: 6, h: 6 }
 ```
 
-For `image` entities (static image): omit `refresh_interval` or set to `0`.
+Rendered via `ratatui-image`. The picker auto-detects the terminal's image protocol (Kitty / iTerm2 / Sixel / halfblocks). On iTerm2 the iTerm2 protocol is forced because the terminal partially advertises Kitty but only renders the iTerm2 protocol correctly. Override with `HA_TUI_IMAGE_PROTO=halfblocks|sixel|kitty|iterm2`.
 
 ### weather
 
