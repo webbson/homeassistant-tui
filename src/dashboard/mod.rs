@@ -95,6 +95,16 @@ pub enum BarOrientation {
     Horizontal,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum StatsMetric {
+    Avg,
+    Min,
+    Max,
+    Sum,
+    Count,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CardKind {
@@ -172,6 +182,17 @@ pub enum CardKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         title: Option<String>,
     },
+    Statistics {
+        instance: Alias,
+        entity: EntityId,
+        #[serde(default = "default_window")]
+        window: String,
+        metric: StatsMetric,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        unit: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+    },
 }
 
 fn default_window() -> String {
@@ -204,6 +225,9 @@ impl Card {
             CardKind::EntityList { title, .. } => title.as_deref().unwrap_or("Entities"),
             CardKind::FilteredEntityList { title, .. } => title.as_deref().unwrap_or("Filtered"),
             CardKind::Clock { title, .. } => title.as_deref().unwrap_or("Clock"),
+            CardKind::Statistics { title, entity, .. } => {
+                title.as_deref().unwrap_or(entity.as_str())
+            }
         }
     }
 
@@ -232,6 +256,9 @@ impl Card {
                     None
                 }
             }
+            CardKind::Statistics {
+                instance, entity, ..
+            } => Some((instance, entity)),
             CardKind::Text { .. }
             | CardKind::EntityList { .. }
             | CardKind::FilteredEntityList { .. }
@@ -487,6 +514,70 @@ pos: { col: 0, row: 0, w: 4, h: 3 }
         }
         let back = serde_yaml::to_string(&card).unwrap();
         assert!(!back.contains("timezone:"));
+        assert!(!back.contains("title:"));
+    }
+
+    #[test]
+    fn statistics_round_trip() {
+        let yaml = r#"
+type: statistics
+instance: home
+entity: sensor.temperature
+window: 6h
+metric: avg
+unit: "°C"
+title: "Avg Temp"
+pos: { col: 0, row: 0, w: 4, h: 3 }
+"#;
+        let card: Card = serde_yaml::from_str(yaml).unwrap();
+        if let CardKind::Statistics {
+            instance,
+            entity,
+            window,
+            metric,
+            unit,
+            title,
+        } = &card.kind
+        {
+            assert_eq!(instance.as_str(), "home");
+            assert_eq!(entity.as_str(), "sensor.temperature");
+            assert_eq!(window, "6h");
+            assert_eq!(*metric, StatsMetric::Avg);
+            assert_eq!(unit.as_deref(), Some("°C"));
+            assert_eq!(title.as_deref(), Some("Avg Temp"));
+        } else {
+            panic!("wrong variant");
+        }
+        let back = serde_yaml::to_string(&card).unwrap();
+        assert!(back.contains("type: statistics"));
+        assert!(back.contains("metric: avg"));
+    }
+
+    #[test]
+    fn statistics_defaults() {
+        let yaml = r#"
+type: statistics
+instance: home
+entity: sensor.temperature
+metric: min
+pos: { col: 0, row: 0, w: 4, h: 3 }
+"#;
+        let card: Card = serde_yaml::from_str(yaml).unwrap();
+        if let CardKind::Statistics {
+            window,
+            unit,
+            title,
+            ..
+        } = &card.kind
+        {
+            assert_eq!(window, "1h");
+            assert!(unit.is_none());
+            assert!(title.is_none());
+        } else {
+            panic!("wrong variant");
+        }
+        let back = serde_yaml::to_string(&card).unwrap();
+        assert!(!back.contains("unit:"));
         assert!(!back.contains("title:"));
     }
 }

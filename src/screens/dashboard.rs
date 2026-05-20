@@ -286,5 +286,29 @@ fn render_card(
                 *hide_state,
             );
         }
+        CardKind::Statistics {
+            instance,
+            entity,
+            window,
+            metric,
+            unit,
+            ..
+        } => {
+            let history = app.history.get(&(instance.clone(), entity.clone()));
+            widgets::card_statistics::render(
+                f,
+                rect,
+                &title,
+                instance,
+                history,
+                *metric,
+                window,
+                unit.as_deref(),
+                card.color.as_deref(),
+                card.size,
+                &app.theme,
+                selected,
+            );
+        }
     }
 }

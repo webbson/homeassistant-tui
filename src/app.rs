@@ -1876,7 +1876,8 @@ impl App {
                         | crate::dashboard::CardKind::Text { title, .. }
                         | crate::dashboard::CardKind::EntityList { title, .. }
                         | crate::dashboard::CardKind::FilteredEntityList { title, .. }
-                        | crate::dashboard::CardKind::Clock { title, .. } => title.clone(),
+                        | crate::dashboard::CardKind::Clock { title, .. }
+                        | crate::dashboard::CardKind::Statistics { title, .. } => title.clone(),
                     })
                     .unwrap_or_default();
                 if let Some(ed) = self.editor.as_mut() {
@@ -2304,6 +2305,9 @@ impl App {
             CardKind::Clock { .. } => {
                 self.last_error = Some("clock cards have no entity to change".into());
                 return;
+            }
+            CardKind::Statistics { instance, .. } => {
+                (CardTypeStub::Statistics, instance.clone(), None)
             }
         };
         editor.edit_target = Some(idx);
@@ -2762,22 +2766,31 @@ impl App {
     }
 
     fn fetch_sparkline_history(&mut self, instance: &Alias) {
-        // For each graph card on every dashboard matching this instance, request backfill.
+        // For each graph/statistics card on every dashboard matching this instance, request backfill.
         let mut requests: Vec<(String, u32)> = Vec::new();
         for dash in &self.dashboards {
             for card in &dash.cards {
-                if let crate::dashboard::CardKind::Graph {
-                    instance: card_inst,
-                    window,
-                    ..
-                } = &card.kind
-                {
-                    if card_inst == instance {
+                match &card.kind {
+                    crate::dashboard::CardKind::Graph {
+                        instance: card_inst,
+                        window,
+                        ..
+                    } if card_inst == instance => {
                         let hours = parse_window_hours(window);
                         for eid in card.graph_entities() {
                             requests.push((eid.clone(), hours));
                         }
                     }
+                    crate::dashboard::CardKind::Statistics {
+                        instance: card_inst,
+                        entity,
+                        window,
+                        ..
+                    } if card_inst == instance => {
+                        let hours = parse_window_hours(window);
+                        requests.push((entity.clone(), hours));
+                    }
+                    _ => {}
                 }
             }
         }
@@ -2947,6 +2960,9 @@ fn build_typed_card(
         CardTypeStub::Clock => {
             unreachable!("Clock is built via ClockAddTitle flow, not build_typed_card")
         }
+        CardTypeStub::Statistics => {
+            unreachable!("Statistics is built via StatsPickMetric flow, not build_typed_card")
+        }
     }
 }
 
@@ -3001,7 +3017,8 @@ fn build_card_kind(kind: CardTypeStub, buf: &str, default_alias: Option<&str>) -
         CardTypeStub::Text
         | CardTypeStub::EntityList
         | CardTypeStub::FilteredEntityList
-        | CardTypeStub::Clock => {
+        | CardTypeStub::Clock
+        | CardTypeStub::Statistics => {
             unreachable!()
         }
     })

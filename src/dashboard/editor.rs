@@ -443,6 +443,7 @@ pub enum CardTypeStub {
     EntityList,
     FilteredEntityList,
     Clock,
+    Statistics,
 }
 
 impl CardTypeStub {
@@ -455,6 +456,7 @@ impl CardTypeStub {
         CardTypeStub::EntityList,
         CardTypeStub::FilteredEntityList,
         CardTypeStub::Clock,
+        CardTypeStub::Statistics,
     ];
     pub fn label(self) -> &'static str {
         match self {
@@ -466,6 +468,7 @@ impl CardTypeStub {
             CardTypeStub::EntityList => "entity list (multi)",
             CardTypeStub::FilteredEntityList => "filtered list (glob + filters)",
             CardTypeStub::Clock => "clock",
+            CardTypeStub::Statistics => "statistics",
         }
     }
 }
@@ -588,7 +591,8 @@ impl EditorState {
             | CardKind::Text { title, .. }
             | CardKind::EntityList { title, .. }
             | CardKind::FilteredEntityList { title, .. }
-            | CardKind::Clock { title, .. } => {
+            | CardKind::Clock { title, .. }
+            | CardKind::Statistics { title, .. } => {
                 *title = new_title;
             }
         }
