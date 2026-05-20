@@ -7,6 +7,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [0.2.0] – 2026-05-20
+
+### Added
 - **First-run bootstrap** — missing `~/.config/ha-tui/config.yaml` is created from the bundled example; missing `dashboards.yaml` gets a one-card Welcome dashboard with setup instructions, so a fresh install lands on a usable screen.
 - **Entity / instance modals** — `E` and `i` now open a centered, searchable overlay on top of the current dashboard instead of switching to a full screen. `Esc` closes back.
 - **Update notifier** — on startup, asynchronously checks GitHub for a newer release of `webbson/homeassistant-tui` and shows a yellow `↑ vX.Y.Z` in the header when available. Failures are silent.
@@ -61,5 +71,6 @@ First tagged release. The initial milestones (M0–M5 + partial M6).
 - rustls 0.23 requires an explicit `CryptoProvider` — installed at process start so the first TLS handshake doesn't panic.
 - crossterm bumped to 0.29 to match ratatui 0.30.
 
-[Unreleased]: https://github.com/tomstevens/homeassistant-tui/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/tomstevens/homeassistant-tui/releases/tag/v0.1.0
+[Unreleased]: https://github.com/webbson/homeassistant-tui/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/webbson/homeassistant-tui/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/webbson/homeassistant-tui/releases/tag/v0.1.0
