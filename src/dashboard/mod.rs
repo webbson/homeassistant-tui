@@ -26,11 +26,28 @@ pub struct Grid {
     pub rows: u16,
 }
 
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CardSize {
+    Small,
+    #[default]
+    Normal,
+    Large,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Card {
     #[serde(flatten)]
     pub kind: CardKind,
     pub pos: Pos,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    #[serde(default, skip_serializing_if = "is_default_size")]
+    pub size: CardSize,
+}
+
+fn is_default_size(s: &CardSize) -> bool {
+    *s == CardSize::Normal
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]

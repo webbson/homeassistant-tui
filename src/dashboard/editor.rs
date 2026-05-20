@@ -1,4 +1,4 @@
-use crate::dashboard::{Card, CardKind, Dashboard, Pos};
+use crate::dashboard::{Card, CardKind, CardSize, Dashboard, Pos};
 
 const MAX_UNDO: usize = 32;
 
@@ -324,6 +324,8 @@ impl EditorState {
                 h: 2.min(dash.grid.rows.saturating_sub(self.cursor_row).max(1)),
             },
             kind,
+            color: None,
+            size: CardSize::Normal,
         };
         dash.cards.push(card);
         self.selected_card = Some(dash.cards.len() - 1);
@@ -399,6 +401,8 @@ mod tests {
                         markdown: "a".into(),
                         title: None,
                     },
+                    color: None,
+                    size: CardSize::Normal,
                 },
                 Card {
                     pos: Pos {
@@ -411,6 +415,8 @@ mod tests {
                         markdown: "b".into(),
                         title: None,
                     },
+                    color: None,
+                    size: CardSize::Normal,
                 },
             ],
         }

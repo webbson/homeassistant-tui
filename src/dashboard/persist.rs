@@ -38,7 +38,7 @@ pub fn save(file: &DashboardFile, path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dashboard::{Card, CardKind, Dashboard, Grid, Pos};
+    use crate::dashboard::{Card, CardKind, CardSize, Dashboard, Grid, Pos};
 
     #[test]
     fn round_trip_yaml() {
@@ -59,6 +59,8 @@ mod tests {
                         title: Some("Kitchen".into()),
                         ticker: false,
                     },
+                    color: None,
+                    size: CardSize::Normal,
                 }],
             }],
         };
