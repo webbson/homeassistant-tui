@@ -2985,12 +2985,14 @@ impl App {
                             editor.mode = EditorMode::PickingNewRowHeight {
                                 buf: tui_input::Input::default(),
                             };
-                            self.status_msg = Some("add first row: enter height or leave blank for auto".into());
+                            self.status_msg =
+                                Some("add first row: enter height or leave blank for auto".into());
                         } else {
                             editor.mode = EditorMode::Browse;
                             // Keep Free layout as-is (already set in create_new_dashboard).
-                            self.status_msg =
-                                Some("dashboard created — press 'a' to add cards, 's' to save".into());
+                            self.status_msg = Some(
+                                "dashboard created — press 'a' to add cards, 's' to save".into(),
+                            );
                         }
                     }
                     _ => {}
