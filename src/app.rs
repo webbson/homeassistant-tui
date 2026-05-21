@@ -4123,7 +4123,12 @@ impl App {
     }
 
     fn dispatch_default(&mut self, alias: &Alias, entity_id: &EntityId) {
-        match crate::actions::default_action(entity_id) {
+        let entity_state = self
+            .instances
+            .runtimes
+            .get(alias)
+            .and_then(|rt| rt.states.get(entity_id));
+        match crate::actions::default_action(entity_id, entity_state) {
             Some(cmd) => {
                 if !self.instances.send(alias, cmd) {
                     self.last_error = Some(format!("{alias}: no command channel"));
