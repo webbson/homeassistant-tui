@@ -72,7 +72,7 @@ pub fn render(
             );
 
             if big_text::fits(temp_area) {
-                big_text::render_big(f, temp_area, &temp_str, color);
+                big_text::render_big(f, temp_area, &temp_str, Style::new().fg(color));
             } else {
                 f.render_widget(
                     Paragraph::new(temp_str)

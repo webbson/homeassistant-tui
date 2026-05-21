@@ -39,17 +39,12 @@ pub fn render(
         return;
     }
     if let Some(p) = protocol {
-        tracing::trace!(
-            inner_w = inner.width,
-            inner_h = inner.height,
-            "rendering image stateful widget"
-        );
         f.render_stateful_widget(StatefulImage::default(), inner, p);
         f.render_widget(block, area);
     } else {
         f.render_widget(block, area);
         f.render_widget(
-            Paragraph::new("(loading…)").style(Style::new().fg(Color::DarkGray)),
+            Paragraph::new("(loading…)").style(Style::new().dim()),
             inner,
         );
     }

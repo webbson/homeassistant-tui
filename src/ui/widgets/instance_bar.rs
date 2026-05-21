@@ -18,13 +18,13 @@ where
     ];
     for rt in runtimes {
         let color = theme.instance_color(&rt.alias);
-        let dot_color = match rt.status {
-            ConnStatus::Connected => Color::Green,
-            ConnStatus::Connecting | ConnStatus::Authenticating => Color::Yellow,
-            ConnStatus::Failed => Color::Red,
-            ConnStatus::Disconnected => Color::DarkGray,
+        let dot_style = match rt.status {
+            ConnStatus::Connected => Style::new().fg(Color::Green),
+            ConnStatus::Connecting | ConnStatus::Authenticating => Style::new().fg(Color::Yellow),
+            ConnStatus::Failed => Style::new().fg(Color::Red),
+            ConnStatus::Disconnected => Style::new().dim(),
         };
-        spans.push(Span::styled("●", Style::new().fg(dot_color)));
+        spans.push(Span::styled("●", dot_style));
         spans.push(Span::raw(" "));
         spans.push(Span::styled(
             rt.alias.clone(),

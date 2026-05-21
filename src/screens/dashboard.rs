@@ -342,12 +342,12 @@ fn render_card(
                     // Draw a dimmed placeholder so the card stays selectable in the editor.
                     let block = Block::bordered()
                         .title(title.as_str())
-                        .style(Style::new().fg(Color::DarkGray));
+                        .style(Style::new().dim());
                     let inner = block.inner(rect);
                     f.render_widget(block, rect);
                     f.render_widget(
                         Paragraph::new("(hidden — no matches)")
-                            .style(Style::new().fg(Color::DarkGray)),
+                            .style(Style::new().dim()),
                         inner,
                     );
                 }

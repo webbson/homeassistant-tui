@@ -51,12 +51,12 @@ pub fn render(
 
     if size == CardSize::Large && state.is_some() && super::big_text::fits(inner) {
         f.render_widget(block, area);
-        super::big_text::render_big(f, inner, &raw, color);
+        super::big_text::render_big(f, inner, &raw, Style::new().fg(color));
         return;
     }
 
     let body = match state {
-        None => Line::from(Span::styled("(unknown)", Style::new().fg(Color::DarkGray))),
+        None => Line::from(Span::styled("(unknown)", Style::new().dim())),
         Some(_) => {
             // Reserve 2 chars padding on each side
             let usable = area.width.saturating_sub(4) as usize;

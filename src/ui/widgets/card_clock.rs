@@ -37,7 +37,7 @@ pub fn render(
 
     // Large size + fits: use big-text renderer inside inner area.
     if size == CardSize::Large && crate::ui::widgets::big_text::fits(inner) {
-        crate::ui::widgets::big_text::render_big(f, inner, &time_str, color);
+        crate::ui::widgets::big_text::render_big(f, inner, &time_str, Style::new().fg(color));
         return;
     }
 

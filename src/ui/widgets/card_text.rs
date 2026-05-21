@@ -15,7 +15,7 @@ pub fn render(
 ) {
     let color = card_color
         .and_then(crate::ui::theme::parse_color)
-        .unwrap_or(Color::White);
+        .unwrap_or(Color::Reset);
     let mut block = Block::bordered()
         .title(format!(" {title} "))
         .border_style(Style::new().fg(color));

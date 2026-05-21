@@ -28,11 +28,11 @@ pub fn render(
     if selected {
         block = block.border_style(Style::new().fg(color).bold());
     }
-    let (label, label_color) = match state.map(|s| s.state.as_str()) {
-        Some("on" | "open" | "home") => ("ON", Color::Green),
-        Some("off" | "closed" | "not_home") => ("OFF", Color::DarkGray),
-        Some(other) => (other, Color::Yellow),
-        None => ("—", Color::DarkGray),
+    let (label, label_style) = match state.map(|s| s.state.as_str()) {
+        Some("on" | "open" | "home") => ("ON", Style::new().fg(Color::Green)),
+        Some("off" | "closed" | "not_home") => ("OFF", Style::new().dim()),
+        Some(other) => (other, Style::new().fg(Color::Yellow)),
+        None => ("—", Style::new().dim()),
     };
 
     // Inner area (inside the 1-char border on each side).
@@ -45,12 +45,12 @@ pub fn render(
 
     if size == CardSize::Large && state.is_some() && super::big_text::fits(inner) {
         f.render_widget(block, area);
-        super::big_text::render_big(f, inner, &format!("[{label}]"), label_color);
+        super::big_text::render_big(f, inner, &format!("[{label}]"), label_style);
         return;
     }
 
     let line = Line::from(vec![
-        Span::styled(format!("[{label}]"), Style::new().fg(label_color).bold()),
+        Span::styled(format!("[{label}]"), label_style.bold()),
         Span::raw("  "),
         Span::styled("⏎ toggle", Style::new().dim()),
     ]);

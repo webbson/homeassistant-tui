@@ -541,7 +541,7 @@ fn draw_grid_editor_overlay(
             {
                 (Color::Blue, Color::Blue)
             }
-            _ => (Color::White, Color::White),
+            _ => (Color::Reset, Color::Reset),
         };
 
         let row = rows.get(info.row_idx);
@@ -645,7 +645,7 @@ fn draw_editor_help_line(f: &mut Frame, area: Rect, app: &App, is_grid: bool) {
     let dirty = if editor.dirty { " [unsaved]" } else { "" };
     let line = Line::from(vec![
         Span::styled(&focus_str, Style::new().fg(Color::Cyan).bold()),
-        Span::styled(keys, Style::new().fg(Color::DarkGray)),
+        Span::styled(keys, Style::new().dim()),
         Span::styled(dirty, Style::new().fg(Color::Yellow)),
     ]);
     f.render_widget(Paragraph::new(line).style(Style::new().bg(Color::Black)), area);
@@ -885,7 +885,7 @@ fn draw_text_body(f: &mut Frame, area: Rect, title: &str, body: &str, focus_body
     } else {
         Style::new().dim()
     };
-    let lines = vec![
+    let mut lines: Vec<Line<'_>> = vec![
         Line::from(vec![
             Span::styled("title: ", title_style),
             Span::raw(title.to_string()),
@@ -896,12 +896,14 @@ fn draw_text_body(f: &mut Frame, area: Rect, title: &str, body: &str, focus_body
             body_style,
         )),
         Line::raw(""),
-        Line::raw(body.to_string()),
-        Line::styled(
-            "[Tab cycles fields · F2 save · Esc cancel]".to_string(),
-            Style::new().dim(),
-        ),
     ];
+    for l in body.split('\n') {
+        lines.push(Line::raw(l.to_string()));
+    }
+    lines.push(Line::styled(
+        "[Tab cycles fields · F2 save · Esc cancel]".to_string(),
+        Style::new().dim(),
+    ));
     f.render_widget(
         Paragraph::new(lines).block(Block::bordered().title(" New text card ")),
         r,

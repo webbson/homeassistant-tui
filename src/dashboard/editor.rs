@@ -510,6 +510,8 @@ pub enum MenuAction {
     AddRow,
     // EntityList / FilteredEntityList per-entry overrides
     EditEntryOverride,
+    // Text card content editing
+    EditTextContent,
     // Dashboard management
     DeleteDashboard,
 }
@@ -526,6 +528,12 @@ pub fn card_menu_items(card: &Card) -> Vec<MenuItem> {
         action: MenuAction::RenameCard,
         label: "Rename card",
     });
+    if let CardKind::Text { .. } = &card.kind {
+        items.push(MenuItem {
+            action: MenuAction::EditTextContent,
+            label: "Edit content",
+        });
+    }
     let entity_change_label = match &card.kind {
         CardKind::EntityList { .. } => Some("Change entities"),
         CardKind::FilteredEntityList { .. }

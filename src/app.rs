@@ -3188,6 +3188,13 @@ impl App {
                 }
                 self.change_card_entity(idx);
             }
+            (A::EditTextContent, C::Card(idx)) => {
+                if let Some(ed) = self.editor.as_mut() {
+                    ed.selected_card = Some(idx);
+                    ed.edit_target = Some(idx);
+                }
+                self.start_card_after_type(crate::dashboard::editor::CardTypeStub::Text);
+            }
             (A::EditWindow, C::Card(idx)) => {
                 let current = self
                     .dashboards
@@ -4888,7 +4895,6 @@ impl App {
             );
             return;
         };
-        tracing::info!(instance = %instance, entity = %entity, ?kind, "sending FetchImageBytes");
         self.image_inflight.insert(key);
         let sent = self.instances.send(
             instance,

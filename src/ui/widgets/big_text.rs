@@ -1,5 +1,5 @@
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Style};
+use ratatui::style::Style;
 use ratatui::Frame;
 use tui_big_text::{BigText, PixelSize};
 
@@ -7,11 +7,11 @@ use tui_big_text::{BigText, PixelSize};
 const GLYPH_W: u16 = 4;
 const GLYPH_H: u16 = 4;
 
-pub fn render_big(f: &mut Frame, area: Rect, text: &str, color: Color) {
+pub fn render_big(f: &mut Frame, area: Rect, text: &str, style: Style) {
     let big = BigText::builder()
         .pixel_size(PixelSize::Quadrant)
         .centered()
-        .style(Style::new().fg(color))
+        .style(style)
         .lines(vec![text.into()])
         .build();
     // Vertically centre by shifting the render area down inside the parent.

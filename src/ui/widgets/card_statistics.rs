@@ -48,7 +48,7 @@ pub fn render(
         Layout::vertical([Constraint::Fill(1), Constraint::Length(1)]).areas(inner);
 
     if matches!(size, CardSize::Large) && big_text::fits(value_area) {
-        big_text::render_big(f, value_area, &text, color);
+        big_text::render_big(f, value_area, &text, Style::new().fg(color));
     } else {
         f.render_widget(
             Paragraph::new(text)

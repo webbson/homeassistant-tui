@@ -1,11 +1,8 @@
-use std::f64::consts::TAU;
-
 use ratatui::layout::Rect;
 #[allow(unused_imports)]
 use ratatui::style::{Color, Style, Stylize};
 use ratatui::symbols;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::canvas::{Canvas, Line as CanvasLine};
 use ratatui::widgets::{Axis, Bar, BarChart, Block, Chart, Dataset, GraphType, Paragraph};
 use ratatui::Frame;
 
@@ -117,7 +114,7 @@ pub fn render_line(f: &mut Frame, args: GraphRender<'_>) {
         let block = make_block(args.title, card_color, args.selected);
         f.render_widget(
             Paragraph::new("(no history yet)")
-                .style(Style::new().fg(Color::DarkGray))
+                .style(Style::new().dim())
                 .block(block),
             args.area,
         );
@@ -138,12 +135,12 @@ pub fn render_line(f: &mut Frame, args: GraphRender<'_>) {
     let max_n = all_series.iter().map(|s| s.points.len()).max().unwrap_or(1);
     let x_max = (max_n as f64 - 1.0).max(1.0);
 
-    let show_legend = all_series.len() >= 2 && inner.height > 3;
-    let legend_rows = if show_legend {
-        all_series.len() as u16
-    } else {
-        0
-    };
+    // Show legend for any non-empty series (including single), but only when
+    // the card is tall enough that the chart still gets at least 3 rows for axis labels.
+    let potential_legend_rows = all_series.len() as u16;
+    let show_legend = !all_series.is_empty()
+        && inner.height > potential_legend_rows + 2;
+    let legend_rows = if show_legend { potential_legend_rows } else { 0 };
     let chart_height = inner.height.saturating_sub(legend_rows).max(1);
 
     let window = args.window;
@@ -178,20 +175,20 @@ pub fn render_line(f: &mut Frame, args: GraphRender<'_>) {
         let chart = Chart::new(datasets)
             .x_axis(
                 Axis::default()
-                    .style(Style::new().fg(Color::DarkGray))
+                    .style(Style::new().dim())
                     .bounds([0.0, x_max])
                     .labels(vec![
-                        Span::styled(format!("-{window}"), Style::new().fg(Color::DarkGray)),
-                        Span::styled("now", Style::new().fg(Color::DarkGray)),
+                        Span::styled(format!("-{window}"), Style::new().dim()),
+                        Span::styled("now", Style::new().dim()),
                     ]),
             )
             .y_axis(
                 Axis::default()
-                    .style(Style::new().fg(Color::DarkGray))
+                    .style(Style::new().dim())
                     .bounds([y_lo, y_hi])
                     .labels(vec![
-                        Span::styled(format!("{lo:.1}"), Style::new().fg(Color::DarkGray)),
-                        Span::styled(format!("{hi:.1}"), Style::new().fg(Color::DarkGray)),
+                        Span::styled(format!("{lo:.1}"), Style::new().dim()),
+                        Span::styled(format!("{hi:.1}"), Style::new().dim()),
                     ]),
             );
         f.render_widget(chart, chart_area);
@@ -207,14 +204,14 @@ pub fn render_line(f: &mut Frame, args: GraphRender<'_>) {
                 height: 1,
             };
             let swatch = Span::styled("█ ", Style::new().fg(s.color));
-            let label = Span::styled(s.label.as_str(), Style::new().fg(Color::White));
+            let label = Span::styled(s.label.as_str(), Style::new());
             let val_str = legend_value_str(args.current_states.get(s.orig_idx).and_then(|o| *o));
             // Only append the value if there is enough room (swatch=2, space=2, label, space, value).
             let min_width = 2 + 2 + s.label.len() + 1 + val_str.len();
             let spans = if (row.width as usize) >= min_width {
                 let val_span = Span::styled(
                     format!("  {val_str}"),
-                    Style::new().fg(Color::DarkGray),
+                    Style::new().dim(),
                 );
                 vec![swatch, label, val_span]
             } else {
@@ -238,20 +235,20 @@ pub fn render_line(f: &mut Frame, args: GraphRender<'_>) {
             .block(block)
             .x_axis(
                 Axis::default()
-                    .style(Style::new().fg(Color::DarkGray))
+                    .style(Style::new().dim())
                     .bounds([0.0, x_max])
                     .labels(vec![
-                        Span::styled(format!("-{window}"), Style::new().fg(Color::DarkGray)),
-                        Span::styled("now", Style::new().fg(Color::DarkGray)),
+                        Span::styled(format!("-{window}"), Style::new().dim()),
+                        Span::styled("now", Style::new().dim()),
                     ]),
             )
             .y_axis(
                 Axis::default()
-                    .style(Style::new().fg(Color::DarkGray))
+                    .style(Style::new().dim())
                     .bounds([y_lo, y_hi])
                     .labels(vec![
-                        Span::styled(format!("{lo:.1}"), Style::new().fg(Color::DarkGray)),
-                        Span::styled(format!("{hi:.1}"), Style::new().fg(Color::DarkGray)),
+                        Span::styled(format!("{lo:.1}"), Style::new().dim()),
+                        Span::styled(format!("{hi:.1}"), Style::new().dim()),
                     ]),
             );
         f.render_widget(chart, args.area);
@@ -267,6 +264,9 @@ pub fn render_bar(
     let card_color =
         crate::ui::theme::resolve_card_color(args.card_color, args.instance, args.theme);
     let block = make_block(args.title, card_color, args.selected);
+    let inner = block.inner(args.area);
+    let n = args.series.len().max(1) as u16;
+    let gap = 1u16;
 
     let bars: Vec<Bar> = args
         .series
@@ -275,39 +275,43 @@ pub fn render_bar(
         .map(|(i, s)| {
             let color = series_color(s, args.card_color, args.instance, args.theme);
             let raw_val = current.get(i).and_then(|(_, v)| *v);
-            let u_val = raw_val.unwrap_or(0.0).max(0.0) as u64;
+            // Multiply by 1000 so decimal values (e.g. 0.5) don't truncate to 0.
+            let u_val = (raw_val.unwrap_or(0.0).max(0.0) * 1000.0).round() as u64;
             let val_str = legend_value_str(args.current_states.get(i).and_then(|o| *o));
-            let label = format!("{} ({})", series_label(s), val_str);
-            Bar::with_label(label, u_val).style(Style::new().fg(color))
+            Bar::with_label(series_label(s).to_string(), u_val)
+                .text_value(val_str)
+                .style(Style::new().fg(color))
         })
         .collect();
 
     match orientation {
         BarOrientation::Vertical => {
-            let chart = BarChart::vertical(bars).block(block).bar_gap(1);
+            let bar_w = ((inner.width.saturating_sub((n - 1) * gap)) / n).clamp(3, 20);
+            let chart = BarChart::vertical(bars).block(block).bar_gap(gap).bar_width(bar_w);
             f.render_widget(chart, args.area);
         }
         BarOrientation::Horizontal => {
-            let chart = BarChart::horizontal(bars).block(block).bar_gap(1);
+            let bar_h = ((inner.height.saturating_sub((n - 1) * gap)) / n).clamp(1, 3);
+            let chart = BarChart::horizontal(bars).block(block).bar_gap(gap).bar_width(bar_h);
             f.render_widget(chart, args.area);
         }
     }
 }
 
 pub fn render_pie(f: &mut Frame, args: GraphRender<'_>, current: &[(EntityId, Option<f64>)]) {
+    use tui_piechart::{PieChart, PieSlice};
+
     let card_color =
         crate::ui::theme::resolve_card_color(args.card_color, args.instance, args.theme);
     let block = make_block(args.title, card_color, args.selected);
     let inner = block.inner(args.area);
 
-    // Collect positive numeric values.
-    struct Slice {
-        color: Color,
+    struct SliceData {
         label: String,
         value: f64,
-        val_str: String,
+        color: ratatui::style::Color,
     }
-    let slices: Vec<Slice> = args
+    let slice_data: Vec<SliceData> = args
         .series
         .iter()
         .enumerate()
@@ -316,120 +320,32 @@ pub fn render_pie(f: &mut Frame, args: GraphRender<'_>, current: &[(EntityId, Op
             if v <= 0.0 {
                 return None;
             }
-            Some(Slice {
-                color: series_color(s, args.card_color, args.instance, args.theme),
-                label: series_label(s).to_string(),
-                value: v,
-                val_str: legend_value_str(args.current_states.get(i).and_then(|o| *o)),
-            })
+            let color = series_color(s, args.card_color, args.instance, args.theme);
+            let val_str = legend_value_str(args.current_states.get(i).and_then(|o| *o));
+            let label = format!("{} ({})", series_label(s), val_str);
+            Some(SliceData { label, value: v, color })
         })
         .collect();
+    let pie_slices: Vec<PieSlice> = slice_data
+        .iter()
+        .map(|d| PieSlice::new(&d.label, d.value, d.color))
+        .collect();
 
-    let total: f64 = slices.iter().map(|s| s.value).sum();
-
-    if total <= 0.0 {
+    if pie_slices.is_empty() {
         f.render_widget(
             Paragraph::new("(no positive values)")
-                .style(Style::new().fg(Color::DarkGray))
+                .style(Style::new().dim())
                 .block(block),
             args.area,
         );
         return;
     }
 
-    // Show legend on right if wide enough and 2+ slices.
-    let show_legend = slices.len() >= 2 && inner.width >= 24;
-    let legend_width: u16 = if show_legend {
-        (inner.width / 3).clamp(10, 20)
-    } else {
-        0
-    };
-    let canvas_width = inner.width.saturating_sub(legend_width);
-
-    let canvas_area = Rect {
-        x: inner.x,
-        y: inner.y,
-        width: canvas_width,
-        height: inner.height,
-    };
-    let legend_area = Rect {
-        x: inner.x + canvas_width,
-        y: inner.y,
-        width: legend_width,
-        height: inner.height,
-    };
-
-    // Render the block.
     f.render_widget(block, args.area);
-
-    // Draw pie using Canvas.
-    let slices_ref = &slices;
-    let total_ref = total;
-    let canvas = Canvas::default()
-        .x_bounds([-1.0, 1.0])
-        .y_bounds([-1.0, 1.0])
-        .marker(symbols::Marker::Braille)
-        .paint(move |ctx| {
-            let mut start = -TAU / 4.0; // start at 12 o'clock
-            for slice in slices_ref.iter() {
-                let sweep = TAU * (slice.value / total_ref);
-                let end = start + sweep;
-                let steps = 64_usize.max((sweep * 32.0) as usize);
-                // Draw arc segments.
-                for step in 0..steps {
-                    let a1 = start + (step as f64 / steps as f64) * sweep;
-                    let a2 = start + ((step + 1) as f64 / steps as f64) * sweep;
-                    let (x1, y1) = (a1.cos() * 0.9, a1.sin() * 0.9);
-                    let (x2, y2) = (a2.cos() * 0.9, a2.sin() * 0.9);
-                    ctx.draw(&CanvasLine {
-                        x1,
-                        y1,
-                        x2,
-                        y2,
-                        color: slice.color,
-                    });
-                }
-                // Radial lines from origin to start and end of slice.
-                let (sx, sy) = (start.cos() * 0.9, start.sin() * 0.9);
-                let (ex, ey) = (end.cos() * 0.9, end.sin() * 0.9);
-                ctx.draw(&CanvasLine {
-                    x1: 0.0,
-                    y1: 0.0,
-                    x2: sx,
-                    y2: sy,
-                    color: slice.color,
-                });
-                ctx.draw(&CanvasLine {
-                    x1: 0.0,
-                    y1: 0.0,
-                    x2: ex,
-                    y2: ey,
-                    color: slice.color,
-                });
-                start = end;
-            }
-        });
-    f.render_widget(canvas, canvas_area);
-
-    // Render legend.
-    if show_legend {
-        for (i, slice) in slices.iter().enumerate() {
-            if i as u16 >= legend_area.height {
-                break;
-            }
-            let pct = slice.value / total * 100.0;
-            let row = Rect {
-                x: legend_area.x,
-                y: legend_area.y + i as u16,
-                width: legend_area.width,
-                height: 1,
-            };
-            let swatch = Span::styled("█ ", Style::new().fg(slice.color));
-            let label_text = format!("{} {} ({:.0}%)", slice.label, slice.val_str, pct);
-            let label = Span::styled(label_text, Style::new().fg(Color::White));
-            f.render_widget(Paragraph::new(Line::from(vec![swatch, label])), row);
-        }
-    }
+    f.render_widget(
+        PieChart::new(pie_slices).show_legend(true).show_percentages(true),
+        inner,
+    );
 }
 
 fn downsample(values: &[f64], target: usize) -> Vec<f64> {

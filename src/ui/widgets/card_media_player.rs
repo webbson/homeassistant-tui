@@ -44,7 +44,7 @@ pub fn render(
             title_row,
         );
         f.render_widget(
-            Paragraph::new(format!("[{player_state}]")).style(Style::new().fg(Color::DarkGray)),
+            Paragraph::new(format!("[{player_state}]")).style(Style::new().dim()),
             state_row,
         );
         return;
@@ -66,7 +66,7 @@ pub fn render(
     .areas(inner);
 
     if matches!(size, CardSize::Large) && big_text::fits(title_row) {
-        big_text::render_big(f, title_row, &media_title, color);
+        big_text::render_big(f, title_row, &media_title, Style::new().fg(color));
     } else {
         f.render_widget(
             Paragraph::new(media_title).style(Style::new().fg(color)),
@@ -91,7 +91,7 @@ pub fn render(
         gauge_row,
     );
     f.render_widget(
-        Paragraph::new(format!("[{player_state}]")).style(Style::new().fg(Color::DarkGray)),
+        Paragraph::new(format!("[{player_state}]")).style(Style::new().dim()),
         state_row,
     );
 }
