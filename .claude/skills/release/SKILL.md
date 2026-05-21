@@ -73,7 +73,7 @@ Open `CHANGELOG.md` and:
    - Replace the `[Unreleased]:` URL's `v<old>...HEAD` with `v<new>...HEAD`.
    - Add a new `[X.Y.Z]:` link below the `[Unreleased]:` line pointing at `<repo-url>/compare/v<prev>...v<new>` (or `/releases/tag/v<new>` if there was no previous tag).
 
-If the Unreleased section is empty, abort with a clear error message asking the user to populate it first.
+If the Unreleased section is empty, try to build a changelog with the commits that will be included, if unable ask user what to populate it with.
 
 ### 7. Print the diff for review
 
@@ -112,4 +112,3 @@ Do **NOT** push automatically. The user pushes when ready.
 - It does not write release notes from scratch — it relies on the curated `## [Unreleased]` section in `CHANGELOG.md`. If that section is empty the release aborts.
 - It does not run tests. Run them yourself before invoking this skill.
 - It does not publish to crates.io. Run `cargo publish` separately.
-- It does not generate GitHub Releases. Use `gh release create vX.Y.Z --notes-from-tag` once the tag is pushed.
