@@ -11,10 +11,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 ### Changed
 
 ### Fixed
-- Grid layout: `attribute_list` card now computes preferred height from actual array length instead of the static default of 4 rows
-- Grid layout: `image` and `graph` cards in a non-fill column now expand to absorb any remaining column space
 
 ### Removed
+
+## [0.5.2] – 2026-05-21
+
+### Fixed
+- Grid layout: `attribute_list` card now computes preferred height from actual array length instead of the static default of 4 rows
+- Grid layout: `image` and `graph` cards in a non-fill column now expand to absorb any remaining column space
 
 ## [0.5.1] – 2026-05-21
 
@@ -134,7 +138,8 @@ First tagged release. The initial milestones (M0–M5 + partial M6).
 - rustls 0.23 requires an explicit `CryptoProvider` — installed at process start so the first TLS handshake doesn't panic.
 - crossterm bumped to 0.29 to match ratatui 0.30.
 
-[Unreleased]: https://github.com/webbson/homeassistant-tui/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/webbson/homeassistant-tui/compare/v0.5.2...HEAD
+[0.5.2]: https://github.com/webbson/homeassistant-tui/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/webbson/homeassistant-tui/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/webbson/homeassistant-tui/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/webbson/homeassistant-tui/compare/v0.3.0...v0.4.0
