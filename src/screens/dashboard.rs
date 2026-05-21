@@ -72,7 +72,19 @@ pub fn draw(
                 }
                 dash.cards_iter()
                     .zip(widths.iter())
-                    .map(|(c, &w)| c.preferred_height(w, None))
+                    .map(|(c, &w)| {
+                        let filtered_count =
+                            if let CardKind::FilteredEntityList {
+                                instance, query, ..
+                            } = &c.kind
+                            {
+                                let rt = app.instances.runtimes.get(instance);
+                                Some(crate::dashboard::query::resolve(rt, query).len())
+                            } else {
+                                None
+                            };
+                        c.preferred_height(w, filtered_count)
+                    })
                     .collect()
             };
 

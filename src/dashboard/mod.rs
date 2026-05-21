@@ -1148,7 +1148,12 @@ impl Card {
                 lines.max(1) + 2 // +2 for border
             }
             CardKind::EntityList { entities, .. } => (entities.len() as u16).saturating_add(2),
-            CardKind::FilteredEntityList { .. } => {
+            CardKind::FilteredEntityList {
+                hide_when_empty, ..
+            } => {
+                if *hide_when_empty && filtered_entity_count == Some(0) {
+                    return 0;
+                }
                 let count = filtered_entity_count.unwrap_or(4);
                 (count as u16).saturating_add(2).max(4)
             }

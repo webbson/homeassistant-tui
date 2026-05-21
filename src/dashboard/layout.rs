@@ -159,9 +159,15 @@ pub fn grid_layout(
                         (frac * target).floor() as u16
                     })
                     .collect();
-                // Correct rounding drift on the last card.
+                // Correct rounding drift on the last visible (non-zero natural height) card.
                 let sum: u16 = heights.iter().sum();
-                if let Some(last) = heights.last_mut() {
+                if let Some(last) = heights
+                    .iter_mut()
+                    .zip(col_card_heights.iter())
+                    .filter(|(_, &nat)| nat > 0)
+                    .last()
+                    .map(|(h, _)| h)
+                {
                     *last = last.saturating_add(col_rect.height.saturating_sub(sum));
                 }
                 heights
