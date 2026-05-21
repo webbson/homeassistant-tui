@@ -989,6 +989,18 @@ pub enum CardKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         title: Option<String>,
     },
+    AttributeList {
+        instance: Alias,
+        entity: EntityId,
+        /// Top-level attribute key (e.g. `top10`).
+        attribute: String,
+        /// Row format template. Supports `{key}` and `{key|filter}` tokens.
+        template: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        limit: Option<usize>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+    },
 }
 
 fn default_window() -> String {
@@ -1037,6 +1049,9 @@ impl Card {
                 }
             }),
             CardKind::Weather { title, entity, .. } => title.as_deref().unwrap_or(entity.as_str()),
+            CardKind::AttributeList { title, entity, .. } => {
+                title.as_deref().unwrap_or(entity.as_str())
+            }
         }
     }
 
@@ -1082,6 +1097,9 @@ impl Card {
                     ImageSource::ImageEntity { entity } | ImageSource::Camera { entity } => entity,
                 },
             )),
+            CardKind::AttributeList {
+                instance, entity, ..
+            } => Some((instance, entity)),
             CardKind::Text { .. }
             | CardKind::EntityList { .. }
             | CardKind::FilteredEntityList { .. }
@@ -1156,6 +1174,9 @@ impl Card {
                 }
                 let count = filtered_entity_count.unwrap_or(4);
                 (count as u16).saturating_add(2).max(4)
+            }
+            CardKind::AttributeList { limit, .. } => {
+                limit.map(|n| (n as u16).saturating_add(2)).unwrap_or(6)
             }
         }
     }

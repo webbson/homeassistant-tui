@@ -415,6 +415,53 @@ pub enum EditorMode {
         row_idx: usize,
         col_idx: usize,
     },
+    // ---- AttributeList add-flow ----
+    /// Pick which array-typed attribute to render (lists keys with v.is_array()).
+    AttrListPickAttr {
+        instance: String,
+        entity: String,
+        /// Attribute key names that are arrays in the current entity state.
+        candidates: Vec<String>,
+        selected: usize,
+    },
+    /// Free-text template input.
+    AttrListEditTemplate {
+        instance: String,
+        entity: String,
+        attribute: String,
+        buffer: String,
+    },
+    /// Optional limit (empty = no limit).
+    AttrListEditLimit {
+        instance: String,
+        entity: String,
+        attribute: String,
+        template: String,
+        buffer: String,
+    },
+    /// Optional title (empty = use entity id).
+    AttrListEditTitle {
+        instance: String,
+        entity: String,
+        attribute: String,
+        template: String,
+        limit: Option<usize>,
+        buffer: String,
+    },
+    // ---- AttributeList in-place edit modes (via card menu) ----
+    AttrListEditAttrExisting {
+        card_idx: usize,
+        candidates: Vec<String>,
+        selected: usize,
+    },
+    AttrListEditTemplateExisting {
+        card_idx: usize,
+        buffer: String,
+    },
+    AttrListEditLimitExisting {
+        card_idx: usize,
+        buffer: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -527,6 +574,10 @@ pub enum MenuAction {
     EditEntryOverride,
     // Text card content editing
     EditTextContent,
+    // AttributeList-specific actions
+    EditAttrListAttr,
+    EditAttrListTemplate,
+    EditAttrListLimit,
     // Dashboard management
     DeleteDashboard,
 }
@@ -669,6 +720,20 @@ pub fn card_menu_items(card: &Card) -> Vec<MenuItem> {
             label: "Toggle ticker mode",
         });
     }
+    if let CardKind::AttributeList { .. } = &card.kind {
+        items.push(MenuItem {
+            action: MenuAction::EditAttrListAttr,
+            label: "Change attribute",
+        });
+        items.push(MenuItem {
+            action: MenuAction::EditAttrListTemplate,
+            label: "Edit template",
+        });
+        items.push(MenuItem {
+            action: MenuAction::EditAttrListLimit,
+            label: "Set limit",
+        });
+    }
     items.push(MenuItem {
         action: MenuAction::SetColorOverride,
         label: "Color override",
@@ -797,6 +862,7 @@ pub enum CardTypeStub {
     MediaPlayer,
     Image,
     Weather,
+    AttributeList,
 }
 
 impl CardTypeStub {
@@ -813,6 +879,7 @@ impl CardTypeStub {
         CardTypeStub::MediaPlayer,
         CardTypeStub::Image,
         CardTypeStub::Weather,
+        CardTypeStub::AttributeList,
     ];
     pub fn label(self) -> &'static str {
         match self {
@@ -828,6 +895,7 @@ impl CardTypeStub {
             CardTypeStub::MediaPlayer => "media player",
             CardTypeStub::Image => "image / camera",
             CardTypeStub::Weather => "weather",
+            CardTypeStub::AttributeList => "attribute list (entity attr array)",
         }
     }
 }
@@ -1025,7 +1093,8 @@ impl EditorState {
             | CardKind::Statistics { title, .. }
             | CardKind::MediaPlayer { title, .. }
             | CardKind::Image { title, .. }
-            | CardKind::Weather { title, .. } => {
+            | CardKind::Weather { title, .. }
+            | CardKind::AttributeList { title, .. } => {
                 *title = new_title;
             }
         }

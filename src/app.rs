@@ -518,6 +518,14 @@ impl App {
                                     friendly_name: fname,
                                     selected: 0,
                                 };
+                            } else if ct == CardTypeStub::AttributeList {
+                                let candidates = attr_array_keys(&self.instances, &inst, &eid);
+                                editor.mode = EditorMode::AttrListPickAttr {
+                                    instance: inst,
+                                    entity: eid,
+                                    candidates,
+                                    selected: 0,
+                                };
                             } else {
                                 editor.mode = EditorMode::EditingTitle {
                                     card_type: ct,
@@ -2699,6 +2707,236 @@ impl App {
                 }
                 return;
             }
+            // ---- AttributeList add-flow ----
+            EditorMode::AttrListPickAttr {
+                instance,
+                entity,
+                candidates,
+                selected,
+            } => {
+                let n = candidates.len();
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Up | KeyCode::Char('k') if *selected > 0 => *selected -= 1,
+                    KeyCode::Down | KeyCode::Char('j') if *selected + 1 < n => *selected += 1,
+                    KeyCode::Enter if n > 0 => {
+                        let attr = candidates[*selected].clone();
+                        let inst = instance.clone();
+                        let ent = entity.clone();
+                        editor.mode = EditorMode::AttrListEditTemplate {
+                            instance: inst,
+                            entity: ent,
+                            attribute: attr,
+                            buffer: String::new(),
+                        };
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::AttrListEditTemplate {
+                instance,
+                entity,
+                attribute,
+                buffer,
+            } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        buffer.pop();
+                    }
+                    KeyCode::Char(c) => buffer.push(c),
+                    KeyCode::Enter => {
+                        let template = if buffer.trim().is_empty() {
+                            "{name}: {state}".to_string()
+                        } else {
+                            buffer.trim().to_string()
+                        };
+                        let inst = instance.clone();
+                        let ent = entity.clone();
+                        let attr = attribute.clone();
+                        editor.mode = EditorMode::AttrListEditLimit {
+                            instance: inst,
+                            entity: ent,
+                            attribute: attr,
+                            template,
+                            buffer: String::new(),
+                        };
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::AttrListEditLimit {
+                instance,
+                entity,
+                attribute,
+                template,
+                buffer,
+            } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        buffer.pop();
+                    }
+                    KeyCode::Char(c) if c.is_ascii_digit() => buffer.push(c),
+                    KeyCode::Enter => {
+                        let limit = buffer.trim().parse::<usize>().ok();
+                        let inst = instance.clone();
+                        let ent = entity.clone();
+                        let attr = attribute.clone();
+                        let tmpl = template.clone();
+                        editor.mode = EditorMode::AttrListEditTitle {
+                            instance: inst,
+                            entity: ent,
+                            attribute: attr,
+                            template: tmpl,
+                            limit,
+                            buffer: String::new(),
+                        };
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::AttrListEditTitle {
+                instance,
+                entity,
+                attribute,
+                template,
+                limit,
+                buffer,
+            } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        buffer.pop();
+                    }
+                    KeyCode::Char(c) => buffer.push(c),
+                    KeyCode::Enter => {
+                        let title_raw = buffer.trim().to_string();
+                        let title = if title_raw.is_empty() {
+                            None
+                        } else {
+                            Some(title_raw)
+                        };
+                        let kind = CardKind::AttributeList {
+                            instance: instance.clone(),
+                            entity: entity.clone(),
+                            attribute: attribute.clone(),
+                            template: template.clone(),
+                            limit: *limit,
+                            title,
+                        };
+                        editor.mode = EditorMode::Browse;
+                        if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.snapshot(dash);
+                                ed.add_card(dash, kind);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            // ---- AttributeList in-place edit modes ----
+            EditorMode::AttrListEditAttrExisting {
+                card_idx,
+                candidates,
+                selected,
+            } => {
+                let n = candidates.len();
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Up | KeyCode::Char('k') if *selected > 0 => *selected -= 1,
+                    KeyCode::Down | KeyCode::Char('j') if *selected + 1 < n => *selected += 1,
+                    KeyCode::Enter if n > 0 => {
+                        let attr = candidates[*selected].clone();
+                        let idx = *card_idx;
+                        editor.mode = EditorMode::Browse;
+                        if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.snapshot(dash);
+                            }
+                            if let Some(card) = dash.card_mut(idx) {
+                                if let CardKind::AttributeList { attribute, .. } = &mut card.kind {
+                                    *attribute = attr;
+                                }
+                            }
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.dirty = true;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::AttrListEditTemplateExisting { card_idx, buffer } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        buffer.pop();
+                    }
+                    KeyCode::Char(c) => buffer.push(c),
+                    KeyCode::Enter => {
+                        let tmpl = buffer.trim().to_string();
+                        let idx = *card_idx;
+                        editor.mode = EditorMode::Browse;
+                        if !tmpl.is_empty() {
+                            if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                                if let Some(ed) = self.editor.as_mut() {
+                                    ed.snapshot(dash);
+                                }
+                                if let Some(card) = dash.card_mut(idx) {
+                                    if let CardKind::AttributeList { template, .. } = &mut card.kind
+                                    {
+                                        *template = tmpl;
+                                    }
+                                }
+                                if let Some(ed) = self.editor.as_mut() {
+                                    ed.dirty = true;
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::AttrListEditLimitExisting { card_idx, buffer } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Backspace => {
+                        buffer.pop();
+                    }
+                    KeyCode::Char(c) if c.is_ascii_digit() => buffer.push(c),
+                    KeyCode::Enter => {
+                        let limit = buffer.trim().parse::<usize>().ok();
+                        let idx = *card_idx;
+                        editor.mode = EditorMode::Browse;
+                        if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.snapshot(dash);
+                            }
+                            if let Some(card) = dash.card_mut(idx) {
+                                if let CardKind::AttributeList {
+                                    limit: card_limit, ..
+                                } = &mut card.kind
+                                {
+                                    *card_limit = limit;
+                                }
+                            }
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.dirty = true;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
             EditorMode::PickingTargetDashboard {
                 op,
                 source_card_idx,
@@ -3244,7 +3482,8 @@ impl App {
                         | crate::dashboard::CardKind::Statistics { title, .. }
                         | crate::dashboard::CardKind::MediaPlayer { title, .. }
                         | crate::dashboard::CardKind::Image { title, .. }
-                        | crate::dashboard::CardKind::Weather { title, .. } => title.clone(),
+                        | crate::dashboard::CardKind::Weather { title, .. }
+                        | crate::dashboard::CardKind::AttributeList { title, .. } => title.clone(),
                     })
                     .unwrap_or_default();
                 if let Some(ed) = self.editor.as_mut() {
@@ -3741,6 +3980,73 @@ impl App {
                     };
                 }
             }
+            (A::EditAttrListAttr, C::Card(idx)) => {
+                let (instance, entity) =
+                    match self.dashboards.get(dash_idx).and_then(|d| d.card(idx)) {
+                        Some(c) => {
+                            if let CardKind::AttributeList {
+                                instance, entity, ..
+                            } = &c.kind
+                            {
+                                (instance.clone(), entity.clone())
+                            } else {
+                                return;
+                            }
+                        }
+                        None => return,
+                    };
+                let candidates = attr_array_keys(&self.instances, &instance, &entity);
+                if let Some(ed) = self.editor.as_mut() {
+                    ed.selected_card = Some(idx);
+                    ed.mode = EditorMode::AttrListEditAttrExisting {
+                        card_idx: idx,
+                        candidates,
+                        selected: 0,
+                    };
+                }
+            }
+            (A::EditAttrListTemplate, C::Card(idx)) => {
+                let current = self
+                    .dashboards
+                    .get(dash_idx)
+                    .and_then(|d| d.card(idx))
+                    .and_then(|c| {
+                        if let CardKind::AttributeList { template, .. } = &c.kind {
+                            Some(template.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_default();
+                if let Some(ed) = self.editor.as_mut() {
+                    ed.selected_card = Some(idx);
+                    ed.mode = EditorMode::AttrListEditTemplateExisting {
+                        card_idx: idx,
+                        buffer: current,
+                    };
+                }
+            }
+            (A::EditAttrListLimit, C::Card(idx)) => {
+                let current = self
+                    .dashboards
+                    .get(dash_idx)
+                    .and_then(|d| d.card(idx))
+                    .and_then(|c| {
+                        if let CardKind::AttributeList { limit, .. } = &c.kind {
+                            limit.map(|n| n.to_string())
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_default();
+                if let Some(ed) = self.editor.as_mut() {
+                    ed.selected_card = Some(idx);
+                    ed.mode = EditorMode::AttrListEditLimitExisting {
+                        card_idx: idx,
+                        buffer: current,
+                    };
+                }
+            }
             (A::MoveToDashboard, C::Card(idx)) => {
                 if let Some(ed) = self.editor.as_mut() {
                     ed.selected_card = Some(idx);
@@ -4096,6 +4402,9 @@ impl App {
                 return;
             }
             CardKind::Weather { instance, .. } => (CardTypeStub::Weather, instance.clone(), None),
+            CardKind::AttributeList { instance, .. } => {
+                (CardTypeStub::AttributeList, instance.clone(), None)
+            }
         };
         editor.edit_target = Some(idx);
         editor.mode = if let Some((picked, orig_title, orig_items)) = prefill {
@@ -4841,7 +5150,7 @@ impl App {
     }
 
     fn move_selection(&mut self, delta: i32) {
-        // Special-case Dashboard: if the selected card is an EntityList, j/k
+        // Special-case Dashboard: if the selected card is a list-like card, j/k
         // navigates rows within that card; otherwise it moves between cards.
         if let Screen::Dashboard {
             idx,
@@ -4851,12 +5160,12 @@ impl App {
         {
             if let Some(dash) = self.dashboards.get(*idx) {
                 if let Some(card) = dash.card(*selected_card) {
-                    if let Some((_, entities)) = list_entities(card, &self.instances) {
-                        if entities.is_empty() {
+                    if let Some(count) = card_sub_row_count(card, &self.instances) {
+                        if count == 0 {
                             return;
                         }
                         let cur = i64::try_from(*sub_index).unwrap_or(0);
-                        let new = (cur + i64::from(delta)).clamp(0, entities.len() as i64 - 1);
+                        let new = (cur + i64::from(delta)).clamp(0, count as i64 - 1);
                         *sub_index = new as usize;
                         return;
                     }
@@ -5351,6 +5660,41 @@ pub fn list_entities(
     }
 }
 
+/// Number of j/k-navigable rows for list-like cards (EntityList, FilteredEntityList, AttributeList).
+/// Returns None for cards that don't have internal row navigation.
+pub fn card_sub_row_count(
+    card: &crate::dashboard::Card,
+    instances: &InstanceRegistry,
+) -> Option<usize> {
+    use crate::dashboard::CardKind as CK;
+    if let Some((_, entities)) = list_entities(card, instances) {
+        return Some(entities.len());
+    }
+    match &card.kind {
+        CK::AttributeList {
+            instance,
+            entity,
+            attribute,
+            limit,
+            ..
+        } => {
+            let arr_len = instances
+                .runtimes
+                .get(instance.as_str())
+                .and_then(|rt| rt.states.get(entity.as_str()))
+                .and_then(|s| s.attributes.get(attribute))
+                .and_then(|v| v.as_array())
+                .map(|a| a.len())
+                .unwrap_or(0);
+            Some(match limit {
+                Some(n) => arr_len.min(*n),
+                None => arr_len,
+            })
+        }
+        _ => None,
+    }
+}
+
 pub fn domain_prefix_for_type(kind: CardTypeStub) -> Option<&'static str> {
     match kind {
         CardTypeStub::MediaPlayer => Some("media_player."),
@@ -5358,6 +5702,29 @@ pub fn domain_prefix_for_type(kind: CardTypeStub) -> Option<&'static str> {
         // Image cards accept both `image.` and `camera.` entities — no single prefix filter.
         _ => None,
     }
+}
+
+/// Return the attribute keys of `entity` whose values are arrays, sorted alphabetically.
+pub fn attr_array_keys(
+    instances: &crate::ha::InstanceRegistry,
+    instance: &str,
+    entity: &str,
+) -> Vec<String> {
+    let attrs = instances
+        .runtimes
+        .get(instance)
+        .and_then(|rt| rt.states.get(entity))
+        .and_then(|s| s.attributes.as_object());
+    let Some(map) = attrs else {
+        return Vec::new();
+    };
+    let mut keys: Vec<String> = map
+        .iter()
+        .filter(|(_, v)| v.is_array())
+        .map(|(k, _)| k.clone())
+        .collect();
+    keys.sort();
+    keys
 }
 
 fn picker_mode_for(kind: CardTypeStub, instance: String) -> EditorMode {
@@ -5447,6 +5814,9 @@ fn build_typed_card(
         CardTypeStub::Weather => {
             unreachable!("Weather is built via WxEditShowForecast flow, not build_typed_card")
         }
+        CardTypeStub::AttributeList => {
+            unreachable!("AttributeList is built via AttrListPickAttr flow, not build_typed_card")
+        }
         CardTypeStub::MediaPlayer => CardKind::MediaPlayer {
             instance,
             entity,
@@ -5514,7 +5884,8 @@ fn build_card_kind(kind: CardTypeStub, buf: &str, default_alias: Option<&str>) -
         | CardTypeStub::Clock
         | CardTypeStub::Statistics
         | CardTypeStub::Image
-        | CardTypeStub::Weather => {
+        | CardTypeStub::Weather
+        | CardTypeStub::AttributeList => {
             unreachable!()
         }
     })

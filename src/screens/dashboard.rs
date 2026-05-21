@@ -502,5 +502,30 @@ fn render_card(
                 selected,
             );
         }
+        CardKind::AttributeList {
+            instance,
+            entity,
+            attribute,
+            template,
+            limit,
+            ..
+        } => {
+            let rt = app.instances.runtimes.get(instance);
+            widgets::card_attribute_list::render(
+                f,
+                rect,
+                &title,
+                instance,
+                entity,
+                attribute,
+                template,
+                *limit,
+                rt,
+                card.color.as_deref(),
+                &app.theme,
+                selected,
+                sub_index,
+            );
+        }
     }
 }

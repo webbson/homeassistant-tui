@@ -470,8 +470,100 @@ pub fn draw(f: &mut Frame, area: Rect, app: &mut App) {
                 &format!("Remove col {} from row {}? (y/n)", col_idx + 1, row_idx + 1),
             );
         }
+        // AttributeList add-flow
+        EditorMode::AttrListPickAttr {
+            candidates,
+            selected,
+            ..
+        } => draw_attr_list_pick_attr(f, area, candidates, *selected),
+        EditorMode::AttrListEditTemplate {
+            buffer, attribute, ..
+        } => {
+            draw_text_input(
+                f,
+                area,
+                " New attribute list (3/4) ",
+                &format!("Row template for \"{attribute}\" (e.g. {{rank}}. {{name}}, ${{dollars|round}})"),
+                buffer,
+            );
+        }
+        EditorMode::AttrListEditLimit { buffer, .. } => {
+            draw_text_input(
+                f,
+                area,
+                " New attribute list (4/4) ",
+                "Max rows (integer — Enter to show all)",
+                buffer,
+            );
+        }
+        EditorMode::AttrListEditTitle { buffer, .. } => {
+            draw_text_input(
+                f,
+                area,
+                " New attribute list — title ",
+                "Title (optional — Enter to use entity name)",
+                buffer,
+            );
+        }
+        // AttributeList in-place edit modes
+        EditorMode::AttrListEditAttrExisting {
+            candidates,
+            selected,
+            ..
+        } => draw_attr_list_pick_attr(f, area, candidates, *selected),
+        EditorMode::AttrListEditTemplateExisting { buffer, .. } => {
+            draw_text_input(
+                f,
+                area,
+                " Edit template ",
+                "Row template (e.g. {rank}. {name}, ${dollars|round})",
+                buffer,
+            );
+        }
+        EditorMode::AttrListEditLimitExisting { buffer, .. } => {
+            draw_text_input(
+                f,
+                area,
+                " Edit limit ",
+                "Max rows (integer — Enter to clear limit)",
+                buffer,
+            );
+        }
         EditorMode::Browse => {}
     }
+}
+
+fn draw_attr_list_pick_attr(f: &mut Frame, area: Rect, candidates: &[String], selected: usize) {
+    let height = (candidates.len() + 2).max(5).min(18) as u16;
+    let r = modal_rect(area, 52, height);
+    f.render_widget(Clear, r);
+    let block =
+        Block::bordered().title(" New attribute list (2/4) — pick attribute (j/k + Enter) ");
+    let inner = block.inner(r);
+    f.render_widget(block, r);
+    if candidates.is_empty() {
+        f.render_widget(
+            Paragraph::new("No array attributes found on this entity.").style(Style::new().dim()),
+            inner,
+        );
+        return;
+    }
+    let items: Vec<ListItem> = candidates
+        .iter()
+        .enumerate()
+        .map(|(i, key)| {
+            let style = if i == selected {
+                Style::new().bold().fg(Color::Yellow)
+            } else {
+                Style::new()
+            };
+            ListItem::new(key.as_str()).style(style)
+        })
+        .collect();
+    let mut state = ListState::default();
+    state.select(Some(selected));
+    let list = List::new(items);
+    f.render_stateful_widget(list, inner, &mut state);
 }
 
 fn draw_new_dashboard_layout_picker(f: &mut Frame, area: Rect, selected: usize) {
