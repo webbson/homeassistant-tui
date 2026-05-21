@@ -1,7 +1,8 @@
 use crate::dashboard::{
-    BarOrientation, Card, CardKind, CardSize, Dashboard, DashboardLayout, EntityListItem,
-    GraphSeries, GraphType, Pos, RowHeight, StatsMetric,
+    BarOrientation, Card, CardKind, CardSize, Dashboard, DashboardLayout, GraphSeries, GraphType,
+    Pos, RowHeight, StatsMetric,
 };
+use tui_input::Input as TInput;
 
 const MAX_UNDO: usize = 32;
 
@@ -41,7 +42,7 @@ pub enum EditorMode {
     PickingEntity {
         card_type: CardTypeStub,
         instance: String,
-        query: String,
+        query: TInput,
         selected: usize,
     },
     /// Entity picked — optional title override (Enter on empty = use friendly_name).
@@ -50,32 +51,26 @@ pub enum EditorMode {
         instance: String,
         entity: String,
         friendly_name: String,
-        title_buffer: String,
+        title_buffer: TInput,
     },
     /// Text card body input.
     EditingTextBody {
-        title_buffer: String,
-        body_buffer: String,
+        title_buffer: TInput,
+        body_buffer: TInput,
         focus_body: bool,
     },
     /// Multi-select entity picker (used only for EntityList card type).
     PickingMulti {
         instance: String,
-        query: String,
+        query: TInput,
         selected: usize,
         picked: Vec<(String, String)>,
-        /// Original title when editing an existing card; `None` for new cards.
-        original_title: Option<String>,
-        /// Original items when editing an existing card; preserves `Full` variants.
-        original_items: Vec<EntityListItem>,
     },
     /// Title input for the in-progress EntityList card.
     EditingEntityListTitle {
         instance: String,
         picked: Vec<(String, String)>,
-        title_buffer: String,
-        /// Original items from the card being edited; used to preserve `Full` variants.
-        original_items: Vec<EntityListItem>,
+        title_buffer: TInput,
     },
     /// Edit per-entry display overrides (name, hide_state) for a specific row in
     /// an EntityList or FilteredEntityList card.
@@ -84,8 +79,8 @@ pub enum EditorMode {
         item_idx: usize,
         /// `Some(entity_id)` for FilteredEntityList rows (keyed by id in the overrides map);
         /// `None` for EntityList rows (stored directly on the item).
-        entity_id: Option<String>,
-        name_buf: String,
+        entity_id: Option<TInput>,
+        name_buf: TInput,
         hide_state: bool,
         /// Only `true` for the FilteredEntityList path while the user is still
         /// typing the entity_id (before they press Tab or Enter to move to name).
@@ -93,12 +88,12 @@ pub enum EditorMode {
     },
     /// Rename current dashboard.
     Renaming {
-        buffer: String,
+        buffer: TInput,
     },
     /// Adjust grid dimensions.
     ResizingGrid {
-        cols_buffer: String,
-        rows_buffer: String,
+        cols_buffer: TInput,
+        rows_buffer: TInput,
         focus_rows: bool,
     },
     /// Confirm dialog before exiting with unsaved changes.
@@ -108,18 +103,18 @@ pub enum EditorMode {
     /// Rename the title of the selected card.
     RenamingCard {
         card_idx: usize,
-        buffer: String,
+        buffer: TInput,
     },
     /// Edit the sparkline window (e.g. "1h", "24h", "7d") for the selected card.
     EditingWindow {
         card_idx: usize,
-        buffer: String,
+        buffer: TInput,
     },
     /// Compose / edit a FilteredEntityList query + title + hide_state.
     EditingFilterQuery {
         instance: String,
-        query_buffer: String,
-        title_buffer: String,
+        query_buffer: TInput,
+        title_buffer: TInput,
         hide_state: bool,
         focus: FilterFocus,
     },
@@ -132,7 +127,7 @@ pub enum EditorMode {
     /// Enter a named color or #rrggbb for the selected card.
     EnterColorOverride {
         card_idx: usize,
-        buf: String,
+        buf: TInput,
     },
     /// Pick Small / Normal / Large for the selected card.
     PickCardSize {
@@ -152,7 +147,7 @@ pub enum EditorMode {
         instance: String,
         graph_type: GraphType,
         accumulated: Vec<GraphSeries>,
-        query: String,
+        query: TInput,
         selected: usize,
         /// true while we're showing the "add another? (y/n)" prompt
         asking_more: bool,
@@ -162,8 +157,8 @@ pub enum EditorMode {
         instance: String,
         graph_type: GraphType,
         series: Vec<GraphSeries>,
-        window_buf: String,
-        title_buf: String,
+        window_buf: TInput,
+        title_buf: TInput,
         title_stage: bool,
     },
     /// Step 4b (Bar): pick orientation.
@@ -171,14 +166,14 @@ pub enum EditorMode {
         instance: String,
         series: Vec<GraphSeries>,
         current: BarOrientation,
-        title_buf: String,
+        title_buf: TInput,
         title_stage: bool,
     },
     // ---- Graph context-menu flows ----
     /// Add one series to an existing Graph card.
     GraphAddOneSeries {
         card_idx: usize,
-        query: String,
+        query: TInput,
         selected: usize,
     },
     /// Pick which series to operate on.
@@ -191,18 +186,18 @@ pub enum EditorMode {
     GraphEditSeriesColor {
         card_idx: usize,
         series_idx: usize,
-        buf: String,
+        buf: TInput,
     },
     /// Edit the label of one series.
     GraphEditSeriesLabel {
         card_idx: usize,
         series_idx: usize,
-        buf: String,
+        buf: TInput,
     },
     /// Edit window on an existing Graph card (from menu).
     GraphEditWindow {
         card_idx: usize,
-        buf: String,
+        buf: TInput,
     },
     /// Pick orientation on an existing Bar Graph card (from menu).
     GraphPickOrientation {
@@ -213,47 +208,47 @@ pub enum EditorMode {
     /// Step 1 of 3: enter the "green" lower threshold.
     EditSeverityGreen {
         card_idx: usize,
-        buf: String,
+        buf: TInput,
         accum: SeverityAccum,
     },
     /// Step 2 of 3: enter the "yellow" warning threshold.
     EditSeverityYellow {
         card_idx: usize,
-        buf: String,
+        buf: TInput,
         accum: SeverityAccum,
     },
     /// Step 3 of 3: enter the "red" critical threshold.
     EditSeverityRed {
         card_idx: usize,
-        buf: String,
+        buf: TInput,
         accum: SeverityAccum,
     },
     // ---- Clock add-flow ----
     /// Step 1: optional title.
     ClockAddTitle {
-        title_buffer: String,
+        title_buffer: TInput,
     },
     /// Step 2: strftime format string.
     ClockAddFormat {
         title: Option<String>,
-        format_buffer: String,
+        format_buffer: TInput,
     },
     /// Step 3: optional IANA timezone (empty = local).
     ClockAddTimezone {
         title: Option<String>,
         format: String,
-        tz_buffer: String,
+        tz_buffer: TInput,
     },
     // ---- Clock context-menu flows ----
     /// Edit the strftime format of an existing Clock card.
     ClockEditFormat {
         card_idx: usize,
-        buf: String,
+        buf: TInput,
     },
     /// Edit the timezone of an existing Clock card.
     ClockEditTimezone {
         card_idx: usize,
-        buf: String,
+        buf: TInput,
     },
     // ---- Statistics add-flow ----
     /// Step 3 (after entity pick): choose Avg/Min/Max/Sum/Count.
@@ -269,7 +264,7 @@ pub enum EditorMode {
         entity: String,
         friendly_name: String,
         metric: StatsMetric,
-        buf: String,
+        buf: TInput,
     },
     /// Step 5: optional unit string.
     StatsEditUnitAdd {
@@ -278,7 +273,7 @@ pub enum EditorMode {
         friendly_name: String,
         metric: StatsMetric,
         window: String,
-        buf: String,
+        buf: TInput,
     },
     /// Step 6: optional title.
     StatsEditTitleAdd {
@@ -288,7 +283,7 @@ pub enum EditorMode {
         metric: StatsMetric,
         window: String,
         unit: Option<String>,
-        buf: String,
+        buf: TInput,
     },
     // ---- Statistics context-menu flows ----
     /// Edit the metric of an existing Statistics card.
@@ -299,12 +294,12 @@ pub enum EditorMode {
     /// Edit the window of an existing Statistics card.
     StatsEditWindow {
         card_idx: usize,
-        buf: String,
+        buf: TInput,
     },
     /// Edit the unit of an existing Statistics card.
     StatsEditUnit {
         card_idx: usize,
-        buf: String,
+        buf: TInput,
     },
     // ---- Image add-flow ----
     /// Step 1: pick source kind — 1 = image entity, 2 = camera.
@@ -317,7 +312,7 @@ pub enum EditorMode {
         entity: String,
         friendly_name: String,
         is_camera: bool,
-        buf: String,
+        buf: TInput,
     },
     /// Step 3: optional title override.
     ImageEditTitleAdd {
@@ -326,7 +321,7 @@ pub enum EditorMode {
         friendly_name: String,
         is_camera: bool,
         refresh_seconds: Option<u32>,
-        buf: String,
+        buf: TInput,
     },
     // ---- Weather add-flow ----
     /// Step 3 (after entity pick): toggle show_forecast on/off.
@@ -342,7 +337,7 @@ pub enum EditorMode {
         entity: String,
         friendly_name: String,
         show_forecast: bool,
-        buf: String,
+        buf: TInput,
     },
     /// Step 5: optional title.
     WxEditTitleAdd {
@@ -351,7 +346,7 @@ pub enum EditorMode {
         friendly_name: String,
         show_forecast: bool,
         forecast_days: u8,
-        buf: String,
+        buf: TInput,
     },
     /// Pick which EntityList item to edit an override for.
     /// Opened before `EditEntityListItemOverride` for EntityList cards so the
@@ -394,17 +389,17 @@ pub enum EditorMode {
     // ---- Grid structural flows ----
     /// Enter height for a new row (integer terminal rows or "auto").
     PickingNewRowHeight {
-        buf: String,
+        buf: TInput,
     },
     /// Enter number of columns for the new row (after height was accepted).
     PickingNewRowColumnCount {
         height: RowHeight,
-        buf: String,
+        buf: TInput,
     },
     /// Edit the height of an existing row.
     EditingRowHeight {
         row_idx: usize,
-        buf: String,
+        buf: TInput,
     },
     /// Confirm before removing a row.
     ConfirmRemoveRow {
@@ -414,6 +409,49 @@ pub enum EditorMode {
     ConfirmRemoveColumn {
         row_idx: usize,
         col_idx: usize,
+    },
+    // ---- AttributeList add-flow ----
+    /// Pick which array-typed attribute to render.
+    AttrListPickAttr {
+        instance: String,
+        entity: String,
+        candidates: Vec<String>,
+        selected: usize,
+    },
+    AttrListEditTemplate {
+        instance: String,
+        entity: String,
+        attribute: String,
+        buffer: TInput,
+    },
+    AttrListEditLimit {
+        instance: String,
+        entity: String,
+        attribute: String,
+        template: String,
+        buffer: TInput,
+    },
+    AttrListEditTitle {
+        instance: String,
+        entity: String,
+        attribute: String,
+        template: String,
+        limit: Option<usize>,
+        buffer: TInput,
+    },
+    // ---- AttributeList in-place edit modes (via card menu) ----
+    AttrListEditAttrExisting {
+        card_idx: usize,
+        candidates: Vec<String>,
+        selected: usize,
+    },
+    AttrListEditTemplateExisting {
+        card_idx: usize,
+        buffer: TInput,
+    },
+    AttrListEditLimitExisting {
+        card_idx: usize,
+        buffer: TInput,
     },
 }
 
@@ -529,6 +567,10 @@ pub enum MenuAction {
     EditTextContent,
     // Dashboard management
     DeleteDashboard,
+    // AttributeList-specific actions
+    EditAttrListAttr,
+    EditAttrListTemplate,
+    EditAttrListLimit,
 }
 
 #[derive(Debug, Clone)]
@@ -669,6 +711,20 @@ pub fn card_menu_items(card: &Card) -> Vec<MenuItem> {
             label: "Toggle ticker mode",
         });
     }
+    if matches!(card.kind, CardKind::AttributeList { .. }) {
+        items.push(MenuItem {
+            action: MenuAction::EditAttrListAttr,
+            label: "Change attribute",
+        });
+        items.push(MenuItem {
+            action: MenuAction::EditAttrListTemplate,
+            label: "Edit template",
+        });
+        items.push(MenuItem {
+            action: MenuAction::EditAttrListLimit,
+            label: "Set limit",
+        });
+    }
     items.push(MenuItem {
         action: MenuAction::SetColorOverride,
         label: "Color override",
@@ -797,6 +853,7 @@ pub enum CardTypeStub {
     MediaPlayer,
     Image,
     Weather,
+    AttributeList,
 }
 
 impl CardTypeStub {
@@ -813,6 +870,7 @@ impl CardTypeStub {
         CardTypeStub::MediaPlayer,
         CardTypeStub::Image,
         CardTypeStub::Weather,
+        CardTypeStub::AttributeList,
     ];
     pub fn label(self) -> &'static str {
         match self {
@@ -828,6 +886,7 @@ impl CardTypeStub {
             CardTypeStub::MediaPlayer => "media player",
             CardTypeStub::Image => "image / camera",
             CardTypeStub::Weather => "weather",
+            CardTypeStub::AttributeList => "attribute list (entity attr array)",
         }
     }
 }
@@ -1025,7 +1084,8 @@ impl EditorState {
             | CardKind::Statistics { title, .. }
             | CardKind::MediaPlayer { title, .. }
             | CardKind::Image { title, .. }
-            | CardKind::Weather { title, .. } => {
+            | CardKind::Weather { title, .. }
+            | CardKind::AttributeList { title, .. } => {
                 *title = new_title;
             }
         }

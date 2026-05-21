@@ -14,6 +14,9 @@ use ratatui::Terminal;
 use tokio::sync::mpsc;
 use tracing::{error, info};
 
+use tui_input::backend::crossterm::EventHandler as TInputHandler;
+use tui_input::Input as TInput;
+
 use crate::config::{self, Alias, Config};
 use crate::dashboard::editor::{CardTypeStub, EditorMode, EditorState};
 use crate::dashboard::{self, CardKind, Dashboard};
@@ -452,13 +455,10 @@ impl App {
                     },
                     other => domain_prefix_for_type(other),
                 };
-                let rows = entity_search_filtered(&self.instances, instance, query, domain_prefix);
+                let rows =
+                    entity_search_filtered(&self.instances, instance, query.value(), domain_prefix);
                 match k.code {
                     KeyCode::Esc => editor.mode = EditorMode::Browse,
-                    KeyCode::Backspace => {
-                        query.pop();
-                        *selected = 0;
-                    }
                     KeyCode::Up if *selected > 0 => {
                         *selected -= 1;
                     }
@@ -470,10 +470,6 @@ impl App {
                     }
                     KeyCode::PageDown => {
                         *selected = (*selected + 10).min(rows.len().saturating_sub(1));
-                    }
-                    KeyCode::Char(c) => {
-                        query.push(c);
-                        *selected = 0;
                     }
                     KeyCode::Enter => {
                         if let Some(pick) = rows.get(*selected) {
@@ -498,7 +494,7 @@ impl App {
                                         entity: eid,
                                         friendly_name: fname,
                                         is_camera: true,
-                                        buf: String::new(),
+                                        buf: TInput::default(),
                                     };
                                 } else {
                                     // image entity — skip refresh_seconds step
@@ -508,7 +504,7 @@ impl App {
                                         friendly_name: fname,
                                         is_camera: false,
                                         refresh_seconds: None,
-                                        buf: String::new(),
+                                        buf: TInput::default(),
                                     };
                                 }
                             } else if ct == CardTypeStub::Weather {
@@ -518,18 +514,34 @@ impl App {
                                     friendly_name: fname,
                                     selected: 0,
                                 };
+                            } else if ct == CardTypeStub::AttributeList {
+                                let candidates = attr_array_keys(&self.instances, &inst, &eid);
+                                editor.mode = EditorMode::AttrListPickAttr {
+                                    instance: inst,
+                                    entity: eid,
+                                    candidates,
+                                    selected: 0,
+                                };
                             } else {
                                 editor.mode = EditorMode::EditingTitle {
                                     card_type: ct,
                                     instance: inst,
                                     entity: eid,
                                     friendly_name: fname,
-                                    title_buffer: String::new(),
+                                    title_buffer: TInput::default(),
                                 };
                             }
                         }
                     }
-                    _ => {}
+                    _ => {
+                        if query
+                            .handle_event(&CtEvent::Key(k))
+                            .map(|s| s.value)
+                            .unwrap_or(false)
+                        {
+                            *selected = 0;
+                        }
+                    }
                 }
                 return;
             }
@@ -542,22 +554,18 @@ impl App {
             } => {
                 match k.code {
                     KeyCode::Esc => editor.mode = EditorMode::Browse,
-                    KeyCode::Backspace => {
-                        title_buffer.pop();
-                    }
-                    KeyCode::Char(c) => title_buffer.push(c),
                     KeyCode::Enter => {
                         let ct = *card_type;
                         let inst = instance.clone();
                         let ent = entity.clone();
-                        let title = if title_buffer.trim().is_empty() {
+                        let title = if title_buffer.value().trim().is_empty() {
                             if friendly_name.is_empty() {
                                 None
                             } else {
                                 Some(friendly_name.clone())
                             }
                         } else {
-                            Some(title_buffer.trim().to_string())
+                            Some(title_buffer.value().trim().to_string())
                         };
                         editor.mode = EditorMode::Browse;
                         let kind = build_typed_card(ct, inst, ent, title);
@@ -570,7 +578,9 @@ impl App {
                         editor2.snapshot(dash);
                         editor2.add_card(dash, kind);
                     }
-                    _ => {}
+                    _ => {
+                        title_buffer.handle_event(&CtEvent::Key(k));
+                    }
                 }
                 return;
             }
@@ -579,16 +589,10 @@ impl App {
                 query,
                 selected,
                 picked,
-                original_title,
-                original_items,
             } => {
-                let rows = entity_search(&self.instances, instance, query);
+                let rows = entity_search(&self.instances, instance, query.value());
                 match k.code {
                     KeyCode::Esc => editor.mode = EditorMode::Browse,
-                    KeyCode::Backspace => {
-                        query.pop();
-                        *selected = 0;
-                    }
                     KeyCode::Up if *selected > 0 => {
                         *selected -= 1;
                     }
@@ -605,10 +609,6 @@ impl App {
                             }
                         }
                     }
-                    KeyCode::Char(c) => {
-                        query.push(c);
-                        *selected = 0;
-                    }
                     KeyCode::Enter => {
                         if picked.is_empty() {
                             // Treat Enter as toggle when no picks yet, then continue.
@@ -619,16 +619,21 @@ impl App {
                         }
                         let inst = instance.clone();
                         let p = picked.clone();
-                        let orig_t = original_title.clone();
-                        let orig_i = original_items.clone();
                         editor.mode = EditorMode::EditingEntityListTitle {
                             instance: inst,
                             picked: p,
-                            title_buffer: orig_t.unwrap_or_default(),
-                            original_items: orig_i,
+                            title_buffer: TInput::default(),
                         };
                     }
-                    _ => {}
+                    _ => {
+                        if query
+                            .handle_event(&CtEvent::Key(k))
+                            .map(|s| s.value)
+                            .unwrap_or(false)
+                        {
+                            *selected = 0;
+                        }
+                    }
                 }
                 return;
             }
@@ -636,32 +641,19 @@ impl App {
                 instance,
                 picked,
                 title_buffer,
-                original_items,
             } => {
                 match k.code {
                     KeyCode::Esc => editor.mode = EditorMode::Browse,
-                    KeyCode::Backspace => {
-                        title_buffer.pop();
-                    }
-                    KeyCode::Char(c) => title_buffer.push(c),
                     KeyCode::Enter => {
-                        let title = if title_buffer.trim().is_empty() {
+                        let title = if title_buffer.value().trim().is_empty() {
                             None
                         } else {
-                            Some(title_buffer.trim().to_string())
+                            Some(title_buffer.value().trim().to_string())
                         };
                         let inst = instance.clone();
                         let entities: Vec<crate::dashboard::EntityListItem> = picked
                             .iter()
-                            .map(|(eid, _)| {
-                                original_items
-                                    .iter()
-                                    .find(|item| item.entity_id() == eid.as_str())
-                                    .cloned()
-                                    .unwrap_or_else(|| {
-                                        crate::dashboard::EntityListItem::Bare(eid.clone())
-                                    })
-                            })
+                            .map(|(eid, _)| crate::dashboard::EntityListItem::Bare(eid.clone()))
                             .collect();
                         editor.mode = EditorMode::Browse;
                         let kind = CardKind::EntityList {
@@ -678,7 +670,9 @@ impl App {
                         editor2.snapshot(dash);
                         editor2.add_card(dash, kind);
                     }
-                    _ => {}
+                    _ => {
+                        title_buffer.handle_event(&CtEvent::Key(k));
+                    }
                 }
                 return;
             }
@@ -722,7 +716,7 @@ impl App {
                             card_idx: cidx,
                             item_idx,
                             entity_id: None, // EntityList uses positional index, not keyed id
-                            name_buf: current_name,
+                            name_buf: TInput::from(current_name.as_str()),
                             hide_state: current_hide,
                             focus_entity_id: false,
                         };
@@ -753,24 +747,6 @@ impl App {
                             *hide_state = !*hide_state;
                         }
                     }
-                    KeyCode::Backspace => {
-                        if *focus_entity_id {
-                            if let Some(eid_buf) = entity_id.as_mut() {
-                                eid_buf.pop();
-                            }
-                        } else {
-                            name_buf.pop();
-                        }
-                    }
-                    KeyCode::Char(c) => {
-                        if *focus_entity_id {
-                            if let Some(eid_buf) = entity_id.as_mut() {
-                                eid_buf.push(c);
-                            }
-                        } else {
-                            name_buf.push(c);
-                        }
-                    }
                     KeyCode::Enter => {
                         if *focus_entity_id {
                             // Confirm entity_id field and move focus to name field
@@ -779,11 +755,11 @@ impl App {
                         }
                         let card_idx = *card_idx;
                         let item_idx = *item_idx;
-                        let entity_id = entity_id.clone();
-                        let name = if name_buf.trim().is_empty() {
+                        let entity_id = entity_id.as_ref().map(|e| e.value().to_string());
+                        let name = if name_buf.value().trim().is_empty() {
                             None
                         } else {
-                            Some(name_buf.trim().to_string())
+                            Some(name_buf.value().trim().to_string())
                         };
                         let hide = *hide_state;
                         editor.mode = EditorMode::Browse;
@@ -834,7 +810,15 @@ impl App {
                             editor2.dirty = true;
                         }
                     }
-                    _ => {}
+                    _ => {
+                        if *focus_entity_id {
+                            if let Some(eid_buf) = entity_id.as_mut() {
+                                eid_buf.handle_event(&CtEvent::Key(k));
+                            }
+                        } else {
+                            name_buf.handle_event(&CtEvent::Key(k));
+                        }
+                    }
                 }
                 return;
             }
@@ -846,34 +830,21 @@ impl App {
                 match k.code {
                     KeyCode::Esc => editor.mode = EditorMode::Browse,
                     KeyCode::Tab => *focus_body = !*focus_body,
-                    KeyCode::Backspace => {
-                        if *focus_body {
-                            body_buffer.pop();
-                        } else {
-                            title_buffer.pop();
-                        }
-                    }
-                    KeyCode::Char(c) => {
-                        if *focus_body {
-                            body_buffer.push(c);
-                        } else {
-                            title_buffer.push(c);
-                        }
-                    }
                     KeyCode::Enter => {
                         if *focus_body {
-                            body_buffer.push('\n');
+                            use tui_input::InputRequest;
+                            body_buffer.handle(InputRequest::InsertChar('\n'));
                         } else {
                             *focus_body = true;
                         }
                     }
                     KeyCode::F(2) => {
-                        let title = if title_buffer.trim().is_empty() {
+                        let title = if title_buffer.value().trim().is_empty() {
                             None
                         } else {
-                            Some(title_buffer.trim().to_string())
+                            Some(title_buffer.value().trim().to_string())
                         };
-                        let body = body_buffer.clone();
+                        let body = body_buffer.value().to_string();
                         editor.mode = EditorMode::Browse;
                         let kind = CardKind::Text {
                             markdown: body,
@@ -888,7 +859,13 @@ impl App {
                         editor2.snapshot(dash);
                         editor2.add_card(dash, kind);
                     }
-                    _ => {}
+                    _ => {
+                        if *focus_body {
+                            body_buffer.handle_event(&CtEvent::Key(k));
+                        } else {
+                            title_buffer.handle_event(&CtEvent::Key(k));
+                        }
+                    }
                 }
                 return;
             }
@@ -930,12 +907,8 @@ impl App {
             EditorMode::Renaming { buffer } => {
                 match k.code {
                     KeyCode::Esc => editor.mode = EditorMode::Browse,
-                    KeyCode::Backspace => {
-                        buffer.pop();
-                    }
-                    KeyCode::Char(c) => buffer.push(c),
                     KeyCode::Enter => {
-                        let new_name = buffer.trim().to_string();
+                        let new_name = buffer.value().trim().to_string();
                         editor.mode = EditorMode::Browse;
                         if !new_name.is_empty() {
                             if let Some(dash) = self.dashboards.get_mut(dash_idx) {
@@ -947,7 +920,9 @@ impl App {
                             }
                         }
                     }
-                    _ => {}
+                    _ => {
+                        buffer.handle_event(&CtEvent::Key(k));
+                    }
                 }
                 return;
             }
@@ -959,23 +934,9 @@ impl App {
                 match k.code {
                     KeyCode::Esc => editor.mode = EditorMode::Browse,
                     KeyCode::Tab => *focus_rows = !*focus_rows,
-                    KeyCode::Backspace => {
-                        if *focus_rows {
-                            rows_buffer.pop();
-                        } else {
-                            cols_buffer.pop();
-                        }
-                    }
-                    KeyCode::Char(c) if c.is_ascii_digit() => {
-                        if *focus_rows {
-                            rows_buffer.push(c);
-                        } else {
-                            cols_buffer.push(c);
-                        }
-                    }
                     KeyCode::Enter => {
-                        let cols: u16 = cols_buffer.parse().unwrap_or(0);
-                        let rows: u16 = rows_buffer.parse().unwrap_or(0);
+                        let cols: u16 = cols_buffer.value().parse().unwrap_or(0);
+                        let rows: u16 = rows_buffer.value().parse().unwrap_or(0);
                         editor.mode = EditorMode::Browse;
                         if cols > 0 && rows > 0 {
                             if let Some(dash) = self.dashboards.get_mut(dash_idx) {
@@ -993,7 +954,13 @@ impl App {
                             }
                         }
                     }
-                    _ => {}
+                    _ => {
+                        if *focus_rows {
+                            rows_buffer.handle_event(&CtEvent::Key(k));
+                        } else {
+                            cols_buffer.handle_event(&CtEvent::Key(k));
+                        }
+                    }
                 }
                 return;
             }
@@ -1014,30 +981,16 @@ impl App {
                             F::HideToggle => F::Query,
                         };
                     }
-                    KeyCode::Backspace => match *focus {
-                        F::Query => {
-                            query_buffer.pop();
-                        }
-                        F::Title => {
-                            title_buffer.pop();
-                        }
-                        F::HideToggle => {}
-                    },
                     KeyCode::Char(' ') if matches!(*focus, F::HideToggle) => {
                         *hide_state = !*hide_state;
                     }
-                    KeyCode::Char(c) => match *focus {
-                        F::Query => query_buffer.push(c),
-                        F::Title => title_buffer.push(c),
-                        F::HideToggle => {}
-                    },
                     KeyCode::F(2) => {
                         let inst = instance.clone();
-                        let q = query_buffer.trim().to_string();
-                        let title = if title_buffer.trim().is_empty() {
+                        let q = query_buffer.value().trim().to_string();
+                        let title = if title_buffer.value().trim().is_empty() {
                             None
                         } else {
-                            Some(title_buffer.trim().to_string())
+                            Some(title_buffer.value().trim().to_string())
                         };
                         let hide = *hide_state;
                         editor.mode = EditorMode::Browse;
@@ -1066,7 +1019,15 @@ impl App {
                         editor2.snapshot(dash);
                         editor2.add_card(dash, kind);
                     }
-                    _ => {}
+                    _ => match *focus {
+                        F::Query => {
+                            query_buffer.handle_event(&CtEvent::Key(k));
+                        }
+                        F::Title => {
+                            title_buffer.handle_event(&CtEvent::Key(k));
+                        }
+                        F::HideToggle => {}
+                    },
                 }
                 return;
             }
@@ -1100,13 +1061,9 @@ impl App {
             EditorMode::EditingWindow { card_idx, buffer } => {
                 match k.code {
                     KeyCode::Esc => editor.mode = EditorMode::Browse,
-                    KeyCode::Backspace => {
-                        buffer.pop();
-                    }
-                    KeyCode::Char(c) => buffer.push(c),
                     KeyCode::Enter => {
                         let idx = *card_idx;
-                        let new_window = buffer.trim().to_string();
+                        let new_window = buffer.value().trim().to_string();
                         editor.mode = EditorMode::Browse;
                         if !new_window.is_empty() {
                             let mut entity_to_refetch: Option<(String, String, u32)> = None;
@@ -1149,23 +1106,21 @@ impl App {
                             }
                         }
                     }
-                    _ => {}
+                    _ => {
+                        buffer.handle_event(&CtEvent::Key(k));
+                    }
                 }
                 return;
             }
             EditorMode::RenamingCard { card_idx, buffer } => {
                 match k.code {
                     KeyCode::Esc => editor.mode = EditorMode::Browse,
-                    KeyCode::Backspace => {
-                        buffer.pop();
-                    }
-                    KeyCode::Char(c) => buffer.push(c),
                     KeyCode::Enter => {
                         let idx = *card_idx;
-                        let new_title = if buffer.trim().is_empty() {
+                        let new_title = if buffer.value().trim().is_empty() {
                             None
                         } else {
-                            Some(buffer.trim().to_string())
+                            Some(buffer.value().trim().to_string())
                         };
                         editor.mode = EditorMode::Browse;
                         if let Some(dash) = self.dashboards.get_mut(dash_idx) {
@@ -1175,20 +1130,18 @@ impl App {
                             }
                         }
                     }
-                    _ => {}
+                    _ => {
+                        buffer.handle_event(&CtEvent::Key(k));
+                    }
                 }
                 return;
             }
             EditorMode::EnterColorOverride { card_idx, buf } => {
                 match k.code {
                     KeyCode::Esc => editor.mode = EditorMode::Browse,
-                    KeyCode::Backspace => {
-                        buf.pop();
-                    }
-                    KeyCode::Char(c) => buf.push(c),
                     KeyCode::Enter => {
                         let idx = *card_idx;
-                        let trimmed = buf.trim().to_string();
+                        let trimmed = buf.value().trim().to_string();
                         if trimmed.is_empty() {
                             // Clear override
                             editor.mode = EditorMode::Browse;
@@ -1230,7 +1183,9 @@ impl App {
                             }
                         }
                     }
-                    _ => {}
+                    _ => {
+                        buf.handle_event(&CtEvent::Key(k));
+                    }
                 }
                 return;
             }
@@ -1313,7 +1268,7 @@ impl App {
                                 instance: inst,
                                 graph_type: gt,
                                 accumulated: Vec::new(),
-                                query: String::new(),
+                                query: TInput::default(),
                                 selected: 0,
                                 asking_more: false,
                             };
@@ -1328,7 +1283,7 @@ impl App {
                                 instance: inst,
                                 graph_type: gt,
                                 accumulated: Vec::new(),
-                                query: String::new(),
+                                query: TInput::default(),
                                 selected: 0,
                                 asking_more: false,
                             };
@@ -1350,7 +1305,7 @@ impl App {
                     match k.code {
                         KeyCode::Char('y') | KeyCode::Char('Y') => {
                             *asking_more = false;
-                            *query = String::new();
+                            *query = TInput::default();
                             *selected = 0;
                         }
                         KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
@@ -1369,7 +1324,7 @@ impl App {
                     }
                     return;
                 }
-                let rows = entity_search(&self.instances, instance, query);
+                let rows = entity_search(&self.instances, instance, query.value());
                 match k.code {
                     KeyCode::Esc => {
                         // Esc with at least one entity = done
@@ -1382,17 +1337,9 @@ impl App {
                             editor.mode = EditorMode::Browse;
                         }
                     }
-                    KeyCode::Backspace => {
-                        query.pop();
-                        *selected = 0;
-                    }
                     KeyCode::Up | KeyCode::Char('k') if *selected > 0 => *selected -= 1,
                     KeyCode::Down | KeyCode::Char('j') if *selected + 1 < rows.len() => {
                         *selected += 1;
-                    }
-                    KeyCode::Char(c) => {
-                        query.push(c);
-                        *selected = 0;
                     }
                     KeyCode::Enter => {
                         if let Some(pick) = rows.get(*selected) {
@@ -1405,7 +1352,15 @@ impl App {
                             *asking_more = true;
                         }
                     }
-                    _ => {}
+                    _ => {
+                        if query
+                            .handle_event(&CtEvent::Key(k))
+                            .map(|s| s.value)
+                            .unwrap_or(false)
+                        {
+                            *selected = 0;
+                        }
+                    }
                 }
                 return;
             }
@@ -1419,34 +1374,20 @@ impl App {
             } => {
                 match k.code {
                     KeyCode::Esc => editor.mode = EditorMode::Browse,
-                    KeyCode::Backspace => {
-                        if *title_stage {
-                            title_buf.pop();
-                        } else {
-                            window_buf.pop();
-                        }
-                    }
-                    KeyCode::Char(c) => {
-                        if *title_stage {
-                            title_buf.push(c);
-                        } else {
-                            window_buf.push(c);
-                        }
-                    }
                     KeyCode::Enter => {
                         if *title_stage {
                             let inst = instance.clone();
                             let gt = *graph_type;
                             let s = series.clone();
-                            let w = if window_buf.trim().is_empty() {
+                            let w = if window_buf.value().trim().is_empty() {
                                 "1h".to_string()
                             } else {
-                                window_buf.trim().to_string()
+                                window_buf.value().trim().to_string()
                             };
-                            let title = if title_buf.trim().is_empty() {
+                            let title = if title_buf.value().trim().is_empty() {
                                 None
                             } else {
-                                Some(title_buf.trim().to_string())
+                                Some(title_buf.value().trim().to_string())
                             };
                             editor.mode = EditorMode::Browse;
                             let kind = crate::dashboard::CardKind::Graph {
@@ -1470,7 +1411,13 @@ impl App {
                             *title_stage = true;
                         }
                     }
-                    _ => {}
+                    _ => {
+                        if *title_stage {
+                            title_buf.handle_event(&CtEvent::Key(k));
+                        } else {
+                            window_buf.handle_event(&CtEvent::Key(k));
+                        }
+                    }
                 }
                 return;
             }
@@ -1499,21 +1446,15 @@ impl App {
                             *current = OPTS[pos + 1];
                         }
                     }
-                    KeyCode::Backspace => {
-                        title_buf.pop();
-                    }
-                    KeyCode::Char(c) if *title_stage => {
-                        title_buf.push(c);
-                    }
                     KeyCode::Enter => {
                         if *title_stage {
                             let inst = instance.clone();
                             let s = series.clone();
                             let ori = *current;
-                            let title = if title_buf.trim().is_empty() {
+                            let title = if title_buf.value().trim().is_empty() {
                                 None
                             } else {
-                                Some(title_buf.trim().to_string())
+                                Some(title_buf.value().trim().to_string())
                             };
                             editor.mode = EditorMode::Browse;
                             let kind = crate::dashboard::CardKind::Graph {
@@ -1537,7 +1478,11 @@ impl App {
                             *title_stage = true;
                         }
                     }
-                    _ => {}
+                    _ => {
+                        if *title_stage {
+                            title_buf.handle_event(&CtEvent::Key(k));
+                        }
+                    }
                 }
                 return;
             }
@@ -1559,20 +1504,12 @@ impl App {
                         }
                     })
                     .unwrap_or_default();
-                let rows = entity_search(&self.instances, &instance, query);
+                let rows = entity_search(&self.instances, &instance, query.value());
                 match k.code {
                     KeyCode::Esc => editor.mode = EditorMode::Browse,
-                    KeyCode::Backspace => {
-                        query.pop();
-                        *selected = 0;
-                    }
                     KeyCode::Up | KeyCode::Char('k') if *selected > 0 => *selected -= 1,
                     KeyCode::Down | KeyCode::Char('j') if *selected + 1 < rows.len() => {
                         *selected += 1
-                    }
-                    KeyCode::Char(c) => {
-                        query.push(c);
-                        *selected = 0;
                     }
                     KeyCode::Enter => {
                         if let Some(pick) = rows.get(*selected) {
@@ -1604,7 +1541,15 @@ impl App {
                             }
                         }
                     }
-                    _ => {}
+                    _ => {
+                        if query
+                            .handle_event(&CtEvent::Key(k))
+                            .map(|s| s.value)
+                            .unwrap_or(false)
+                        {
+                            *selected = 0;
+                        }
+                    }
                 }
                 return;
             }
@@ -1678,7 +1623,7 @@ impl App {
                                 editor.mode = EditorMode::GraphEditSeriesColor {
                                     card_idx: idx,
                                     series_idx: sidx,
-                                    buf: cur,
+                                    buf: TInput::from(cur.as_str()),
                                 };
                             }
                             crate::dashboard::editor::SeriesIndexOp::SetLabel => {
@@ -1700,7 +1645,7 @@ impl App {
                                 editor.mode = EditorMode::GraphEditSeriesLabel {
                                     card_idx: idx,
                                     series_idx: sidx,
-                                    buf: cur,
+                                    buf: TInput::from(cur.as_str()),
                                 };
                             }
                         }
@@ -1716,14 +1661,10 @@ impl App {
             } => {
                 match k.code {
                     KeyCode::Esc => editor.mode = EditorMode::Browse,
-                    KeyCode::Backspace => {
-                        buf.pop();
-                    }
-                    KeyCode::Char(c) => buf.push(c),
                     KeyCode::Enter => {
                         let idx = *card_idx;
                         let sidx = *series_idx;
-                        let trimmed = buf.trim().to_string();
+                        let trimmed = buf.value().trim().to_string();
                         if !trimmed.is_empty() && crate::ui::theme::parse_color(&trimmed).is_none()
                         {
                             self.last_error = Some(format!(
@@ -1759,7 +1700,9 @@ impl App {
                             }
                         }
                     }
-                    _ => {}
+                    _ => {
+                        buf.handle_event(&CtEvent::Key(k));
+                    }
                 }
                 return;
             }
@@ -1770,14 +1713,10 @@ impl App {
             } => {
                 match k.code {
                     KeyCode::Esc => editor.mode = EditorMode::Browse,
-                    KeyCode::Backspace => {
-                        buf.pop();
-                    }
-                    KeyCode::Char(c) => buf.push(c),
                     KeyCode::Enter => {
                         let idx = *card_idx;
                         let sidx = *series_idx;
-                        let trimmed = buf.trim().to_string();
+                        let trimmed = buf.value().trim().to_string();
                         editor.mode = EditorMode::Browse;
                         let label_val = if trimmed.is_empty() {
                             None
@@ -1806,20 +1745,18 @@ impl App {
                             }
                         }
                     }
-                    _ => {}
+                    _ => {
+                        buf.handle_event(&CtEvent::Key(k));
+                    }
                 }
                 return;
             }
             EditorMode::GraphEditWindow { card_idx, buf } => {
                 match k.code {
                     KeyCode::Esc => editor.mode = EditorMode::Browse,
-                    KeyCode::Backspace => {
-                        buf.pop();
-                    }
-                    KeyCode::Char(c) => buf.push(c),
                     KeyCode::Enter => {
                         let idx = *card_idx;
-                        let new_window = buf.trim().to_string();
+                        let new_window = buf.value().trim().to_string();
                         editor.mode = EditorMode::Browse;
                         if !new_window.is_empty() {
                             if let Some(dash) = self.dashboards.get_mut(dash_idx) {
@@ -1843,7 +1780,9 @@ impl App {
                             }
                         }
                     }
-                    _ => {}
+                    _ => {
+                        buf.handle_event(&CtEvent::Key(k));
+                    }
                 }
                 return;
             }
@@ -1901,11 +1840,7 @@ impl App {
             } => {
                 match k.code {
                     KeyCode::Esc => editor.mode = EditorMode::Browse,
-                    KeyCode::Backspace => {
-                        buf.pop();
-                    }
-                    KeyCode::Char(c) => buf.push(c),
-                    KeyCode::Enter => match buf.trim().parse::<f64>() {
+                    KeyCode::Enter => match buf.value().trim().parse::<f64>() {
                         Ok(v) => {
                             let idx = *card_idx;
                             let new_accum = crate::dashboard::editor::SeverityAccum {
@@ -1926,7 +1861,7 @@ impl App {
                                 .unwrap_or_default();
                             editor.mode = EditorMode::EditSeverityYellow {
                                 card_idx: idx,
-                                buf: cur_sev,
+                                buf: TInput::from(cur_sev.as_str()),
                                 accum: new_accum,
                             };
                         }
@@ -1934,7 +1869,9 @@ impl App {
                             self.last_error = Some("invalid number — enter a numeric value".into());
                         }
                     },
-                    _ => {}
+                    _ => {
+                        buf.handle_event(&CtEvent::Key(k));
+                    }
                 }
                 return;
             }
@@ -1945,11 +1882,7 @@ impl App {
             } => {
                 match k.code {
                     KeyCode::Esc => editor.mode = EditorMode::Browse,
-                    KeyCode::Backspace => {
-                        buf.pop();
-                    }
-                    KeyCode::Char(c) => buf.push(c),
-                    KeyCode::Enter => match buf.trim().parse::<f64>() {
+                    KeyCode::Enter => match buf.value().trim().parse::<f64>() {
                         Ok(v) => {
                             let idx = *card_idx;
                             let new_accum = crate::dashboard::editor::SeverityAccum {
@@ -1970,7 +1903,7 @@ impl App {
                                 .unwrap_or_default();
                             editor.mode = EditorMode::EditSeverityRed {
                                 card_idx: idx,
-                                buf: cur_red,
+                                buf: TInput::from(cur_red.as_str()),
                                 accum: new_accum,
                             };
                         }
@@ -1978,7 +1911,9 @@ impl App {
                             self.last_error = Some("invalid number — enter a numeric value".into());
                         }
                     },
-                    _ => {}
+                    _ => {
+                        buf.handle_event(&CtEvent::Key(k));
+                    }
                 }
                 return;
             }
@@ -1989,11 +1924,7 @@ impl App {
             } => {
                 match k.code {
                     KeyCode::Esc => editor.mode = EditorMode::Browse,
-                    KeyCode::Backspace => {
-                        buf.pop();
-                    }
-                    KeyCode::Char(c) => buf.push(c),
-                    KeyCode::Enter => match buf.trim().parse::<f64>() {
+                    KeyCode::Enter => match buf.value().trim().parse::<f64>() {
                         Ok(red) => {
                             let idx = *card_idx;
                             let new_sev = crate::dashboard::Severity {
@@ -2024,7 +1955,9 @@ impl App {
                             self.last_error = Some("invalid number — enter a numeric value".into());
                         }
                     },
-                    _ => {}
+                    _ => {
+                        buf.handle_event(&CtEvent::Key(k));
+                    }
                 }
                 return;
             }
@@ -2061,7 +1994,7 @@ impl App {
                             entity: ent,
                             friendly_name: fname,
                             metric,
-                            buf: "1h".into(),
+                            buf: TInput::from("1h"),
                         };
                     }
                     _ => {}
@@ -2077,13 +2010,9 @@ impl App {
             } => {
                 match k.code {
                     KeyCode::Esc => editor.mode = EditorMode::Browse,
-                    KeyCode::Backspace => {
-                        buf.pop();
-                    }
-                    KeyCode::Char(c) => buf.push(c),
                     KeyCode::Enter => {
                         let window = {
-                            let s = buf.trim().to_string();
+                            let s = buf.value().trim().to_string();
                             if s.is_empty() {
                                 "1h".into()
                             } else {
@@ -2100,10 +2029,12 @@ impl App {
                             friendly_name: fname,
                             metric: m,
                             window,
-                            buf: String::new(),
+                            buf: TInput::default(),
                         };
                     }
-                    _ => {}
+                    _ => {
+                        buf.handle_event(&CtEvent::Key(k));
+                    }
                 }
                 return;
             }
@@ -2117,12 +2048,8 @@ impl App {
             } => {
                 match k.code {
                     KeyCode::Esc => editor.mode = EditorMode::Browse,
-                    KeyCode::Backspace => {
-                        buf.pop();
-                    }
-                    KeyCode::Char(c) => buf.push(c),
                     KeyCode::Enter => {
-                        let unit_raw = buf.trim().to_string();
+                        let unit_raw = buf.value().trim().to_string();
                         let unit = if unit_raw.is_empty() {
                             None
                         } else {
@@ -2140,10 +2067,12 @@ impl App {
                             metric: m,
                             window: win,
                             unit,
-                            buf: String::new(),
+                            buf: TInput::default(),
                         };
                     }
-                    _ => {}
+                    _ => {
+                        buf.handle_event(&CtEvent::Key(k));
+                    }
                 }
                 return;
             }
@@ -2158,12 +2087,8 @@ impl App {
             } => {
                 match k.code {
                     KeyCode::Esc => editor.mode = EditorMode::Browse,
-                    KeyCode::Backspace => {
-                        buf.pop();
-                    }
-                    KeyCode::Char(c) => buf.push(c),
                     KeyCode::Enter => {
-                        let title_raw = buf.trim().to_string();
+                        let title_raw = buf.value().trim().to_string();
                         let title = if title_raw.is_empty() {
                             if friendly_name.is_empty() {
                                 None
@@ -2189,7 +2114,9 @@ impl App {
                             }
                         }
                     }
-                    _ => {}
+                    _ => {
+                        buf.handle_event(&CtEvent::Key(k));
+                    }
                 }
                 return;
             }
@@ -2240,14 +2167,10 @@ impl App {
             EditorMode::StatsEditWindow { card_idx, buf } => {
                 match k.code {
                     KeyCode::Esc => editor.mode = EditorMode::Browse,
-                    KeyCode::Backspace => {
-                        buf.pop();
-                    }
-                    KeyCode::Char(c) => buf.push(c),
                     KeyCode::Enter => {
                         let idx = *card_idx;
                         let new_window = {
-                            let s = buf.trim().to_string();
+                            let s = buf.value().trim().to_string();
                             if s.is_empty() {
                                 "1h".into()
                             } else {
@@ -2273,20 +2196,18 @@ impl App {
                             }
                         }
                     }
-                    _ => {}
+                    _ => {
+                        buf.handle_event(&CtEvent::Key(k));
+                    }
                 }
                 return;
             }
             EditorMode::StatsEditUnit { card_idx, buf } => {
                 match k.code {
                     KeyCode::Esc => editor.mode = EditorMode::Browse,
-                    KeyCode::Backspace => {
-                        buf.pop();
-                    }
-                    KeyCode::Char(c) => buf.push(c),
                     KeyCode::Enter => {
                         let idx = *card_idx;
-                        let unit_raw = buf.trim().to_string();
+                        let unit_raw = buf.value().trim().to_string();
                         let new_unit = if unit_raw.is_empty() {
                             None
                         } else {
@@ -2311,7 +2232,9 @@ impl App {
                             }
                         }
                     }
-                    _ => {}
+                    _ => {
+                        buf.handle_event(&CtEvent::Key(k));
+                    }
                 }
                 return;
             }
@@ -2319,13 +2242,9 @@ impl App {
             EditorMode::ClockAddTitle { title_buffer } => {
                 match k.code {
                     KeyCode::Esc => editor.mode = EditorMode::Browse,
-                    KeyCode::Backspace => {
-                        title_buffer.pop();
-                    }
-                    KeyCode::Char(c) => title_buffer.push(c),
                     KeyCode::Enter => {
                         let title = {
-                            let t = title_buffer.trim().to_string();
+                            let t = title_buffer.value().trim().to_string();
                             if t.is_empty() {
                                 None
                             } else {
@@ -2334,10 +2253,12 @@ impl App {
                         };
                         editor.mode = EditorMode::ClockAddFormat {
                             title,
-                            format_buffer: "%H:%M:%S".into(),
+                            format_buffer: TInput::from("%H:%M:%S"),
                         };
                     }
-                    _ => {}
+                    _ => {
+                        title_buffer.handle_event(&CtEvent::Key(k));
+                    }
                 }
                 return;
             }
@@ -2347,12 +2268,8 @@ impl App {
             } => {
                 match k.code {
                     KeyCode::Esc => editor.mode = EditorMode::Browse,
-                    KeyCode::Backspace => {
-                        format_buffer.pop();
-                    }
-                    KeyCode::Char(c) => format_buffer.push(c),
                     KeyCode::Enter => {
-                        let fmt = format_buffer.trim().to_string();
+                        let fmt = format_buffer.value().trim().to_string();
                         let fmt = if fmt.is_empty() {
                             "%H:%M:%S".into()
                         } else {
@@ -2361,10 +2278,12 @@ impl App {
                         editor.mode = EditorMode::ClockAddTimezone {
                             title: title.clone(),
                             format: fmt,
-                            tz_buffer: String::new(),
+                            tz_buffer: TInput::default(),
                         };
                     }
-                    _ => {}
+                    _ => {
+                        format_buffer.handle_event(&CtEvent::Key(k));
+                    }
                 }
                 return;
             }
@@ -2375,12 +2294,8 @@ impl App {
             } => {
                 match k.code {
                     KeyCode::Esc => editor.mode = EditorMode::Browse,
-                    KeyCode::Backspace => {
-                        tz_buffer.pop();
-                    }
-                    KeyCode::Char(c) => tz_buffer.push(c),
                     KeyCode::Enter => {
-                        let tz_raw = tz_buffer.trim().to_string();
+                        let tz_raw = tz_buffer.value().trim().to_string();
                         let timezone = if tz_raw.is_empty() {
                             None
                         } else {
@@ -2399,7 +2314,9 @@ impl App {
                             }
                         }
                     }
-                    _ => {}
+                    _ => {
+                        tz_buffer.handle_event(&CtEvent::Key(k));
+                    }
                 }
                 return;
             }
@@ -2407,14 +2324,10 @@ impl App {
             EditorMode::ClockEditFormat { card_idx, buf } => {
                 match k.code {
                     KeyCode::Esc => editor.mode = EditorMode::Browse,
-                    KeyCode::Backspace => {
-                        buf.pop();
-                    }
-                    KeyCode::Char(c) => buf.push(c),
                     KeyCode::Enter => {
                         let idx = *card_idx;
                         let new_fmt = {
-                            let s = buf.trim().to_string();
+                            let s = buf.value().trim().to_string();
                             if s.is_empty() {
                                 "%H:%M:%S".into()
                             } else {
@@ -2440,20 +2353,18 @@ impl App {
                             }
                         }
                     }
-                    _ => {}
+                    _ => {
+                        buf.handle_event(&CtEvent::Key(k));
+                    }
                 }
                 return;
             }
             EditorMode::ClockEditTimezone { card_idx, buf } => {
                 match k.code {
                     KeyCode::Esc => editor.mode = EditorMode::Browse,
-                    KeyCode::Backspace => {
-                        buf.pop();
-                    }
-                    KeyCode::Char(c) => buf.push(c),
                     KeyCode::Enter => {
                         let idx = *card_idx;
-                        let tz_raw = buf.trim().to_string();
+                        let tz_raw = buf.value().trim().to_string();
                         let new_tz = if tz_raw.is_empty() {
                             None
                         } else {
@@ -2478,7 +2389,9 @@ impl App {
                             }
                         }
                     }
-                    _ => {}
+                    _ => {
+                        buf.handle_event(&CtEvent::Key(k));
+                    }
                 }
                 return;
             }
@@ -2521,12 +2434,8 @@ impl App {
             } => {
                 match k.code {
                     KeyCode::Esc => editor.mode = EditorMode::Browse,
-                    KeyCode::Backspace => {
-                        buf.pop();
-                    }
-                    KeyCode::Char(c) if c.is_ascii_digit() => buf.push(c),
                     KeyCode::Enter => {
-                        let secs_raw = buf.trim().to_string();
+                        let secs_raw = buf.value().trim().to_string();
                         let refresh_seconds = secs_raw.parse::<u32>().ok().filter(|&s| s > 0);
                         editor.mode = EditorMode::ImageEditTitleAdd {
                             instance: instance.clone(),
@@ -2534,8 +2443,19 @@ impl App {
                             friendly_name: friendly_name.clone(),
                             is_camera: *is_camera,
                             refresh_seconds,
-                            buf: String::new(),
+                            buf: TInput::default(),
                         };
+                    }
+                    KeyCode::Char(c) if c.is_ascii_digit() => {
+                        buf.handle_event(&CtEvent::Key(k));
+                    }
+                    KeyCode::Backspace
+                    | KeyCode::Delete
+                    | KeyCode::Left
+                    | KeyCode::Right
+                    | KeyCode::Home
+                    | KeyCode::End => {
+                        buf.handle_event(&CtEvent::Key(k));
                     }
                     _ => {}
                 }
@@ -2551,12 +2471,8 @@ impl App {
             } => {
                 match k.code {
                     KeyCode::Esc => editor.mode = EditorMode::Browse,
-                    KeyCode::Backspace => {
-                        buf.pop();
-                    }
-                    KeyCode::Char(c) => buf.push(c),
                     KeyCode::Enter => {
-                        let title_raw = buf.trim().to_string();
+                        let title_raw = buf.value().trim().to_string();
                         let title = if title_raw.is_empty() {
                             if friendly_name.is_empty() {
                                 None
@@ -2589,7 +2505,9 @@ impl App {
                             }
                         }
                     }
-                    _ => {}
+                    _ => {
+                        buf.handle_event(&CtEvent::Key(k));
+                    }
                 }
                 return;
             }
@@ -2632,12 +2550,8 @@ impl App {
             } => {
                 match k.code {
                     KeyCode::Esc => editor.mode = EditorMode::Browse,
-                    KeyCode::Backspace => {
-                        buf.pop();
-                    }
-                    KeyCode::Char(c) if c.is_ascii_digit() => buf.push(c),
                     KeyCode::Enter => {
-                        let days: u8 = buf.trim().parse::<u8>().unwrap_or(3).clamp(1, 7);
+                        let days: u8 = buf.value().trim().parse::<u8>().unwrap_or(3).clamp(1, 7);
                         let inst = instance.clone();
                         let ent = entity.clone();
                         let fname = friendly_name.clone();
@@ -2648,8 +2562,19 @@ impl App {
                             friendly_name: fname,
                             show_forecast: sf,
                             forecast_days: days,
-                            buf: String::new(),
+                            buf: TInput::default(),
                         };
+                    }
+                    KeyCode::Char(c) if c.is_ascii_digit() => {
+                        buf.handle_event(&CtEvent::Key(k));
+                    }
+                    KeyCode::Backspace
+                    | KeyCode::Delete
+                    | KeyCode::Left
+                    | KeyCode::Right
+                    | KeyCode::Home
+                    | KeyCode::End => {
+                        buf.handle_event(&CtEvent::Key(k));
                     }
                     _ => {}
                 }
@@ -2665,12 +2590,8 @@ impl App {
             } => {
                 match k.code {
                     KeyCode::Esc => editor.mode = EditorMode::Browse,
-                    KeyCode::Backspace => {
-                        buf.pop();
-                    }
-                    KeyCode::Char(c) => buf.push(c),
                     KeyCode::Enter => {
-                        let title_raw = buf.trim().to_string();
+                        let title_raw = buf.value().trim().to_string();
                         let title = if title_raw.is_empty() {
                             if friendly_name.is_empty() {
                                 None
@@ -2694,6 +2615,244 @@ impl App {
                                 ed.add_card(dash, kind);
                             }
                         }
+                    }
+                    _ => {
+                        buf.handle_event(&CtEvent::Key(k));
+                    }
+                }
+                return;
+            }
+            EditorMode::AttrListPickAttr {
+                instance,
+                entity,
+                candidates,
+                selected,
+            } => {
+                let n = candidates.len();
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Up | KeyCode::Char('k') if *selected > 0 => *selected -= 1,
+                    KeyCode::Down | KeyCode::Char('j') if *selected + 1 < n => *selected += 1,
+                    KeyCode::Enter if n > 0 => {
+                        let attr = candidates[*selected].clone();
+                        let inst = instance.clone();
+                        let ent = entity.clone();
+                        editor.mode = EditorMode::AttrListEditTemplate {
+                            instance: inst,
+                            entity: ent,
+                            attribute: attr,
+                            buffer: TInput::default(),
+                        };
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::AttrListEditTemplate {
+                instance,
+                entity,
+                attribute,
+                buffer,
+            } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Enter => {
+                        let template = if buffer.value().trim().is_empty() {
+                            "{name}: {state}".to_string()
+                        } else {
+                            buffer.value().trim().to_string()
+                        };
+                        let inst = instance.clone();
+                        let ent = entity.clone();
+                        let attr = attribute.clone();
+                        editor.mode = EditorMode::AttrListEditLimit {
+                            instance: inst,
+                            entity: ent,
+                            attribute: attr,
+                            template,
+                            buffer: TInput::default(),
+                        };
+                    }
+                    _ => {
+                        buffer.handle_event(&CtEvent::Key(k));
+                    }
+                }
+                return;
+            }
+            EditorMode::AttrListEditLimit {
+                instance,
+                entity,
+                attribute,
+                template,
+                buffer,
+            } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Enter => {
+                        let limit = buffer.value().trim().parse::<usize>().ok();
+                        let inst = instance.clone();
+                        let ent = entity.clone();
+                        let attr = attribute.clone();
+                        let tmpl = template.clone();
+                        editor.mode = EditorMode::AttrListEditTitle {
+                            instance: inst,
+                            entity: ent,
+                            attribute: attr,
+                            template: tmpl,
+                            limit,
+                            buffer: TInput::default(),
+                        };
+                    }
+                    KeyCode::Char(c) if c.is_ascii_digit() => {
+                        buffer.handle_event(&CtEvent::Key(k));
+                    }
+                    KeyCode::Backspace
+                    | KeyCode::Delete
+                    | KeyCode::Left
+                    | KeyCode::Right
+                    | KeyCode::Home
+                    | KeyCode::End => {
+                        buffer.handle_event(&CtEvent::Key(k));
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::AttrListEditTitle {
+                instance,
+                entity,
+                attribute,
+                template,
+                limit,
+                buffer,
+            } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Enter => {
+                        let title_raw = buffer.value().trim().to_string();
+                        let title = if title_raw.is_empty() {
+                            None
+                        } else {
+                            Some(title_raw)
+                        };
+                        let kind = CardKind::AttributeList {
+                            instance: instance.clone(),
+                            entity: entity.clone(),
+                            attribute: attribute.clone(),
+                            template: template.clone(),
+                            limit: *limit,
+                            title,
+                        };
+                        editor.mode = EditorMode::Browse;
+                        if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.snapshot(dash);
+                                ed.add_card(dash, kind);
+                            }
+                        }
+                    }
+                    _ => {
+                        buffer.handle_event(&CtEvent::Key(k));
+                    }
+                }
+                return;
+            }
+            EditorMode::AttrListEditAttrExisting {
+                card_idx,
+                candidates,
+                selected,
+            } => {
+                let n = candidates.len();
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Up | KeyCode::Char('k') if *selected > 0 => *selected -= 1,
+                    KeyCode::Down | KeyCode::Char('j') if *selected + 1 < n => *selected += 1,
+                    KeyCode::Enter if n > 0 => {
+                        let attr = candidates[*selected].clone();
+                        let idx = *card_idx;
+                        editor.mode = EditorMode::Browse;
+                        if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.snapshot(dash);
+                            }
+                            if let Some(card) = dash.card_mut(idx) {
+                                if let CardKind::AttributeList { attribute, .. } = &mut card.kind {
+                                    *attribute = attr;
+                                }
+                            }
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.dirty = true;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::AttrListEditTemplateExisting { card_idx, buffer } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Enter => {
+                        let tmpl = buffer.value().trim().to_string();
+                        let idx = *card_idx;
+                        editor.mode = EditorMode::Browse;
+                        if !tmpl.is_empty() {
+                            if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                                if let Some(ed) = self.editor.as_mut() {
+                                    ed.snapshot(dash);
+                                }
+                                if let Some(card) = dash.card_mut(idx) {
+                                    if let CardKind::AttributeList { template, .. } = &mut card.kind
+                                    {
+                                        *template = tmpl;
+                                    }
+                                }
+                                if let Some(ed) = self.editor.as_mut() {
+                                    ed.dirty = true;
+                                }
+                            }
+                        }
+                    }
+                    _ => {
+                        buffer.handle_event(&CtEvent::Key(k));
+                    }
+                }
+                return;
+            }
+            EditorMode::AttrListEditLimitExisting { card_idx, buffer } => {
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Enter => {
+                        let limit = buffer.value().trim().parse::<usize>().ok();
+                        let idx = *card_idx;
+                        editor.mode = EditorMode::Browse;
+                        if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.snapshot(dash);
+                            }
+                            if let Some(card) = dash.card_mut(idx) {
+                                if let CardKind::AttributeList {
+                                    limit: card_limit, ..
+                                } = &mut card.kind
+                                {
+                                    *card_limit = limit;
+                                }
+                            }
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.dirty = true;
+                            }
+                        }
+                    }
+                    KeyCode::Char(c) if c.is_ascii_digit() => {
+                        buffer.handle_event(&CtEvent::Key(k));
+                    }
+                    KeyCode::Backspace
+                    | KeyCode::Delete
+                    | KeyCode::Left
+                    | KeyCode::Right
+                    | KeyCode::Home
+                    | KeyCode::End => {
+                        buffer.handle_event(&CtEvent::Key(k));
                     }
                     _ => {}
                 }
@@ -2870,12 +3029,8 @@ impl App {
             EditorMode::PickingNewRowHeight { buf } => {
                 match k.code {
                     KeyCode::Esc => editor.mode = EditorMode::Browse,
-                    KeyCode::Char(c) if c.is_alphanumeric() => buf.push(c),
-                    KeyCode::Backspace => {
-                        buf.pop();
-                    }
                     KeyCode::Enter => {
-                        let raw = buf.trim().to_lowercase();
+                        let raw = buf.value().trim().to_lowercase();
                         let height = if raw == "auto" {
                             crate::dashboard::RowHeight::Auto
                         } else if let Ok(n) = raw.parse::<u16>() {
@@ -2887,22 +3042,20 @@ impl App {
                         };
                         editor.mode = EditorMode::PickingNewRowColumnCount {
                             height,
-                            buf: String::new(),
+                            buf: TInput::default(),
                         };
                     }
-                    _ => {}
+                    _ => {
+                        buf.handle_event(&CtEvent::Key(k));
+                    }
                 }
                 return;
             }
             EditorMode::PickingNewRowColumnCount { height, buf } => {
                 match k.code {
                     KeyCode::Esc => editor.mode = EditorMode::Browse,
-                    KeyCode::Char(c) if c.is_ascii_digit() => buf.push(c),
-                    KeyCode::Backspace => {
-                        buf.pop();
-                    }
                     KeyCode::Enter => {
-                        let n_cols = buf.trim().parse::<usize>().unwrap_or(1).max(1);
+                        let n_cols = buf.value().trim().parse::<usize>().unwrap_or(1).max(1);
                         let h = *height;
                         editor.snapshot(&self.dashboards[dash_idx]);
                         editor.mode = EditorMode::Browse;
@@ -2913,6 +3066,17 @@ impl App {
                             ed.dirty = true;
                         }
                     }
+                    KeyCode::Char(c) if c.is_ascii_digit() => {
+                        buf.handle_event(&CtEvent::Key(k));
+                    }
+                    KeyCode::Backspace
+                    | KeyCode::Delete
+                    | KeyCode::Left
+                    | KeyCode::Right
+                    | KeyCode::Home
+                    | KeyCode::End => {
+                        buf.handle_event(&CtEvent::Key(k));
+                    }
                     _ => {}
                 }
                 return;
@@ -2920,12 +3084,8 @@ impl App {
             EditorMode::EditingRowHeight { row_idx, buf } => {
                 match k.code {
                     KeyCode::Esc => editor.mode = EditorMode::Browse,
-                    KeyCode::Char(c) if c.is_alphanumeric() => buf.push(c),
-                    KeyCode::Backspace => {
-                        buf.pop();
-                    }
                     KeyCode::Enter => {
-                        let raw = buf.trim().to_lowercase();
+                        let raw = buf.value().trim().to_lowercase();
                         let height = if raw == "auto" {
                             crate::dashboard::RowHeight::Auto
                         } else if let Ok(n) = raw.parse::<u16>() {
@@ -2944,7 +3104,9 @@ impl App {
                             ed.dirty = true;
                         }
                     }
-                    _ => {}
+                    _ => {
+                        buf.handle_event(&CtEvent::Key(k));
+                    }
                 }
                 return;
             }
@@ -3244,14 +3406,15 @@ impl App {
                         | crate::dashboard::CardKind::Statistics { title, .. }
                         | crate::dashboard::CardKind::MediaPlayer { title, .. }
                         | crate::dashboard::CardKind::Image { title, .. }
-                        | crate::dashboard::CardKind::Weather { title, .. } => title.clone(),
+                        | crate::dashboard::CardKind::Weather { title, .. }
+                        | crate::dashboard::CardKind::AttributeList { title, .. } => title.clone(),
                     })
                     .unwrap_or_default();
                 if let Some(ed) = self.editor.as_mut() {
                     ed.selected_card = Some(idx);
                     ed.mode = EditorMode::RenamingCard {
                         card_idx: idx,
-                        buffer: current,
+                        buffer: current.into(),
                     };
                 }
             }
@@ -3282,7 +3445,7 @@ impl App {
                     ed.selected_card = Some(idx);
                     ed.mode = EditorMode::EditingWindow {
                         card_idx: idx,
-                        buffer: current,
+                        buffer: current.into(),
                     };
                 }
             }
@@ -3297,7 +3460,7 @@ impl App {
                     ed.selected_card = Some(idx);
                     ed.mode = EditorMode::EnterColorOverride {
                         card_idx: idx,
-                        buf: current_color,
+                        buf: current_color.into(),
                     };
                 }
             }
@@ -3349,8 +3512,8 @@ impl App {
                                     ed.mode = EditorMode::EditEntityListItemOverride {
                                         card_idx,
                                         item_idx: 0,
-                                        entity_id: Some(String::new()),
-                                        name_buf: String::new(),
+                                        entity_id: Some(TInput::default()),
+                                        name_buf: TInput::default(),
                                         hide_state: false,
                                         focus_entity_id: true,
                                     };
@@ -3392,8 +3555,8 @@ impl App {
                         ed.edit_target = Some(idx);
                         ed.mode = EditorMode::EditingFilterQuery {
                             instance: inst,
-                            query_buffer: q,
-                            title_buffer: t,
+                            query_buffer: q.into(),
+                            title_buffer: t.into(),
                             hide_state: hs,
                             focus: crate::dashboard::editor::FilterFocus::Query,
                         };
@@ -3455,7 +3618,9 @@ impl App {
                     .map(|d| d.name.clone())
                     .unwrap_or_default();
                 if let Some(ed) = self.editor.as_mut() {
-                    ed.mode = EditorMode::Renaming { buffer: name };
+                    ed.mode = EditorMode::Renaming {
+                        buffer: name.into(),
+                    };
                 }
             }
             (A::ResizeGrid, C::Dashboard) => {
@@ -3469,8 +3634,8 @@ impl App {
                     .unwrap_or_else(|| ("12".into(), "24".into()));
                 if let Some(ed) = self.editor.as_mut() {
                     ed.mode = EditorMode::ResizingGrid {
-                        cols_buffer: cols,
-                        rows_buffer: rows,
+                        cols_buffer: cols.into(),
+                        rows_buffer: rows.into(),
                         focus_rows: false,
                     };
                 }
@@ -3480,7 +3645,7 @@ impl App {
                     ed.selected_card = Some(idx);
                     ed.mode = EditorMode::GraphAddOneSeries {
                         card_idx: idx,
-                        query: String::new(),
+                        query: TInput::default(),
                         selected: 0,
                     };
                 }
@@ -3556,7 +3721,7 @@ impl App {
                     ed.selected_card = Some(idx);
                     ed.mode = EditorMode::GraphEditWindow {
                         card_idx: idx,
-                        buf: current,
+                        buf: current.into(),
                     };
                 }
             }
@@ -3591,16 +3756,16 @@ impl App {
                             None
                         }
                     });
-                let (green_str, accum) = match existing {
+                let (green_buf, accum) = match existing {
                     Some((g, y, _)) => (
-                        g.to_string(),
+                        TInput::from(g.to_string().as_str()),
                         crate::dashboard::editor::SeverityAccum {
                             green: g,
                             yellow: y,
                         },
                     ),
                     None => (
-                        String::new(),
+                        TInput::default(),
                         crate::dashboard::editor::SeverityAccum::default(),
                     ),
                 };
@@ -3608,7 +3773,7 @@ impl App {
                     ed.selected_card = Some(idx);
                     ed.mode = EditorMode::EditSeverityGreen {
                         card_idx: idx,
-                        buf: green_str,
+                        buf: green_buf,
                         accum,
                     };
                 }
@@ -3645,7 +3810,7 @@ impl App {
                     ed.selected_card = Some(idx);
                     ed.mode = EditorMode::ClockEditFormat {
                         card_idx: idx,
-                        buf: current,
+                        buf: current.into(),
                     };
                 }
             }
@@ -3666,7 +3831,7 @@ impl App {
                     ed.selected_card = Some(idx);
                     ed.mode = EditorMode::ClockEditTimezone {
                         card_idx: idx,
-                        buf: current,
+                        buf: current.into(),
                     };
                 }
             }
@@ -3716,7 +3881,7 @@ impl App {
                     ed.selected_card = Some(idx);
                     ed.mode = EditorMode::StatsEditWindow {
                         card_idx: idx,
-                        buf: current,
+                        buf: current.into(),
                     };
                 }
             }
@@ -3737,7 +3902,74 @@ impl App {
                     ed.selected_card = Some(idx);
                     ed.mode = EditorMode::StatsEditUnit {
                         card_idx: idx,
-                        buf: current,
+                        buf: current.into(),
+                    };
+                }
+            }
+            (A::EditAttrListAttr, C::Card(idx)) => {
+                let (instance, entity) =
+                    match self.dashboards.get(dash_idx).and_then(|d| d.card(idx)) {
+                        Some(c) => {
+                            if let CardKind::AttributeList {
+                                instance, entity, ..
+                            } = &c.kind
+                            {
+                                (instance.clone(), entity.clone())
+                            } else {
+                                return;
+                            }
+                        }
+                        None => return,
+                    };
+                let candidates = attr_array_keys(&self.instances, &instance, &entity);
+                if let Some(ed) = self.editor.as_mut() {
+                    ed.selected_card = Some(idx);
+                    ed.mode = EditorMode::AttrListEditAttrExisting {
+                        card_idx: idx,
+                        candidates,
+                        selected: 0,
+                    };
+                }
+            }
+            (A::EditAttrListTemplate, C::Card(idx)) => {
+                let current = self
+                    .dashboards
+                    .get(dash_idx)
+                    .and_then(|d| d.card(idx))
+                    .and_then(|c| {
+                        if let CardKind::AttributeList { template, .. } = &c.kind {
+                            Some(template.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_default();
+                if let Some(ed) = self.editor.as_mut() {
+                    ed.selected_card = Some(idx);
+                    ed.mode = EditorMode::AttrListEditTemplateExisting {
+                        card_idx: idx,
+                        buffer: TInput::from(current.as_str()),
+                    };
+                }
+            }
+            (A::EditAttrListLimit, C::Card(idx)) => {
+                let current = self
+                    .dashboards
+                    .get(dash_idx)
+                    .and_then(|d| d.card(idx))
+                    .and_then(|c| {
+                        if let CardKind::AttributeList { limit, .. } = &c.kind {
+                            limit.map(|n| n.to_string())
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_default();
+                if let Some(ed) = self.editor.as_mut() {
+                    ed.selected_card = Some(idx);
+                    ed.mode = EditorMode::AttrListEditLimitExisting {
+                        card_idx: idx,
+                        buffer: TInput::from(current.as_str()),
                     };
                 }
             }
@@ -3811,7 +4043,7 @@ impl App {
                 if let Some(ed) = self.editor.as_mut() {
                     ed.mode = EditorMode::EditingRowHeight {
                         row_idx,
-                        buf: current,
+                        buf: current.into(),
                     };
                 }
             }
@@ -3900,7 +4132,9 @@ impl App {
             // ── Dashboard-level grid actions ──────────────────────────────────
             (A::AddRow, C::Dashboard) => {
                 if let Some(ed) = self.editor.as_mut() {
-                    ed.mode = EditorMode::PickingNewRowHeight { buf: String::new() };
+                    ed.mode = EditorMode::PickingNewRowHeight {
+                        buf: TInput::default(),
+                    };
                 }
             }
             (A::DeleteDashboard, C::Dashboard) => {
@@ -4042,12 +4276,8 @@ impl App {
             CardKind::Gauge { instance, .. } => (CardTypeStub::Gauge, instance.clone(), None),
             CardKind::Graph { instance, .. } => (CardTypeStub::Graph, instance.clone(), None),
             CardKind::EntityList {
-                instance,
-                entities,
-                title,
+                instance, entities, ..
             } => {
-                let orig_title = title.clone();
-                let orig_items = entities.clone();
                 let picked: Vec<(String, String)> = entities
                     .iter()
                     .map(|item| {
@@ -4064,11 +4294,7 @@ impl App {
                         (eid.clone(), friendly)
                     })
                     .collect();
-                (
-                    CardTypeStub::EntityList,
-                    instance.clone(),
-                    Some((picked, orig_title, orig_items)),
-                )
+                (CardTypeStub::EntityList, instance.clone(), Some(picked))
             }
             CardKind::Text { .. } => {
                 self.last_error = Some("text cards have no entity to change".into());
@@ -4096,22 +4322,23 @@ impl App {
                 return;
             }
             CardKind::Weather { instance, .. } => (CardTypeStub::Weather, instance.clone(), None),
+            CardKind::AttributeList { instance, .. } => {
+                (CardTypeStub::AttributeList, instance.clone(), None)
+            }
         };
         editor.edit_target = Some(idx);
-        editor.mode = if let Some((picked, orig_title, orig_items)) = prefill {
+        editor.mode = if let Some(picked) = prefill {
             EditorMode::PickingMulti {
                 instance,
-                query: String::new(),
+                query: TInput::default(),
                 selected: 0,
                 picked,
-                original_title: orig_title,
-                original_items: orig_items,
             }
         } else {
             EditorMode::PickingEntity {
                 card_type: kind,
                 instance,
-                query: String::new(),
+                query: TInput::default(),
                 selected: 0,
             }
         };
@@ -4129,15 +4356,19 @@ impl App {
             let (title_buf, body_buf, focus_body) = if let Some(card_idx) = edit_target {
                 if let Some(card) = self.dashboards.get(dash_idx).and_then(|d| d.card(card_idx)) {
                     if let crate::dashboard::CardKind::Text { markdown, title } = &card.kind {
-                        (title.clone().unwrap_or_default(), markdown.clone(), true)
+                        (
+                            TInput::from(title.clone().unwrap_or_default().as_str()),
+                            TInput::from(markdown.as_str()),
+                            true,
+                        )
                     } else {
-                        (String::new(), String::new(), false)
+                        (TInput::default(), TInput::default(), false)
                     }
                 } else {
-                    (String::new(), String::new(), false)
+                    (TInput::default(), TInput::default(), false)
                 }
             } else {
-                (String::new(), String::new(), false)
+                (TInput::default(), TInput::default(), false)
             };
             let editor = self.editor.as_mut().unwrap();
             editor.mode = EditorMode::EditingTextBody {
@@ -4153,7 +4384,7 @@ impl App {
         // Clock has no instance or entity — go straight to title input.
         if matches!(kind, CardTypeStub::Clock) {
             editor.mode = EditorMode::ClockAddTitle {
-                title_buffer: String::new(),
+                title_buffer: TInput::default(),
             };
             return;
         }
@@ -4207,7 +4438,7 @@ impl App {
                     instance: inst,
                     graph_type,
                     accumulated: Vec::new(),
-                    query: String::new(),
+                    query: TInput::default(),
                     selected: 0,
                     asking_more: false,
                 };
@@ -4236,8 +4467,8 @@ impl App {
                     instance,
                     graph_type,
                     series,
-                    window_buf: String::new(),
-                    title_buf: String::new(),
+                    window_buf: TInput::default(),
+                    title_buf: TInput::default(),
                     title_stage: false,
                 };
             }
@@ -4246,7 +4477,7 @@ impl App {
                     instance,
                     series,
                     current: crate::dashboard::BarOrientation::default(),
-                    title_buf: String::new(),
+                    title_buf: TInput::default(),
                     title_stage: false,
                 };
             }
@@ -4259,8 +4490,8 @@ impl App {
                     instance,
                     graph_type,
                     series,
-                    window_buf: "1h".to_string(),
-                    title_buf: String::new(),
+                    window_buf: TInput::from("1h"),
+                    title_buf: TInput::default(),
                     title_stage: true, // skip window prompt, go straight to title
                 };
             }
@@ -4851,12 +5082,12 @@ impl App {
         {
             if let Some(dash) = self.dashboards.get(*idx) {
                 if let Some(card) = dash.card(*selected_card) {
-                    if let Some((_, entities)) = list_entities(card, &self.instances) {
-                        if entities.is_empty() {
+                    if let Some(count) = card_sub_row_count(card, &self.instances) {
+                        if count == 0 {
                             return;
                         }
                         let cur = i64::try_from(*sub_index).unwrap_or(0);
-                        let new = (cur + i64::from(delta)).clamp(0, entities.len() as i64 - 1);
+                        let new = (cur + i64::from(delta)).clamp(0, count as i64 - 1);
                         *sub_index = new as usize;
                         return;
                     }
@@ -5351,6 +5582,64 @@ pub fn list_entities(
     }
 }
 
+/// Number of j/k-navigable rows for list-like cards (EntityList, FilteredEntityList, AttributeList).
+/// Returns None for cards that don't have internal row navigation.
+pub fn card_sub_row_count(
+    card: &crate::dashboard::Card,
+    instances: &InstanceRegistry,
+) -> Option<usize> {
+    use crate::dashboard::CardKind as CK;
+    if let Some((_, entities)) = list_entities(card, instances) {
+        return Some(entities.len());
+    }
+    match &card.kind {
+        CK::AttributeList {
+            instance,
+            entity,
+            attribute,
+            limit,
+            ..
+        } => {
+            let arr_len = instances
+                .runtimes
+                .get(instance.as_str())
+                .and_then(|rt| rt.states.get(entity.as_str()))
+                .and_then(|s| s.attributes.get(attribute))
+                .and_then(|v| v.as_array())
+                .map(|a| a.len())
+                .unwrap_or(0);
+            Some(match limit {
+                Some(n) => arr_len.min(*n),
+                None => arr_len,
+            })
+        }
+        _ => None,
+    }
+}
+
+/// Return the attribute keys of `entity` whose values are arrays, sorted alphabetically.
+pub fn attr_array_keys(
+    instances: &crate::ha::InstanceRegistry,
+    instance: &str,
+    entity: &str,
+) -> Vec<String> {
+    let attrs = instances
+        .runtimes
+        .get(instance)
+        .and_then(|rt| rt.states.get(entity))
+        .and_then(|s| s.attributes.as_object());
+    let Some(map) = attrs else {
+        return Vec::new();
+    };
+    let mut keys: Vec<String> = map
+        .iter()
+        .filter(|(_, v)| v.is_array())
+        .map(|(k, _)| k.clone())
+        .collect();
+    keys.sort();
+    keys
+}
+
 pub fn domain_prefix_for_type(kind: CardTypeStub) -> Option<&'static str> {
     match kind {
         CardTypeStub::MediaPlayer => Some("media_player."),
@@ -5364,23 +5653,21 @@ fn picker_mode_for(kind: CardTypeStub, instance: String) -> EditorMode {
     match kind {
         CardTypeStub::EntityList => EditorMode::PickingMulti {
             instance,
-            query: String::new(),
+            query: TInput::default(),
             selected: 0,
             picked: Vec::new(),
-            original_title: None,
-            original_items: Vec::new(),
         },
         CardTypeStub::FilteredEntityList => EditorMode::EditingFilterQuery {
             instance,
-            query_buffer: String::new(),
-            title_buffer: String::new(),
+            query_buffer: TInput::default(),
+            title_buffer: TInput::default(),
             hide_state: false,
             focus: crate::dashboard::editor::FilterFocus::Query,
         },
         _ => EditorMode::PickingEntity {
             card_type: kind,
             instance,
-            query: String::new(),
+            query: TInput::default(),
             selected: 0,
         },
     }
@@ -5446,6 +5733,9 @@ fn build_typed_card(
         }
         CardTypeStub::Weather => {
             unreachable!("Weather is built via WxEditShowForecast flow, not build_typed_card")
+        }
+        CardTypeStub::AttributeList => {
+            unreachable!("AttributeList is built via AttrListPickAttr flow, not build_typed_card")
         }
         CardTypeStub::MediaPlayer => CardKind::MediaPlayer {
             instance,
@@ -5514,7 +5804,8 @@ fn build_card_kind(kind: CardTypeStub, buf: &str, default_alias: Option<&str>) -
         | CardTypeStub::Clock
         | CardTypeStub::Statistics
         | CardTypeStub::Image
-        | CardTypeStub::Weather => {
+        | CardTypeStub::Weather
+        | CardTypeStub::AttributeList => {
             unreachable!()
         }
     })

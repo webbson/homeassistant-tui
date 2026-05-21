@@ -7,6 +7,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 ## [Unreleased]
 
 ### Added
+- **AttributeList card** — renders an entity attribute array (e.g. `top10`) as a scrollable list with a configurable per-row template. Supports `{key}`, `{key|round}`, `{key|int}`, `{key|thousands}`, `{rank}`, and `{index}` tokens. Optional `limit` caps the number of rows shown. Add via the editor palette (`a` → "attribute list") or directly in YAML.
 
 ### Changed
 

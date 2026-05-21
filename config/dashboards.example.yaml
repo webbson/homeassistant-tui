@@ -93,6 +93,18 @@ dashboards:
         refresh_interval: 10
         pos: { col: 6, row: 8, w: 6, h: 6 }
 
+      # --- attribute_list: render an entity attribute array as a ranked list ---
+      # Tokens: {key} raw value, {key|round} strip decimals, {key|int} truncate,
+      #         {key|thousands} comma-separated, {rank} 1-based row number, {index} 0-based.
+      - type: attribute_list
+        instance: home
+        entity: sensor.claude_stats_cost
+        attribute: top10
+        template: "{rank}. {name}, ${dollars|round}"
+        limit: 10
+        title: "Top users"
+        pos: { col: 0, row: 14, w: 6, h: 12 }
+
       # --- weather: current conditions + forecast strip ---
       - type: weather
         instance: home

@@ -1,4 +1,5 @@
 pub mod format;
+pub mod template;
 pub mod theme;
 pub mod widgets;
 

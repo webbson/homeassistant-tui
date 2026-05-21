@@ -6,6 +6,15 @@ use ratatui::style::{Color, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph};
 use ratatui::Frame;
+use tui_input::Input as TInput;
+
+/// Build spans for a `TInput` buffer: text in bold, then a blinking cursor.
+fn input_spans(input: &TInput) -> Vec<Span<'static>> {
+    vec![
+        Span::styled(input.value().to_string(), Style::new().bold()),
+        Span::styled("_", Style::new().rapid_blink()),
+    ]
+}
 
 use crate::app::App;
 use crate::dashboard::editor::{CardTypeStub, EditorMode, SeriesIndexOp, TransferOp};
@@ -128,13 +137,11 @@ pub fn draw(f: &mut Frame, area: Rect, app: &mut App) {
             query,
             selected,
             picked,
-            ..
         } => draw_multi_picker(f, area, app, instance, query, *selected, picked),
         EditorMode::EditingEntityListTitle {
             instance,
             picked,
             title_buffer,
-            ..
         } => draw_entity_list_title(f, area, instance, picked, title_buffer),
         EditorMode::EditEntityListItemOverride {
             name_buf,
@@ -145,7 +152,7 @@ pub fn draw(f: &mut Frame, area: Rect, app: &mut App) {
         } => draw_entity_list_item_override(
             f,
             area,
-            entity_id.as_deref(),
+            entity_id.as_ref().map(|e| e as &TInput),
             *focus_entity_id,
             name_buf,
             *hide_state,
@@ -470,8 +477,100 @@ pub fn draw(f: &mut Frame, area: Rect, app: &mut App) {
                 &format!("Remove col {} from row {}? (y/n)", col_idx + 1, row_idx + 1),
             );
         }
+        EditorMode::AttrListPickAttr {
+            candidates,
+            selected,
+            ..
+        } => draw_attr_list_pick_attr(f, area, candidates, *selected),
+        EditorMode::AttrListEditTemplate {
+            buffer, attribute, ..
+        } => {
+            draw_text_input(
+                f,
+                area,
+                " New attribute list (3/4) ",
+                &format!(
+                    "Row template for \"{attribute}\" (e.g. {{rank}}. {{name}}, ${{dollars|round}})"
+                ),
+                buffer,
+            );
+        }
+        EditorMode::AttrListEditLimit { buffer, .. } => {
+            draw_text_input(
+                f,
+                area,
+                " New attribute list (4/4) ",
+                "Max rows (integer — Enter to show all)",
+                buffer,
+            );
+        }
+        EditorMode::AttrListEditTitle { buffer, .. } => {
+            draw_text_input(
+                f,
+                area,
+                " New attribute list — title ",
+                "Title (optional — Enter to use entity name)",
+                buffer,
+            );
+        }
+        EditorMode::AttrListEditAttrExisting {
+            candidates,
+            selected,
+            ..
+        } => draw_attr_list_pick_attr(f, area, candidates, *selected),
+        EditorMode::AttrListEditTemplateExisting { buffer, .. } => {
+            draw_text_input(
+                f,
+                area,
+                " Edit template ",
+                "Row template (e.g. {rank}. {name}, ${dollars|round})",
+                buffer,
+            );
+        }
+        EditorMode::AttrListEditLimitExisting { buffer, .. } => {
+            draw_text_input(
+                f,
+                area,
+                " Edit limit ",
+                "Max rows (integer — Enter to clear limit)",
+                buffer,
+            );
+        }
         EditorMode::Browse => {}
     }
+}
+
+fn draw_attr_list_pick_attr(f: &mut Frame, area: Rect, candidates: &[String], selected: usize) {
+    let height = (candidates.len() + 2).max(5).min(18) as u16;
+    let r = modal_rect(area, 52, height);
+    f.render_widget(Clear, r);
+    let block =
+        Block::bordered().title(" New attribute list (2/4) — pick attribute (j/k + Enter) ");
+    let inner = block.inner(r);
+    f.render_widget(block, r);
+    if candidates.is_empty() {
+        f.render_widget(
+            Paragraph::new("No array attributes found on this entity.").style(Style::new().dim()),
+            inner,
+        );
+        return;
+    }
+    let items: Vec<ListItem> = candidates
+        .iter()
+        .enumerate()
+        .map(|(i, key)| {
+            let style = if i == selected {
+                Style::new().bold().fg(Color::Yellow)
+            } else {
+                Style::new()
+            };
+            ListItem::new(key.as_str()).style(style)
+        })
+        .collect();
+    let mut state = ListState::default();
+    state.select(Some(selected));
+    let list = List::new(items);
+    f.render_stateful_widget(list, inner, &mut state);
 }
 
 fn draw_new_dashboard_layout_picker(f: &mut Frame, area: Rect, selected: usize) {
@@ -822,7 +921,7 @@ fn draw_entity_picker(
     app: &App,
     card_type: CardTypeStub,
     instance: &str,
-    query: &str,
+    query: &TInput,
     selected: usize,
 ) {
     let w = 80u16.min(area.width.saturating_sub(2));
@@ -864,14 +963,12 @@ fn draw_entity_picker(
     );
     f.render_widget(Block::bordered().title(title), r);
 
-    f.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled("search: ", Style::new().dim()),
-            Span::styled(query.to_string(), Style::new().fg(color).bold()),
-            Span::styled("_", Style::new().fg(color).rapid_blink()),
-        ])),
-        search_row,
-    );
+    let query_spans: Vec<Span<'_>> = {
+        let mut s = vec![Span::styled("search: ", Style::new().dim())];
+        s.extend(input_spans(query).into_iter().map(|sp| sp.fg(color)));
+        s
+    };
+    f.render_widget(Paragraph::new(Line::from(query_spans)), search_row);
 
     let domain_prefix = match card_type {
         CardTypeStub::Image => match app.editor.as_ref().and_then(|e| e.image_pending_is_camera) {
@@ -881,7 +978,8 @@ fn draw_entity_picker(
         },
         other => crate::app::domain_prefix_for_type(other),
     };
-    let rows = crate::app::entity_search_filtered(&app.instances, instance, query, domain_prefix);
+    let rows =
+        crate::app::entity_search_filtered(&app.instances, instance, query.value(), domain_prefix);
     let items: Vec<ListItem<'_>> = rows
         .iter()
         .map(|p| {
@@ -917,7 +1015,7 @@ fn draw_title_input(
     instance: &str,
     entity: &str,
     friendly: &str,
-    title_buffer: &str,
+    title_buffer: &TInput,
 ) {
     let r = modal_rect(area, 68, 8);
     f.render_widget(Clear, r);
@@ -926,6 +1024,8 @@ fn draw_title_input(
     } else {
         friendly
     };
+    let mut title_line = vec![Span::raw("> ")];
+    title_line.extend(input_spans(title_buffer));
     let lines = vec![
         Line::from(vec![
             Span::styled("type:    ", Style::new().dim()),
@@ -945,11 +1045,7 @@ fn draw_title_input(
             format!("title (default: \"{default_label}\"):"),
             Style::new().bold(),
         )]),
-        Line::from(vec![
-            Span::raw("> "),
-            Span::styled(title_buffer.to_string(), Style::new().bold()),
-            Span::styled("_", Style::new().rapid_blink()),
-        ]),
+        Line::from(title_line),
     ];
     f.render_widget(
         Paragraph::new(lines).block(Block::bordered().title(" Title (Enter=accept, Esc=cancel) ")),
@@ -957,7 +1053,7 @@ fn draw_title_input(
     );
 }
 
-fn draw_text_body(f: &mut Frame, area: Rect, title: &str, body: &str, focus_body: bool) {
+fn draw_text_body(f: &mut Frame, area: Rect, title: &TInput, body: &TInput, focus_body: bool) {
     let r = modal_rect(area, 72, 16);
     f.render_widget(Clear, r);
     let title_style = if focus_body {
@@ -973,7 +1069,7 @@ fn draw_text_body(f: &mut Frame, area: Rect, title: &str, body: &str, focus_body
     let mut lines: Vec<Line<'_>> = vec![
         Line::from(vec![
             Span::styled("title: ", title_style),
-            Span::raw(title.to_string()),
+            Span::raw(title.value().to_string()),
         ]),
         Line::raw(""),
         Line::from(Span::styled(
@@ -982,7 +1078,7 @@ fn draw_text_body(f: &mut Frame, area: Rect, title: &str, body: &str, focus_body
         )),
         Line::raw(""),
     ];
-    for l in body.split('\n') {
+    for l in body.value().split('\n') {
         lines.push(Line::raw(l.to_string()));
     }
     lines.push(Line::styled(
@@ -1035,8 +1131,8 @@ fn draw_filter_query(
     f: &mut Frame,
     area: Rect,
     instance: &str,
-    query: &str,
-    title: &str,
+    query: &TInput,
+    title: &TInput,
     hide_state: bool,
     focus: crate::dashboard::editor::FilterFocus,
 ) {
@@ -1050,35 +1146,29 @@ fn draw_filter_query(
             Style::new().dim()
         }
     };
+    let mut query_spans = vec![Span::styled("query: ", f_style(F::Query))];
+    query_spans.push(Span::styled(query.value().to_string(), f_style(F::Query)));
+    if matches!(focus, F::Query) {
+        query_spans.push(Span::styled("_", Style::new().rapid_blink()));
+    }
+    let mut title_spans = vec![Span::styled("title: ", f_style(F::Title))];
+    title_spans.push(Span::styled(title.value().to_string(), f_style(F::Title)));
+    if matches!(focus, F::Title) {
+        title_spans.push(Span::styled("_", Style::new().rapid_blink()));
+    }
     let lines = vec![
         Line::from(vec![
             Span::styled("instance: ", Style::new().dim()),
             Span::raw(instance.to_string()),
         ]),
         Line::raw(""),
-        Line::from(vec![
-            Span::styled("query: ", f_style(F::Query)),
-            Span::styled(query.to_string(), f_style(F::Query)),
-            if matches!(focus, F::Query) {
-                Span::styled("_", Style::new().rapid_blink())
-            } else {
-                Span::raw("")
-            },
-        ]),
+        Line::from(query_spans),
         Line::from(Span::styled(
             "  format: glob[state=on][attr.location=\"HBG - Helsingborg\"]",
             Style::new().dim(),
         )),
         Line::raw(""),
-        Line::from(vec![
-            Span::styled("title: ", f_style(F::Title)),
-            Span::styled(title.to_string(), f_style(F::Title)),
-            if matches!(focus, F::Title) {
-                Span::styled("_", Style::new().rapid_blink())
-            } else {
-                Span::raw("")
-            },
-        ]),
+        Line::from(title_spans),
         Line::raw(""),
         Line::from(vec![
             Span::styled("hide state column: ", f_style(F::HideToggle)),
@@ -1104,17 +1194,15 @@ fn draw_filter_query(
     );
 }
 
-fn draw_window_edit(f: &mut Frame, area: Rect, buffer: &str) {
+fn draw_window_edit(f: &mut Frame, area: Rect, buffer: &TInput) {
     let r = modal_rect(area, 56, 6);
     f.render_widget(Clear, r);
+    let mut buf_spans = vec![Span::raw("> ")];
+    buf_spans.extend(input_spans(buffer));
     let lines = vec![
         Line::raw("Graph history window — examples: 1h, 6h, 24h, 7d"),
         Line::raw(""),
-        Line::from(vec![
-            Span::raw("> "),
-            Span::styled(buffer.to_string(), Style::new().bold()),
-            Span::styled("_", Style::new().rapid_blink()),
-        ]),
+        Line::from(buf_spans),
     ];
     f.render_widget(
         Paragraph::new(lines)
@@ -1123,17 +1211,15 @@ fn draw_window_edit(f: &mut Frame, area: Rect, buffer: &str) {
     );
 }
 
-fn draw_card_rename(f: &mut Frame, area: Rect, buffer: &str) {
+fn draw_card_rename(f: &mut Frame, area: Rect, buffer: &TInput) {
     let r = modal_rect(area, 56, 5);
     f.render_widget(Clear, r);
+    let mut buf_spans = vec![Span::raw("> ")];
+    buf_spans.extend(input_spans(buffer));
     let lines = vec![
         Line::raw("Rename selected card (blank = clear, reverts to default):"),
         Line::raw(""),
-        Line::from(vec![
-            Span::raw("> "),
-            Span::styled(buffer.to_string(), Style::new().bold()),
-            Span::styled("_", Style::new().rapid_blink()),
-        ]),
+        Line::from(buf_spans),
     ];
     f.render_widget(
         Paragraph::new(lines)
@@ -1142,17 +1228,15 @@ fn draw_card_rename(f: &mut Frame, area: Rect, buffer: &str) {
     );
 }
 
-fn draw_rename(f: &mut Frame, area: Rect, buffer: &str) {
+fn draw_rename(f: &mut Frame, area: Rect, buffer: &TInput) {
     let r = modal_rect(area, 56, 5);
     f.render_widget(Clear, r);
+    let mut buf_spans = vec![Span::raw("> ")];
+    buf_spans.extend(input_spans(buffer));
     let lines = vec![
         Line::raw("Rename dashboard:"),
         Line::raw(""),
-        Line::from(vec![
-            Span::raw("> "),
-            Span::styled(buffer.to_string(), Style::new().bold()),
-            Span::styled("_", Style::new().rapid_blink()),
-        ]),
+        Line::from(buf_spans),
     ];
     f.render_widget(
         Paragraph::new(lines).block(Block::bordered().title(" Rename (Enter=save, Esc=cancel) ")),
@@ -1160,17 +1244,15 @@ fn draw_rename(f: &mut Frame, area: Rect, buffer: &str) {
     );
 }
 
-fn draw_text_input(f: &mut Frame, area: Rect, title: &str, hint: &str, buffer: &str) {
+fn draw_text_input(f: &mut Frame, area: Rect, title: &str, hint: &str, buffer: &TInput) {
     let r = modal_rect(area, 64, 6);
     f.render_widget(Clear, r);
+    let mut buf_spans = vec![Span::raw("> ")];
+    buf_spans.extend(input_spans(buffer));
     let lines = vec![
         Line::raw(hint.to_string()),
         Line::raw(""),
-        Line::from(vec![
-            Span::raw("> "),
-            Span::styled(buffer.to_string(), Style::new().bold()),
-            Span::styled("_", Style::new().rapid_blink()),
-        ]),
+        Line::from(buf_spans),
     ];
     f.render_widget(
         Paragraph::new(lines)
@@ -1184,9 +1266,9 @@ fn draw_text_input(f: &mut Frame, area: Rect, title: &str, hint: &str, buffer: &
 fn draw_entity_list_item_override(
     f: &mut Frame,
     area: Rect,
-    entity_id: Option<&str>,
+    entity_id: Option<&TInput>,
     focus_entity_id: bool,
-    name_buf: &str,
+    name_buf: &TInput,
     hide_state: bool,
 ) {
     let has_eid_field = entity_id.is_some();
@@ -1214,7 +1296,7 @@ fn draw_entity_list_item_override(
         ));
         let mut eid_spans = vec![
             Span::raw("> "),
-            Span::styled(eid_buf.to_string(), eid_style),
+            Span::styled(eid_buf.value().to_string(), eid_style),
         ];
         if focus_entity_id {
             eid_spans.push(Span::styled("_", Style::new().rapid_blink()));
@@ -1235,7 +1317,7 @@ fn draw_entity_list_item_override(
     ));
     let mut name_spans = vec![
         Span::raw("> "),
-        Span::styled(name_buf.to_string(), name_style),
+        Span::styled(name_buf.value().to_string(), name_style),
     ];
     if !focus_entity_id {
         name_spans.push(Span::styled("_", Style::new().rapid_blink()));
@@ -1313,7 +1395,7 @@ fn draw_pick_entity_list_item(
     );
 }
 
-fn draw_resize_grid(f: &mut Frame, area: Rect, cols: &str, rows: &str, focus_rows: bool) {
+fn draw_resize_grid(f: &mut Frame, area: Rect, cols: &TInput, rows: &TInput, focus_rows: bool) {
     let r = modal_rect(area, 56, 7);
     f.render_widget(Clear, r);
     let cstyle = if focus_rows {
@@ -1329,11 +1411,11 @@ fn draw_resize_grid(f: &mut Frame, area: Rect, cols: &str, rows: &str, focus_row
     let lines = vec![
         Line::from(vec![
             Span::styled("cols: ", cstyle),
-            Span::raw(cols.to_string()),
+            Span::raw(cols.value().to_string()),
         ]),
         Line::from(vec![
             Span::styled("rows: ", rstyle),
-            Span::raw(rows.to_string()),
+            Span::raw(rows.value().to_string()),
         ]),
         Line::raw(""),
         Line::styled(
@@ -1352,7 +1434,7 @@ fn draw_multi_picker(
     area: Rect,
     app: &App,
     instance: &str,
-    query: &str,
+    query: &TInput,
     selected: usize,
     picked: &[(String, String)],
 ) {
@@ -1399,14 +1481,12 @@ fn draw_multi_picker(
         height: inner.height.saturating_sub(4),
     };
 
-    f.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled("search: ", Style::new().dim()),
-            Span::styled(query.to_string(), Style::new().fg(color).bold()),
-            Span::styled("_", Style::new().fg(color).rapid_blink()),
-        ])),
-        search_row,
-    );
+    let multi_query_spans: Vec<Span<'_>> = {
+        let mut s = vec![Span::styled("search: ", Style::new().dim())];
+        s.extend(input_spans(query).into_iter().map(|sp| sp.fg(color)));
+        s
+    };
+    f.render_widget(Paragraph::new(Line::from(multi_query_spans)), search_row);
 
     let picked_text = if picked.is_empty() {
         "(none yet)".to_string()
@@ -1425,7 +1505,7 @@ fn draw_multi_picker(
         picked_label,
     );
 
-    let rows = crate::app::entity_search(&app.instances, instance, query);
+    let rows = crate::app::entity_search(&app.instances, instance, query.value());
     let items: Vec<ListItem<'_>> = rows
         .iter()
         .map(|p| {
@@ -1462,7 +1542,7 @@ fn draw_entity_list_title(
     area: Rect,
     instance: &str,
     picked: &[(String, String)],
-    title_buffer: &str,
+    title_buffer: &TInput,
 ) {
     let r = modal_rect(area, 72, 10);
     f.render_widget(Clear, r);
@@ -1492,11 +1572,11 @@ fn draw_entity_list_title(
             "title (default: \"Entities\"):",
             Style::new().bold(),
         )),
-        Line::from(vec![
-            Span::raw("> "),
-            Span::styled(title_buffer.to_string(), Style::new().bold()),
-            Span::styled("_", Style::new().rapid_blink()),
-        ]),
+        {
+            let mut s = vec![Span::raw("> ")];
+            s.extend(input_spans(title_buffer));
+            Line::from(s)
+        },
     ];
     f.render_widget(
         Paragraph::new(lines)
@@ -1514,20 +1594,18 @@ fn draw_confirm(f: &mut Frame, area: Rect, msg: &str) {
     );
 }
 
-fn draw_color_override(f: &mut Frame, area: Rect, buf: &str) {
+fn draw_color_override(f: &mut Frame, area: Rect, buf: &TInput) {
     let r = modal_rect(area, 64, 5);
     f.render_widget(Clear, r);
+    let mut buf_spans = vec![Span::raw("> ")];
+    buf_spans.extend(input_spans(buf));
     let lines = vec![
         Line::styled(
             "Enter named color or #rrggbb · empty to clear · Esc cancel",
             Style::new().dim(),
         ),
         Line::raw(""),
-        Line::from(vec![
-            Span::raw("> "),
-            Span::styled(buf.to_string(), Style::new().bold()),
-            Span::styled("_", Style::new().rapid_blink()),
-        ]),
+        Line::from(buf_spans),
     ];
     f.render_widget(
         Paragraph::new(lines).block(Block::bordered().title(" Color override ")),
@@ -1567,19 +1645,17 @@ fn draw_numeric_prompt(
     area: Rect,
     title: &str,
     hint: &str,
-    buf: &str,
+    buf: &TInput,
     accum: &SeverityAccum,
 ) {
     let r = modal_rect(area, 64, 9);
     f.render_widget(Clear, r);
+    let mut buf_spans = vec![Span::raw("> ")];
+    buf_spans.extend(input_spans(buf));
     let lines = vec![
         Line::styled(hint.to_string(), Style::new().bold()),
         Line::raw(""),
-        Line::from(vec![
-            Span::raw("> "),
-            Span::styled(buf.to_string(), Style::new().bold()),
-            Span::styled("_", Style::new().rapid_blink()),
-        ]),
+        Line::from(buf_spans),
         Line::raw(""),
         Line::from(vec![
             Span::styled("green: ", Style::new().fg(Color::Green).dim()),
@@ -1639,7 +1715,7 @@ fn draw_graph_add_entities(
     app: &App,
     instance: &str,
     accumulated: &[crate::dashboard::GraphSeries],
-    query: &str,
+    query: &TInput,
     selected: usize,
     asking_more: bool,
 ) {
@@ -1721,14 +1797,12 @@ fn draw_graph_add_entities(
         height: inner.height.saturating_sub(4),
     };
 
-    f.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled("search: ", Style::new().dim()),
-            Span::styled(query.to_string(), Style::new().fg(color).bold()),
-            Span::styled("_", Style::new().fg(color).rapid_blink()),
-        ])),
-        search_row,
-    );
+    let graph_query_spans: Vec<Span<'_>> = {
+        let mut s = vec![Span::styled("search: ", Style::new().dim())];
+        s.extend(input_spans(query).into_iter().map(|sp| sp.fg(color)));
+        s
+    };
+    f.render_widget(Paragraph::new(Line::from(graph_query_spans)), search_row);
     f.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled("added: ", Style::new().dim()),
@@ -1737,7 +1811,7 @@ fn draw_graph_add_entities(
         picked_row,
     );
 
-    let rows = crate::app::entity_search(&app.instances, instance, query);
+    let rows = crate::app::entity_search(&app.instances, instance, query.value());
     let items: Vec<ListItem<'_>> = rows
         .iter()
         .map(|p| {
@@ -1769,36 +1843,32 @@ fn draw_graph_add_entities(
 fn draw_graph_window_add(
     f: &mut Frame,
     area: Rect,
-    window_buf: &str,
-    title_buf: &str,
+    window_buf: &TInput,
+    title_buf: &TInput,
     title_stage: bool,
 ) {
     let r = modal_rect(area, 60, 8);
     f.render_widget(Clear, r);
     let lines = if title_stage {
+        let mut title_spans = vec![Span::raw("> ")];
+        title_spans.extend(input_spans(title_buf));
         vec![
             Line::raw("Optional card title (blank = no title):"),
             Line::raw(""),
-            Line::from(vec![
-                Span::raw("> "),
-                Span::styled(title_buf.to_string(), Style::new().bold()),
-                Span::styled("_", Style::new().rapid_blink()),
-            ]),
+            Line::from(title_spans),
             Line::raw(""),
             Line::from(vec![
                 Span::styled("window: ", Style::new().dim()),
-                Span::raw(window_buf.to_string()),
+                Span::raw(window_buf.value().to_string()),
             ]),
         ]
     } else {
+        let mut win_spans = vec![Span::raw("> ")];
+        win_spans.extend(input_spans(window_buf));
         vec![
             Line::raw("History window — examples: 1h, 6h, 24h, 7d"),
             Line::raw(""),
-            Line::from(vec![
-                Span::raw("> "),
-                Span::styled(window_buf.to_string(), Style::new().bold()),
-                Span::styled("_", Style::new().rapid_blink()),
-            ]),
+            Line::from(win_spans),
         ]
     };
     f.render_widget(
@@ -1812,20 +1882,18 @@ fn draw_graph_orientation_add(
     f: &mut Frame,
     area: Rect,
     current: BarOrientation,
-    title_buf: &str,
+    title_buf: &TInput,
     title_stage: bool,
 ) {
     if title_stage {
         let r = modal_rect(area, 60, 6);
         f.render_widget(Clear, r);
+        let mut title_spans = vec![Span::raw("> ")];
+        title_spans.extend(input_spans(title_buf));
         let lines = vec![
             Line::raw("Optional card title (blank = no title):"),
             Line::raw(""),
-            Line::from(vec![
-                Span::raw("> "),
-                Span::styled(title_buf.to_string(), Style::new().bold()),
-                Span::styled("_", Style::new().rapid_blink()),
-            ]),
+            Line::from(title_spans),
         ];
         f.render_widget(
             Paragraph::new(lines)
@@ -1864,7 +1932,7 @@ fn draw_graph_add_one_series(
     area: Rect,
     app: &App,
     card_idx: usize,
-    query: &str,
+    query: &TInput,
     selected: usize,
 ) {
     // Determine instance from card
@@ -1920,15 +1988,16 @@ fn draw_graph_add_one_series(
         width: inner.width,
         height: inner.height.saturating_sub(3),
     };
+    let one_series_query_spans: Vec<Span<'_>> = {
+        let mut s = vec![Span::styled("search: ", Style::new().dim())];
+        s.extend(input_spans(query).into_iter().map(|sp| sp.fg(color)));
+        s
+    };
     f.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled("search: ", Style::new().dim()),
-            Span::styled(query.to_string(), Style::new().fg(color).bold()),
-            Span::styled("_", Style::new().fg(color).rapid_blink()),
-        ])),
+        Paragraph::new(Line::from(one_series_query_spans)),
         search_row,
     );
-    let rows = crate::app::entity_search(&app.instances, &instance, query);
+    let rows = crate::app::entity_search(&app.instances, &instance, query.value());
     let items: Vec<ListItem<'_>> = rows
         .iter()
         .map(|p| {
@@ -2016,20 +2085,18 @@ fn draw_graph_pick_series(
     );
 }
 
-fn draw_graph_series_color(f: &mut Frame, area: Rect, buf: &str) {
+fn draw_graph_series_color(f: &mut Frame, area: Rect, buf: &TInput) {
     let r = modal_rect(area, 64, 5);
     f.render_widget(Clear, r);
+    let mut buf_spans = vec![Span::raw("> ")];
+    buf_spans.extend(input_spans(buf));
     let lines = vec![
         Line::styled(
             "Enter named color or #rrggbb · empty to clear · Esc cancel",
             Style::new().dim(),
         ),
         Line::raw(""),
-        Line::from(vec![
-            Span::raw("> "),
-            Span::styled(buf.to_string(), Style::new().bold()),
-            Span::styled("_", Style::new().rapid_blink()),
-        ]),
+        Line::from(buf_spans),
     ];
     f.render_widget(
         Paragraph::new(lines).block(Block::bordered().title(" Series colour ")),
@@ -2037,20 +2104,18 @@ fn draw_graph_series_color(f: &mut Frame, area: Rect, buf: &str) {
     );
 }
 
-fn draw_graph_series_label(f: &mut Frame, area: Rect, buf: &str) {
+fn draw_graph_series_label(f: &mut Frame, area: Rect, buf: &TInput) {
     let r = modal_rect(area, 64, 5);
     f.render_widget(Clear, r);
+    let mut buf_spans = vec![Span::raw("> ")];
+    buf_spans.extend(input_spans(buf));
     let lines = vec![
         Line::styled(
             "Enter label · empty to clear · Esc cancel",
             Style::new().dim(),
         ),
         Line::raw(""),
-        Line::from(vec![
-            Span::raw("> "),
-            Span::styled(buf.to_string(), Style::new().bold()),
-            Span::styled("_", Style::new().rapid_blink()),
-        ]),
+        Line::from(buf_spans),
     ];
     f.render_widget(
         Paragraph::new(lines).block(Block::bordered().title(" Series label ")),
