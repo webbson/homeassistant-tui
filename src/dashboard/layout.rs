@@ -84,7 +84,9 @@ pub fn grid_layout(
         1.0_f32
     };
 
-    let remaining = area.height.saturating_sub((sum_fixed as f32 * scale) as u16);
+    let remaining = area
+        .height
+        .saturating_sub((sum_fixed as f32 * scale) as u16);
     let auto_share = if n_auto > 0 {
         (remaining / n_auto).max(MIN_ROW_HEIGHT)
     } else {
@@ -120,8 +122,18 @@ pub fn grid_layout(
 
         let mut col_x = area.x;
         for (ci, col) in row.columns.iter().enumerate() {
-            let col_w = col_w_base + if ci == row.columns.len() - 1 { col_w_remainder } else { 0 };
-            let col_rect = Rect { x: col_x, y: row_y, width: col_w, height: row_h };
+            let col_w = col_w_base
+                + if ci == row.columns.len() - 1 {
+                    col_w_remainder
+                } else {
+                    0
+                };
+            let col_rect = Rect {
+                x: col_x,
+                y: row_y,
+                width: col_w,
+                height: row_h,
+            };
 
             let fill = col.effective_fill_height(row.fill_height_default());
             let scroll = col_scrolls.get(&(ri, ci)).copied().unwrap_or(0);
@@ -131,12 +143,7 @@ pub fn grid_layout(
                 .cards
                 .iter()
                 .enumerate()
-                .map(|(ci_local, _)| {
-                    card_heights
-                        .get(flat_idx + ci_local)
-                        .copied()
-                        .unwrap_or(4)
-                })
+                .map(|(ci_local, _)| card_heights.get(flat_idx + ci_local).copied().unwrap_or(4))
                 .collect();
 
             let sum_natural: u16 = col_card_heights.iter().sum();
@@ -266,7 +273,10 @@ mod tests {
                 height: *height,
                 fill_height: Some(*fill),
                 columns: (0..*n_cols)
-                    .map(|_| GridColumn { fill_height: None, cards: vec![] })
+                    .map(|_| GridColumn {
+                        fill_height: None,
+                        cards: vec![],
+                    })
                     .collect(),
             })
             .collect()
@@ -274,7 +284,12 @@ mod tests {
 
     #[test]
     fn grid_layout_fixed_and_auto_rows() {
-        let area = Rect { x: 0, y: 0, width: 120, height: 30 };
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 120,
+            height: 30,
+        };
         // Two fixed rows (10 each) + one auto row → auto gets remaining 10.
         let rows = make_grid_rows(&[
             (RowHeight::Fixed(10), 2, false),
@@ -294,11 +309,19 @@ mod tests {
     #[test]
     fn grid_layout_fill_height_proportional() {
         use crate::dashboard::{Card, CardId, CardKind, CardSize, GridColumn, GridRow};
-        let area = Rect { x: 0, y: 0, width: 60, height: 20 };
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 60,
+            height: 20,
+        };
         // One row, one column, fill_height=true, two cards with heights 4 and 6.
         let card = |h: u16| Card {
             id: CardId::ZERO,
-            kind: CardKind::Text { markdown: String::new(), title: None },
+            kind: CardKind::Text {
+                markdown: String::new(),
+                title: None,
+            },
             pos: None,
             height: Some(h),
             color: None,
@@ -325,10 +348,18 @@ mod tests {
     #[test]
     fn grid_layout_scroll_hides_top_card() {
         use crate::dashboard::{Card, CardId, CardKind, CardSize, GridColumn, GridRow};
-        let area = Rect { x: 0, y: 0, width: 60, height: 10 };
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 60,
+            height: 10,
+        };
         let card = || Card {
             id: CardId::ZERO,
-            kind: CardKind::Text { markdown: String::new(), title: None },
+            kind: CardKind::Text {
+                markdown: String::new(),
+                title: None,
+            },
             pos: None,
             height: None,
             color: None,
@@ -349,7 +380,13 @@ mod tests {
         let (slots, col_infos) = grid_layout(&rows, area, &scrolls, &card_heights);
         assert_eq!(col_infos[0].needs_scrollbar, true);
         // First card (flat_idx 0) should not appear in slots.
-        assert!(!slots.iter().any(|s| s.flat_idx == 0), "scrolled-away card must not render");
-        assert!(slots.iter().any(|s| s.flat_idx == 1), "second card must be visible");
+        assert!(
+            !slots.iter().any(|s| s.flat_idx == 0),
+            "scrolled-away card must not render"
+        );
+        assert!(
+            slots.iter().any(|s| s.flat_idx == 1),
+            "second card must be visible"
+        );
     }
 }

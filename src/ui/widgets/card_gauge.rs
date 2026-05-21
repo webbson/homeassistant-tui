@@ -118,7 +118,12 @@ pub fn render(
     };
 
     if size == CardSize::Large && crate::ui::widgets::big_text::fits(label_area) {
-        crate::ui::widgets::big_text::render_big(f, label_area, &label_str, Style::new().fg(base_color));
+        crate::ui::widgets::big_text::render_big(
+            f,
+            label_area,
+            &label_str,
+            Style::new().fg(base_color),
+        );
     } else {
         f.render_widget(
             Paragraph::new(label_str).style(Style::new().fg(base_color)),

@@ -35,7 +35,9 @@ pub fn draw(
         DashboardLayout::Free { grid, .. } => {
             let grid = *grid;
             for (i, card) in dash.cards_iter().enumerate() {
-                let Some(pos) = card.pos else { continue; };
+                let Some(pos) = card.pos else {
+                    continue;
+                };
                 let rect = cell_to_rect(area, grid, pos);
                 if rect.width < 3 || rect.height < 3 {
                     continue;
@@ -85,7 +87,8 @@ pub fn draw(
                     .copied()
                     .unwrap_or(0);
                 if current > max_scroll {
-                    app.column_scroll.insert((idx, info.row_idx, info.col_idx), max_scroll);
+                    app.column_scroll
+                        .insert((idx, info.row_idx, info.col_idx), max_scroll);
                 }
 
                 if info.needs_scrollbar && info.content_height > 0 {
@@ -105,7 +108,9 @@ pub fn draw(
 
             // Render visible card slots.
             for slot in &slots {
-                let Some(card) = dash.cards_iter().nth(slot.flat_idx) else { continue };
+                let Some(card) = dash.cards_iter().nth(slot.flat_idx) else {
+                    continue;
+                };
                 if slot.rect.width < 3 || slot.rect.height < 2 {
                     continue;
                 }
@@ -346,8 +351,7 @@ fn render_card(
                     let inner = block.inner(rect);
                     f.render_widget(block, rect);
                     f.render_widget(
-                        Paragraph::new("(hidden — no matches)")
-                            .style(Style::new().dim()),
+                        Paragraph::new("(hidden — no matches)").style(Style::new().dim()),
                         inner,
                     );
                 }

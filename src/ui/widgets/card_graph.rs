@@ -138,9 +138,12 @@ pub fn render_line(f: &mut Frame, args: GraphRender<'_>) {
     // Show legend for any non-empty series (including single), but only when
     // the card is tall enough that the chart still gets at least 3 rows for axis labels.
     let potential_legend_rows = all_series.len() as u16;
-    let show_legend = !all_series.is_empty()
-        && inner.height > potential_legend_rows + 2;
-    let legend_rows = if show_legend { potential_legend_rows } else { 0 };
+    let show_legend = !all_series.is_empty() && inner.height > potential_legend_rows + 2;
+    let legend_rows = if show_legend {
+        potential_legend_rows
+    } else {
+        0
+    };
     let chart_height = inner.height.saturating_sub(legend_rows).max(1);
 
     let window = args.window;
@@ -209,10 +212,7 @@ pub fn render_line(f: &mut Frame, args: GraphRender<'_>) {
             // Only append the value if there is enough room (swatch=2, space=2, label, space, value).
             let min_width = 2 + 2 + s.label.len() + 1 + val_str.len();
             let spans = if (row.width as usize) >= min_width {
-                let val_span = Span::styled(
-                    format!("  {val_str}"),
-                    Style::new().dim(),
-                );
+                let val_span = Span::styled(format!("  {val_str}"), Style::new().dim());
                 vec![swatch, label, val_span]
             } else {
                 vec![swatch, label]
@@ -287,12 +287,18 @@ pub fn render_bar(
     match orientation {
         BarOrientation::Vertical => {
             let bar_w = ((inner.width.saturating_sub((n - 1) * gap)) / n).clamp(3, 20);
-            let chart = BarChart::vertical(bars).block(block).bar_gap(gap).bar_width(bar_w);
+            let chart = BarChart::vertical(bars)
+                .block(block)
+                .bar_gap(gap)
+                .bar_width(bar_w);
             f.render_widget(chart, args.area);
         }
         BarOrientation::Horizontal => {
             let bar_h = ((inner.height.saturating_sub((n - 1) * gap)) / n).clamp(1, 3);
-            let chart = BarChart::horizontal(bars).block(block).bar_gap(gap).bar_width(bar_h);
+            let chart = BarChart::horizontal(bars)
+                .block(block)
+                .bar_gap(gap)
+                .bar_width(bar_h);
             f.render_widget(chart, args.area);
         }
     }
@@ -323,7 +329,11 @@ pub fn render_pie(f: &mut Frame, args: GraphRender<'_>, current: &[(EntityId, Op
             let color = series_color(s, args.card_color, args.instance, args.theme);
             let val_str = legend_value_str(args.current_states.get(i).and_then(|o| *o));
             let label = format!("{} ({})", series_label(s), val_str);
-            Some(SliceData { label, value: v, color })
+            Some(SliceData {
+                label,
+                value: v,
+                color,
+            })
         })
         .collect();
     let pie_slices: Vec<PieSlice> = slice_data
@@ -343,7 +353,9 @@ pub fn render_pie(f: &mut Frame, args: GraphRender<'_>, current: &[(EntityId, Op
 
     f.render_widget(block, args.area);
     f.render_widget(
-        PieChart::new(pie_slices).show_legend(true).show_percentages(true),
+        PieChart::new(pie_slices)
+            .show_legend(true)
+            .show_percentages(true),
         inner,
     );
 }

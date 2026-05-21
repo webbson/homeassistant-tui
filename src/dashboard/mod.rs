@@ -54,9 +54,10 @@ impl<'de> Deserialize<'de> for Dashboard {
         let raw = DashboardRaw::deserialize(de)?;
         let layout = match (raw.layout_type.as_deref(), raw.grid, raw.cards, raw.rows) {
             // Explicit `type: free` or inferred from having grid+cards and no rows
-            (None | Some("free"), Some(grid), cards_opt, None) => {
-                DashboardLayout::Free { grid, cards: cards_opt.unwrap_or_default() }
-            }
+            (None | Some("free"), Some(grid), cards_opt, None) => DashboardLayout::Free {
+                grid,
+                cards: cards_opt.unwrap_or_default(),
+            },
             (Some("free"), _, _, Some(_)) => {
                 return Err(serde::de::Error::custom(
                     "dashboard has `type: free` but also `rows` — remove one",
@@ -69,7 +70,9 @@ impl<'de> Deserialize<'de> for Dashboard {
                         "dashboard has `type: grid` but also `grid`/`cards` fields — remove them",
                     ));
                 }
-                DashboardLayout::Grid { rows: rows_opt.unwrap_or_default() }
+                DashboardLayout::Grid {
+                    rows: rows_opt.unwrap_or_default(),
+                }
             }
             // Inferred from rows presence
             (None, None, None, Some(rows)) => DashboardLayout::Grid { rows },
@@ -98,7 +101,10 @@ impl<'de> Deserialize<'de> for Dashboard {
                 )));
             }
         };
-        Ok(Dashboard { name: raw.name, layout })
+        Ok(Dashboard {
+            name: raw.name,
+            layout,
+        })
     }
 }
 
@@ -205,7 +211,9 @@ impl Dashboard {
 
     /// Reverse of `flat_idx_from_grid`: flat index → (row, col, pos_in_col).
     pub fn locate_grid_flat(&self, flat_idx: usize) -> Option<(usize, usize, usize)> {
-        let DashboardLayout::Grid { rows } = &self.layout else { return None; };
+        let DashboardLayout::Grid { rows } = &self.layout else {
+            return None;
+        };
         let mut f = 0usize;
         for (ri, row) in rows.iter().enumerate() {
             for (ci, col) in row.columns.iter().enumerate() {
@@ -219,7 +227,12 @@ impl Dashboard {
     }
 
     /// Compute the flat index for a (row, col, pos_in_col) triple in a grid layout.
-    pub fn flat_idx_from_grid(&self, row_idx: usize, col_idx: usize, pos_in_col: usize) -> Option<usize> {
+    pub fn flat_idx_from_grid(
+        &self,
+        row_idx: usize,
+        col_idx: usize,
+        pos_in_col: usize,
+    ) -> Option<usize> {
         let DashboardLayout::Grid { rows } = &self.layout else {
             return None;
         };
@@ -340,84 +353,158 @@ impl Dashboard {
 
     /// Append a new row to a grid-layout dashboard.
     pub fn grid_add_row(&mut self, height: RowHeight, n_cols: usize) {
-        let DashboardLayout::Grid { rows } = &mut self.layout else { return; };
+        let DashboardLayout::Grid { rows } = &mut self.layout else {
+            return;
+        };
         rows.push(GridRow {
             height,
             fill_height: None,
-            columns: (0..n_cols.max(1)).map(|_| GridColumn { fill_height: None, cards: vec![] }).collect(),
+            columns: (0..n_cols.max(1))
+                .map(|_| GridColumn {
+                    fill_height: None,
+                    cards: vec![],
+                })
+                .collect(),
         });
     }
 
     /// Remove a row by index. Returns false if index is out of range or last row.
     pub fn grid_remove_row(&mut self, row_idx: usize) -> bool {
-        let DashboardLayout::Grid { rows } = &mut self.layout else { return false; };
-        if rows.len() <= 1 || row_idx >= rows.len() { return false; }
+        let DashboardLayout::Grid { rows } = &mut self.layout else {
+            return false;
+        };
+        if rows.len() <= 1 || row_idx >= rows.len() {
+            return false;
+        }
         rows.remove(row_idx);
         true
     }
 
     /// Swap two adjacent rows (move row_idx up or down).
     pub fn grid_move_row(&mut self, row_idx: usize, up: bool) -> bool {
-        let DashboardLayout::Grid { rows } = &mut self.layout else { return false; };
-        let other = if up { row_idx.checked_sub(1) } else { row_idx.checked_add(1) };
-        let Some(other) = other else { return false; };
-        if other >= rows.len() { return false; }
+        let DashboardLayout::Grid { rows } = &mut self.layout else {
+            return false;
+        };
+        let other = if up {
+            row_idx.checked_sub(1)
+        } else {
+            row_idx.checked_add(1)
+        };
+        let Some(other) = other else {
+            return false;
+        };
+        if other >= rows.len() {
+            return false;
+        }
         rows.swap(row_idx, other);
         true
     }
 
     /// Add a column to a row.
     pub fn grid_add_column(&mut self, row_idx: usize) -> bool {
-        let DashboardLayout::Grid { rows } = &mut self.layout else { return false; };
-        let Some(row) = rows.get_mut(row_idx) else { return false; };
-        row.columns.push(GridColumn { fill_height: None, cards: vec![] });
+        let DashboardLayout::Grid { rows } = &mut self.layout else {
+            return false;
+        };
+        let Some(row) = rows.get_mut(row_idx) else {
+            return false;
+        };
+        row.columns.push(GridColumn {
+            fill_height: None,
+            cards: vec![],
+        });
         true
     }
 
     /// Remove a column (and its cards) from a row.
     pub fn grid_remove_column(&mut self, row_idx: usize, col_idx: usize) -> bool {
-        let DashboardLayout::Grid { rows } = &mut self.layout else { return false; };
-        let Some(row) = rows.get_mut(row_idx) else { return false; };
-        if row.columns.len() <= 1 || col_idx >= row.columns.len() { return false; }
+        let DashboardLayout::Grid { rows } = &mut self.layout else {
+            return false;
+        };
+        let Some(row) = rows.get_mut(row_idx) else {
+            return false;
+        };
+        if row.columns.len() <= 1 || col_idx >= row.columns.len() {
+            return false;
+        }
         row.columns.remove(col_idx);
         true
     }
 
     /// Swap two adjacent columns within a row.
     pub fn grid_move_column(&mut self, row_idx: usize, col_idx: usize, left: bool) -> bool {
-        let DashboardLayout::Grid { rows } = &mut self.layout else { return false; };
-        let Some(row) = rows.get_mut(row_idx) else { return false; };
-        let other = if left { col_idx.checked_sub(1) } else { col_idx.checked_add(1) };
-        let Some(other) = other else { return false; };
-        if other >= row.columns.len() { return false; }
+        let DashboardLayout::Grid { rows } = &mut self.layout else {
+            return false;
+        };
+        let Some(row) = rows.get_mut(row_idx) else {
+            return false;
+        };
+        let other = if left {
+            col_idx.checked_sub(1)
+        } else {
+            col_idx.checked_add(1)
+        };
+        let Some(other) = other else {
+            return false;
+        };
+        if other >= row.columns.len() {
+            return false;
+        }
         row.columns.swap(col_idx, other);
         true
     }
 
     /// Move a card up or down within its column.
-    pub fn grid_move_card_in_column(&mut self, row_idx: usize, col_idx: usize, pos: usize, up: bool) -> bool {
-        let DashboardLayout::Grid { rows } = &mut self.layout else { return false; };
-        let Some(row) = rows.get_mut(row_idx) else { return false; };
-        let Some(col) = row.columns.get_mut(col_idx) else { return false; };
-        let other = if up { pos.checked_sub(1) } else { pos.checked_add(1) };
-        let Some(other) = other else { return false; };
-        if other >= col.cards.len() { return false; }
+    pub fn grid_move_card_in_column(
+        &mut self,
+        row_idx: usize,
+        col_idx: usize,
+        pos: usize,
+        up: bool,
+    ) -> bool {
+        let DashboardLayout::Grid { rows } = &mut self.layout else {
+            return false;
+        };
+        let Some(row) = rows.get_mut(row_idx) else {
+            return false;
+        };
+        let Some(col) = row.columns.get_mut(col_idx) else {
+            return false;
+        };
+        let other = if up {
+            pos.checked_sub(1)
+        } else {
+            pos.checked_add(1)
+        };
+        let Some(other) = other else {
+            return false;
+        };
+        if other >= col.cards.len() {
+            return false;
+        }
         col.cards.swap(pos, other);
         true
     }
 
     /// Set the height of a grid row.
     pub fn grid_set_row_height(&mut self, row_idx: usize, height: RowHeight) -> bool {
-        let DashboardLayout::Grid { rows } = &mut self.layout else { return false; };
-        let Some(row) = rows.get_mut(row_idx) else { return false; };
+        let DashboardLayout::Grid { rows } = &mut self.layout else {
+            return false;
+        };
+        let Some(row) = rows.get_mut(row_idx) else {
+            return false;
+        };
         row.height = height;
         true
     }
 
     /// Toggle the `fill_height` default for a row.
     pub fn grid_toggle_row_fill_height(&mut self, row_idx: usize) -> bool {
-        let DashboardLayout::Grid { rows } = &mut self.layout else { return false; };
-        let Some(row) = rows.get_mut(row_idx) else { return false; };
+        let DashboardLayout::Grid { rows } = &mut self.layout else {
+            return false;
+        };
+        let Some(row) = rows.get_mut(row_idx) else {
+            return false;
+        };
         let current = row.fill_height.unwrap_or(false);
         row.fill_height = Some(!current);
         true
@@ -425,9 +512,15 @@ impl Dashboard {
 
     /// Toggle `fill_height` for a specific column.
     pub fn grid_toggle_column_fill_height(&mut self, row_idx: usize, col_idx: usize) -> bool {
-        let DashboardLayout::Grid { rows } = &mut self.layout else { return false; };
-        let Some(row) = rows.get_mut(row_idx) else { return false; };
-        let Some(col) = row.columns.get_mut(col_idx) else { return false; };
+        let DashboardLayout::Grid { rows } = &mut self.layout else {
+            return false;
+        };
+        let Some(row) = rows.get_mut(row_idx) else {
+            return false;
+        };
+        let Some(col) = row.columns.get_mut(col_idx) else {
+            return false;
+        };
         let current = col.fill_height.unwrap_or(false);
         col.fill_height = Some(!current);
         true
@@ -582,7 +675,10 @@ impl<'de> Deserialize<'de> for RowHeight {
                 if v.eq_ignore_ascii_case("auto") {
                     Ok(RowHeight::Auto)
                 } else {
-                    Err(E::custom(format!("expected \"auto\" or integer, got {:?}", v)))
+                    Err(E::custom(format!(
+                        "expected \"auto\" or integer, got {:?}",
+                        v
+                    )))
                 }
             }
         }
@@ -624,7 +720,6 @@ impl GridRow {
 }
 
 // ── Dashboard layout ────────────────────────────────────────────────────────
-
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -1017,7 +1112,11 @@ impl Card {
     ///
     /// If `self.height` is set it always wins. Otherwise falls back to per-kind static defaults,
     /// with Text/EntityList/FilteredEntityList scaling with content.
-    pub fn preferred_height(&self, available_width: u16, filtered_entity_count: Option<usize>) -> u16 {
+    pub fn preferred_height(
+        &self,
+        available_width: u16,
+        filtered_entity_count: Option<usize>,
+    ) -> u16 {
         if let Some(h) = self.height {
             return h;
         }
@@ -1029,7 +1128,11 @@ impl Card {
             CardKind::Statistics { .. } => 4,
             CardKind::MediaPlayer { .. } => 6,
             CardKind::Weather { show_forecast, .. } => {
-                if *show_forecast { 12 } else { 6 }
+                if *show_forecast {
+                    12
+                } else {
+                    6
+                }
             }
             CardKind::Image { .. } => 10,
             CardKind::Graph { .. } => 10,
@@ -1453,7 +1556,10 @@ pos: { col: 0, row: 0, w: 6, h: 4 }
                     .collect(),
             })
             .collect();
-        Dashboard { name: "test".into(), layout: DashboardLayout::Grid { rows } }
+        Dashboard {
+            name: "test".into(),
+            layout: DashboardLayout::Grid { rows },
+        }
     }
 
     #[test]
@@ -1471,8 +1577,16 @@ pos: { col: 0, row: 0, w: 6, h: 4 }
         // 1 row, 3 cols of 2 cards each: flat 0-1 / 2-3 / 4-5
         let dash = make_grid_dashboard(&[&[2, 2, 2]]);
         assert_eq!(dash.neighbor(0, NavDir::Left), None, "leftmost col stays");
-        assert_eq!(dash.neighbor(0, NavDir::Right), Some(2), "go to col 1 pos 0");
-        assert_eq!(dash.neighbor(3, NavDir::Left), Some(1), "col 1 pos 1 → col 0 pos 1");
+        assert_eq!(
+            dash.neighbor(0, NavDir::Right),
+            Some(2),
+            "go to col 1 pos 0"
+        );
+        assert_eq!(
+            dash.neighbor(3, NavDir::Left),
+            Some(1),
+            "col 1 pos 1 → col 0 pos 1"
+        );
         // col 2 flat 4-5; neighbor Right from last col → None
         assert_eq!(dash.neighbor(4, NavDir::Right), None);
     }
@@ -1542,7 +1656,7 @@ pos: { col: 0, row: 0, w: 6, h: 4 }
         let before_id = dash.flat_idx_of(id0).unwrap();
         assert_eq!(before_id, 0);
         dash.grid_move_card_in_column(0, 0, 0, false); // move pos-0 down → pos-1
-        // id0 should now be at flat index 1.
+                                                       // id0 should now be at flat index 1.
         assert_eq!(dash.flat_idx_of(id0), Some(1));
     }
 
@@ -1567,9 +1681,18 @@ pos: { col: 0, row: 0, w: 4, h: 4 }
         assert!(matches!(&entities[1], EntityListItem::Bare(e) if e == "light.bedroom"));
         // Verify bare form is preserved on serialization (not expanded to {entity: ...}).
         let back = serde_yaml::to_string(&card).unwrap();
-        assert!(back.contains("- light.kitchen"), "bare string form not preserved: {back}");
-        assert!(back.contains("- light.bedroom"), "bare string form not preserved: {back}");
-        assert!(!back.contains("entity: light.kitchen"), "bare was expanded: {back}");
+        assert!(
+            back.contains("- light.kitchen"),
+            "bare string form not preserved: {back}"
+        );
+        assert!(
+            back.contains("- light.bedroom"),
+            "bare string form not preserved: {back}"
+        );
+        assert!(
+            !back.contains("entity: light.kitchen"),
+            "bare was expanded: {back}"
+        );
     }
 
     #[test]
@@ -1631,7 +1754,10 @@ pos: { col: 0, row: 0, w: 4, h: 4 }
         };
         assert_eq!(entities.len(), 2);
         assert!(matches!(&entities[0], EntityListItem::Bare(_)));
-        assert!(matches!(&entities[1], EntityListItem::Full { name: Some(_), .. }));
+        assert!(matches!(
+            &entities[1],
+            EntityListItem::Full { name: Some(_), .. }
+        ));
         let back = serde_yaml::to_string(&card).unwrap();
         assert!(back.contains("- light.kitchen"));
         assert!(back.contains("name: Bedroom"));
@@ -1678,7 +1804,10 @@ pos: { col: 0, row: 0, w: 4, h: 4 }
         assert!(overrides.is_empty());
         let back = serde_yaml::to_string(&card).unwrap();
         // Empty overrides map must not appear in serialized output.
-        assert!(!back.contains("overrides:"), "empty overrides should be omitted: {back}");
+        assert!(
+            !back.contains("overrides:"),
+            "empty overrides should be omitted: {back}"
+        );
     }
 
     // Required canonical test names -----------------------------------------------
@@ -1698,8 +1827,14 @@ pos: { col: 0, row: 0, w: 4, h: 4 }
         };
         assert!(matches!(&entities[0], EntityListItem::Bare(e) if e == "light.kitchen"));
         let back = serde_yaml::to_string(&card).unwrap();
-        assert!(back.contains("- light.kitchen"), "bare string not preserved: {back}");
-        assert!(!back.contains("entity: light.kitchen"), "bare was expanded: {back}");
+        assert!(
+            back.contains("- light.kitchen"),
+            "bare string not preserved: {back}"
+        );
+        assert!(
+            !back.contains("entity: light.kitchen"),
+            "bare was expanded: {back}"
+        );
     }
 
     #[test]
@@ -1743,7 +1878,10 @@ pos: { col: 0, row: 0, w: 4, h: 4 }
         };
         assert_eq!(entities.len(), 2);
         assert!(matches!(&entities[0], EntityListItem::Bare(_)));
-        assert!(matches!(&entities[1], EntityListItem::Full { name: Some(_), .. }));
+        assert!(matches!(
+            &entities[1],
+            EntityListItem::Full { name: Some(_), .. }
+        ));
         let back = serde_yaml::to_string(&card).unwrap();
         assert!(back.contains("- light.kitchen"));
         assert!(back.contains("name: Bedroom"));
@@ -1776,7 +1914,10 @@ pos: { col: 0, row: 0, w: 4, h: 4 }
 "#;
         let card: Card = serde_yaml::from_str(yaml).unwrap();
         let back = serde_yaml::to_string(&card).unwrap();
-        assert!(!back.contains("overrides:"), "empty overrides should be omitted: {back}");
+        assert!(
+            !back.contains("overrides:"),
+            "empty overrides should be omitted: {back}"
+        );
     }
 
     #[test]

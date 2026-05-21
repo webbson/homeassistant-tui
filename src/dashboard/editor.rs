@@ -1,6 +1,6 @@
 use crate::dashboard::{
-    BarOrientation, Card, CardKind, CardSize, Dashboard, DashboardLayout, GraphSeries,
-    GraphType, Pos, RowHeight, StatsMetric,
+    BarOrientation, Card, CardKind, CardSize, Dashboard, DashboardLayout, GraphSeries, GraphType,
+    Pos, RowHeight, StatsMetric,
 };
 
 const MAX_UNDO: usize = 32;
@@ -420,9 +420,18 @@ pub enum TransferOp {
 /// Where the editor focus sits within a grid-layout dashboard.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GridFocus {
-    Card { row: usize, col: usize, pos_in_col: usize },
-    Column { row: usize, col: usize },
-    Row { row: usize },
+    Card {
+        row: usize,
+        col: usize,
+        pos_in_col: usize,
+    },
+    Column {
+        row: usize,
+        col: usize,
+    },
+    Row {
+        row: usize,
+    },
 }
 
 /// Accumulates the first two threshold values while collecting severity input.
@@ -680,42 +689,91 @@ pub fn card_menu_items(card: &Card) -> Vec<MenuItem> {
 /// Grid-only card menu additions (appended by `open_menu` when in a grid dashboard).
 pub fn grid_card_extra_items() -> Vec<MenuItem> {
     vec![
-        MenuItem { action: MenuAction::MoveCardUpInColumn, label: "Move up in column" },
-        MenuItem { action: MenuAction::MoveCardDownInColumn, label: "Move down in column" },
-        MenuItem { action: MenuAction::MoveToColumn, label: "Move to column…" },
+        MenuItem {
+            action: MenuAction::MoveCardUpInColumn,
+            label: "Move up in column",
+        },
+        MenuItem {
+            action: MenuAction::MoveCardDownInColumn,
+            label: "Move down in column",
+        },
+        MenuItem {
+            action: MenuAction::MoveToColumn,
+            label: "Move to column…",
+        },
     ]
 }
 
 pub fn row_menu_items() -> Vec<MenuItem> {
     vec![
-        MenuItem { action: MenuAction::SetRowHeight, label: "Set row height" },
-        MenuItem { action: MenuAction::ToggleRowFillHeight, label: "Toggle fill_height default" },
-        MenuItem { action: MenuAction::AddColumn, label: "Add column" },
-        MenuItem { action: MenuAction::MoveRowUp, label: "Move row up" },
-        MenuItem { action: MenuAction::MoveRowDown, label: "Move row down" },
-        MenuItem { action: MenuAction::RemoveRow, label: "Remove row" },
+        MenuItem {
+            action: MenuAction::SetRowHeight,
+            label: "Set row height",
+        },
+        MenuItem {
+            action: MenuAction::ToggleRowFillHeight,
+            label: "Toggle fill_height default",
+        },
+        MenuItem {
+            action: MenuAction::AddColumn,
+            label: "Add column",
+        },
+        MenuItem {
+            action: MenuAction::MoveRowUp,
+            label: "Move row up",
+        },
+        MenuItem {
+            action: MenuAction::MoveRowDown,
+            label: "Move row down",
+        },
+        MenuItem {
+            action: MenuAction::RemoveRow,
+            label: "Remove row",
+        },
     ]
 }
 
 pub fn column_menu_items() -> Vec<MenuItem> {
     vec![
-        MenuItem { action: MenuAction::SetColumnFillHeight, label: "Toggle fill_height" },
-        MenuItem { action: MenuAction::MoveColumnLeft, label: "Move column left" },
-        MenuItem { action: MenuAction::MoveColumnRight, label: "Move column right" },
-        MenuItem { action: MenuAction::RemoveColumn, label: "Remove column" },
+        MenuItem {
+            action: MenuAction::SetColumnFillHeight,
+            label: "Toggle fill_height",
+        },
+        MenuItem {
+            action: MenuAction::MoveColumnLeft,
+            label: "Move column left",
+        },
+        MenuItem {
+            action: MenuAction::MoveColumnRight,
+            label: "Move column right",
+        },
+        MenuItem {
+            action: MenuAction::RemoveColumn,
+            label: "Remove column",
+        },
     ]
 }
 
 pub fn dashboard_menu_items(is_grid: bool) -> Vec<MenuItem> {
-    let mut items = vec![
-        MenuItem { action: MenuAction::RenameDashboard, label: "Rename dashboard" },
-    ];
+    let mut items = vec![MenuItem {
+        action: MenuAction::RenameDashboard,
+        label: "Rename dashboard",
+    }];
     if is_grid {
-        items.push(MenuItem { action: MenuAction::AddRow, label: "Add row" });
+        items.push(MenuItem {
+            action: MenuAction::AddRow,
+            label: "Add row",
+        });
     } else {
-        items.push(MenuItem { action: MenuAction::ResizeGrid, label: "Grid size (cols × rows)" });
+        items.push(MenuItem {
+            action: MenuAction::ResizeGrid,
+            label: "Grid size (cols × rows)",
+        });
     }
-    items.push(MenuItem { action: MenuAction::DeleteDashboard, label: "Delete dashboard" });
+    items.push(MenuItem {
+        action: MenuAction::DeleteDashboard,
+        label: "Delete dashboard",
+    });
     items
 }
 
@@ -815,12 +873,17 @@ impl EditorState {
 
     pub fn resize_selected(&mut self, dw: i32, dh: i32, dash: &mut Dashboard) {
         let Some(i) = self.selected_card else { return };
-        let (grid_cols, grid_rows) = dash.free_grid().map(|g| (g.cols, g.rows)).unwrap_or((12, 8));
+        let (grid_cols, grid_rows) = dash
+            .free_grid()
+            .map(|g| (g.cols, g.rows))
+            .unwrap_or((12, 8));
         let Some(card) = dash.card_mut(i) else {
             return;
         };
         self.snapshot_inner(card);
-        let Some(pos) = card.pos.as_mut() else { return; };
+        let Some(pos) = card.pos.as_mut() else {
+            return;
+        };
         let new_w = clamp_dim(pos.w, dw, grid_cols - pos.col);
         let new_h = clamp_dim(pos.h, dh, grid_rows - pos.row);
         pos.w = new_w.max(1);
@@ -832,11 +895,16 @@ impl EditorState {
         let Some(i) = self.selected_card else { return };
         let target_col = self.cursor_col;
         let target_row = self.cursor_row;
-        let (grid_cols, grid_rows) = dash.free_grid().map(|g| (g.cols, g.rows)).unwrap_or((12, 8));
+        let (grid_cols, grid_rows) = dash
+            .free_grid()
+            .map(|g| (g.cols, g.rows))
+            .unwrap_or((12, 8));
         let Some(card) = dash.card_mut(i) else {
             return;
         };
-        let Some(pos) = card.pos.as_mut() else { return; };
+        let Some(pos) = card.pos.as_mut() else {
+            return;
+        };
         let new_col = target_col.min(grid_cols.saturating_sub(pos.w));
         let new_row = target_row.min(grid_rows.saturating_sub(pos.h));
         if pos.col != new_col || pos.row != new_row {
@@ -887,12 +955,21 @@ impl EditorState {
                     if let Some(row) = rows.get(row_idx) {
                         if let Some(col) = row.columns.get(col_idx) {
                             let pos_in_col = col.cards.len().saturating_sub(1);
-                            self.grid_focus = Some(GridFocus::Card { row: row_idx, col: col_idx, pos_in_col });
+                            self.grid_focus = Some(GridFocus::Card {
+                                row: row_idx,
+                                col: col_idx,
+                                pos_in_col,
+                            });
                         }
                     }
                 }
                 self.selected_card = self.grid_focus.and_then(|gf| {
-                    if let GridFocus::Card { row, col, pos_in_col } = gf {
+                    if let GridFocus::Card {
+                        row,
+                        col,
+                        pos_in_col,
+                    } = gf
+                    {
                         dash.flat_idx_from_grid(row, col, pos_in_col)
                     } else {
                         None
@@ -901,7 +978,10 @@ impl EditorState {
                 self.dirty = true;
             }
             DashboardLayout::Free { .. } => {
-                let (gcols, grows) = dash.free_grid().map(|g| (g.cols, g.rows)).unwrap_or((12, 8));
+                let (gcols, grows) = dash
+                    .free_grid()
+                    .map(|g| (g.cols, g.rows))
+                    .unwrap_or((12, 8));
                 let card = Card {
                     id: dash.next_card_id(),
                     pos: Some(Pos {
@@ -969,11 +1049,7 @@ pub fn card_at(dash: &Dashboard, col: u16, row: u16) -> Option<usize> {
     let cards: Vec<_> = dash.cards_iter().enumerate().collect();
     for (i, c) in cards.into_iter().rev() {
         if let Some(pos) = c.pos {
-            if col >= pos.col
-                && col < pos.col + pos.w
-                && row >= pos.row
-                && row < pos.row + pos.h
-            {
+            if col >= pos.col && col < pos.col + pos.w && row >= pos.row && row < pos.row + pos.h {
                 return Some(i);
             }
         }
@@ -984,8 +1060,8 @@ pub fn card_at(dash: &Dashboard, col: u16, row: u16) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dashboard::{CardId, Grid};
     use crate::dashboard::Pos;
+    use crate::dashboard::{CardId, Grid};
 
     fn make_dash() -> Dashboard {
         Dashboard {

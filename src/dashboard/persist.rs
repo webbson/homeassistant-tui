@@ -69,7 +69,9 @@ pub fn save(file: &DashboardFile, path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dashboard::{Card, CardId, CardKind, CardSize, Dashboard, DashboardLayout, Grid, Pos};
+    use crate::dashboard::{
+        Card, CardId, CardKind, CardSize, Dashboard, DashboardLayout, Grid, Pos,
+    };
 
     #[test]
     fn round_trip_yaml() {
@@ -142,7 +144,10 @@ dashboards:
             }],
         };
         let yaml = serde_yaml::to_string(&f).unwrap();
-        assert!(!yaml.contains("type:"), "free dashboard must not emit type: key");
+        assert!(
+            !yaml.contains("type:"),
+            "free dashboard must not emit type: key"
+        );
         assert!(yaml.contains("grid:"), "free dashboard must emit grid:");
         assert!(yaml.contains("cards:"), "free dashboard must emit cards:");
         // Re-parse and verify structure preserved

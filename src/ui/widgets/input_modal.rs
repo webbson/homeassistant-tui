@@ -78,8 +78,7 @@ fn render_text_input(f: &mut Frame, area: Rect, state: &InputModalState) {
 
     let mut y = area.y + 3;
     if let Some(err) = &state.error {
-        let err_line =
-            Paragraph::new(Line::from(Span::styled(err.as_str(), Style::new().red())));
+        let err_line = Paragraph::new(Line::from(Span::styled(err.as_str(), Style::new().red())));
         f.render_widget(
             err_line,
             Rect {
@@ -165,7 +164,9 @@ fn render_select(
 
 fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
     let x = area.x.saturating_add(area.width.saturating_sub(width) / 2);
-    let y = area.y.saturating_add(area.height.saturating_sub(height) / 2);
+    let y = area
+        .y
+        .saturating_add(area.height.saturating_sub(height) / 2);
     Rect {
         x,
         y,
@@ -187,14 +188,8 @@ pub fn build_input_modal_kind(domain: &str, state: &EntityState) -> InputModalKi
             InputModalKind::Number { min, max, step }
         }
         "input_text" => {
-            let min_length = attrs
-                .get("min")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0) as usize;
-            let max_length = attrs
-                .get("max")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(255) as usize;
+            let min_length = attrs.get("min").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            let max_length = attrs.get("max").and_then(|v| v.as_u64()).unwrap_or(255) as usize;
             let password = attrs.get("mode").and_then(|v| v.as_str()) == Some("password");
             InputModalKind::Text {
                 min_length,
@@ -523,7 +518,13 @@ mod tests {
     fn build_number_cmd() {
         let s = make_number_state("42", 0.0, 100.0);
         let cmd = build_input_submit_cmd(&s).unwrap();
-        let HaCommand::CallService { domain, service, service_data, .. } = cmd else {
+        let HaCommand::CallService {
+            domain,
+            service,
+            service_data,
+            ..
+        } = cmd
+        else {
             panic!("expected CallService");
         };
         assert_eq!(domain, "input_number");
@@ -535,7 +536,13 @@ mod tests {
     fn build_text_cmd() {
         let s = make_text_state("hello", 0, 255);
         let cmd = build_input_submit_cmd(&s).unwrap();
-        let HaCommand::CallService { domain, service, service_data, .. } = cmd else {
+        let HaCommand::CallService {
+            domain,
+            service,
+            service_data,
+            ..
+        } = cmd
+        else {
             panic!("expected CallService");
         };
         assert_eq!(domain, "input_text");
@@ -547,7 +554,13 @@ mod tests {
     fn build_select_cmd() {
         let s = make_select_state("b", &["a", "b", "c"]);
         let cmd = build_input_submit_cmd(&s).unwrap();
-        let HaCommand::CallService { domain, service, service_data, .. } = cmd else {
+        let HaCommand::CallService {
+            domain,
+            service,
+            service_data,
+            ..
+        } = cmd
+        else {
             panic!("expected CallService");
         };
         assert_eq!(domain, "input_select");
@@ -559,7 +572,13 @@ mod tests {
     fn build_datetime_cmd_full() {
         let s = make_datetime_state("2024-03-15 14:30:00", true, true);
         let cmd = build_input_submit_cmd(&s).unwrap();
-        let HaCommand::CallService { domain, service, service_data, .. } = cmd else {
+        let HaCommand::CallService {
+            domain,
+            service,
+            service_data,
+            ..
+        } = cmd
+        else {
             panic!("expected CallService");
         };
         assert_eq!(domain, "input_datetime");

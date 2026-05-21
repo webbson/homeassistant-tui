@@ -57,8 +57,22 @@ pub struct InputModalState {
 
 #[derive(Debug, Clone)]
 pub enum InputModalKind {
-    Number { min: f64, max: f64, step: f64 },
-    Text { min_length: usize, max_length: usize, password: bool },
-    Select { options: Vec<String>, selected: usize },
-    DateTime { has_date: bool, has_time: bool },
+    Number {
+        min: f64,
+        max: f64,
+        step: f64,
+    },
+    Text {
+        min_length: usize,
+        max_length: usize,
+        password: bool,
+    },
+    Select {
+        options: Vec<String>,
+        selected: usize,
+    },
+    DateTime {
+        has_date: bool,
+        has_time: bool,
+    },
 }

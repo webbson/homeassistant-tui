@@ -13,9 +13,7 @@ pub fn default_action(entity_id: &EntityId, state: Option<&EntityState>) -> Opti
         "script" | "automation" | "scene" => {
             ("turn_on".to_string(), json!({ "entity_id": entity_id }))
         }
-        "button" | "input_button" => {
-            ("press".to_string(), json!({ "entity_id": entity_id }))
-        }
+        "button" | "input_button" => ("press".to_string(), json!({ "entity_id": entity_id })),
         "lock" => {
             // If locked → unlock; otherwise (unlocked, jammed, unknown) → lock.
             // Exception: if state is completely absent (None), preserve legacy unlock behavior.
@@ -101,7 +99,10 @@ mod tests {
     #[test]
     fn button_presses() {
         let cmd = default_action(&"button.doorbell".to_string(), None).unwrap();
-        let HaCommand::CallService { domain, service, .. } = cmd else {
+        let HaCommand::CallService {
+            domain, service, ..
+        } = cmd
+        else {
             panic!("expected CallService");
         };
         assert_eq!(domain, "button");

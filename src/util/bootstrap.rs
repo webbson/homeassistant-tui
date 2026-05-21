@@ -3,7 +3,9 @@ use std::path::Path;
 use color_eyre::eyre::Context;
 use color_eyre::Result;
 
-use crate::dashboard::{Card, CardId, CardKind, CardSize, Dashboard, DashboardFile, DashboardLayout, Grid, Pos};
+use crate::dashboard::{
+    Card, CardId, CardKind, CardSize, Dashboard, DashboardFile, DashboardLayout, Grid, Pos,
+};
 
 const EXAMPLE_CONFIG: &str = include_str!("../../config/config.example.yaml");
 

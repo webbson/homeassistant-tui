@@ -8,10 +8,10 @@ use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragra
 use ratatui::Frame;
 
 use crate::app::App;
-use crate::dashboard::editor::{GridFocus, SeverityAccum};
 use crate::dashboard::editor::{CardTypeStub, EditorMode, SeriesIndexOp, TransferOp};
-use crate::dashboard::DashboardLayout;
+use crate::dashboard::editor::{GridFocus, SeverityAccum};
 use crate::dashboard::layout::{cell_to_rect, grid_layout};
+use crate::dashboard::DashboardLayout;
 use crate::dashboard::{BarOrientation, CardSize};
 
 pub fn draw(f: &mut Frame, area: Rect, app: &mut App) {
@@ -22,11 +22,18 @@ pub fn draw(f: &mut Frame, area: Rect, app: &mut App) {
 
     // Detect layout type before the mutable dashboard draw.
     let (dash_idx, is_grid, cursor_col, cursor_row, dash_grid, card_pos, grid_focus, selected_card) = {
-        let Some(editor) = app.editor.as_ref() else { return; };
-        let Some(dash) = app.dashboards.get(editor.dash_idx) else { return; };
+        let Some(editor) = app.editor.as_ref() else {
+            return;
+        };
+        let Some(dash) = app.dashboards.get(editor.dash_idx) else {
+            return;
+        };
         let is_grid = matches!(&dash.layout, DashboardLayout::Grid { .. });
         let card_pos = if !is_grid {
-            editor.selected_card.and_then(|i| dash.card(i)).and_then(|c| c.pos)
+            editor
+                .selected_card
+                .and_then(|i| dash.card(i))
+                .and_then(|c| c.pos)
         } else {
             None
         };
@@ -35,7 +42,8 @@ pub fn draw(f: &mut Frame, area: Rect, app: &mut App) {
             is_grid,
             editor.cursor_col,
             editor.cursor_row,
-            dash.free_grid().unwrap_or(crate::dashboard::Grid { cols: 12, rows: 8 }),
+            dash.free_grid()
+                .unwrap_or(crate::dashboard::Grid { cols: 12, rows: 8 }),
             card_pos,
             editor.grid_focus,
             editor.selected_card,
@@ -51,14 +59,25 @@ pub fn draw(f: &mut Frame, area: Rect, app: &mut App) {
         let cur_rect = cell_to_rect(
             main_area,
             dash_grid,
-            crate::dashboard::Pos { col: cursor_col, row: cursor_row, w: 1, h: 1 },
+            crate::dashboard::Pos {
+                col: cursor_col,
+                row: cursor_row,
+                w: 1,
+                h: 1,
+            },
         );
         if cur_rect.width > 0 && cur_rect.height > 0 {
-            f.render_widget(Block::new().style(Style::new().bg(Color::DarkGray)), cur_rect);
+            f.render_widget(
+                Block::new().style(Style::new().bg(Color::DarkGray)),
+                cur_rect,
+            );
         }
         if let Some(pos) = card_pos {
             let r = cell_to_rect(main_area, dash_grid, pos);
-            f.render_widget(Block::bordered().border_style(Style::new().fg(Color::Yellow).bold()), r);
+            f.render_widget(
+                Block::bordered().border_style(Style::new().fg(Color::Yellow).bold()),
+                r,
+            );
         }
     }
 
@@ -66,8 +85,12 @@ pub fn draw(f: &mut Frame, area: Rect, app: &mut App) {
     draw_editor_help_line(f, help_area, app, is_grid);
 
     // Re-borrow editor and dash after the &mut dashboard draw.
-    let Some(editor) = app.editor.as_ref() else { return; };
-    let Some(dash) = app.dashboards.get(editor.dash_idx) else { return; };
+    let Some(editor) = app.editor.as_ref() else {
+        return;
+    };
+    let Some(dash) = app.dashboards.get(editor.dash_idx) else {
+        return;
+    };
 
     match &editor.mode {
         EditorMode::PickingType { selected } => draw_palette(f, area, *selected),
@@ -393,10 +416,19 @@ pub fn draw(f: &mut Frame, area: Rect, app: &mut App) {
         EditorMode::PickingTargetDashboard { op, selected, .. } => {
             draw_dashboard_picker(f, area, app, *selected, *op, "Pick target dashboard");
         }
-        EditorMode::PickingTargetGridRow { target_dash, selected, .. } => {
+        EditorMode::PickingTargetGridRow {
+            target_dash,
+            selected,
+            ..
+        } => {
             draw_grid_row_picker(f, area, app, *target_dash, *selected);
         }
-        EditorMode::PickingTargetGridColumn { target_dash, target_row, selected, .. } => {
+        EditorMode::PickingTargetGridColumn {
+            target_dash,
+            target_row,
+            selected,
+            ..
+        } => {
             draw_grid_col_picker(f, area, app, *target_dash, *target_row, *selected);
         }
         EditorMode::PickingNewDashboardLayout { selected } => {
@@ -406,19 +438,35 @@ pub fn draw(f: &mut Frame, area: Rect, app: &mut App) {
             draw_confirm(f, area, "Delete this dashboard? (y/n)");
         }
         EditorMode::PickingNewRowHeight { buf } => {
-            draw_text_input(f, area, "Add row (1/2)", "Enter height: integer or \"auto\"", buf);
+            draw_text_input(
+                f,
+                area,
+                "Add row (1/2)",
+                "Enter height: integer or \"auto\"",
+                buf,
+            );
         }
         EditorMode::PickingNewRowColumnCount { buf, .. } => {
             draw_text_input(f, area, "Add row (2/2)", "Number of columns", buf);
         }
         EditorMode::EditingRowHeight { buf, row_idx } => {
-            draw_text_input(f, area, &format!("Row {} height", row_idx + 1), "integer or \"auto\"", buf);
+            draw_text_input(
+                f,
+                area,
+                &format!("Row {} height", row_idx + 1),
+                "integer or \"auto\"",
+                buf,
+            );
         }
         EditorMode::ConfirmRemoveRow { row_idx } => {
             draw_confirm(f, area, &format!("Remove row {}? (y/n)", row_idx + 1));
         }
         EditorMode::ConfirmRemoveColumn { row_idx, col_idx } => {
-            draw_confirm(f, area, &format!("Remove col {} from row {}? (y/n)", col_idx + 1, row_idx + 1));
+            draw_confirm(
+                f,
+                area,
+                &format!("Remove col {} from row {}? (y/n)", col_idx + 1, row_idx + 1),
+            );
         }
         EditorMode::Browse => {}
     }
@@ -431,8 +479,16 @@ fn draw_new_dashboard_layout_picker(f: &mut Frame, area: Rect, selected: usize) 
     let inner = block.inner(r);
     f.render_widget(block, r);
     let items: [(&str, &str, &str); 2] = [
-        ("1", "Free canvas", "place cards at any (col, row, w, h) position"),
-        ("2", "Grid layout", "stacked rows of columns, cards fill column width"),
+        (
+            "1",
+            "Free canvas",
+            "place cards at any (col, row, w, h) position",
+        ),
+        (
+            "2",
+            "Grid layout",
+            "stacked rows of columns, cards fill column width",
+        ),
     ];
     let list_items: Vec<ListItem> = items
         .iter()
@@ -510,8 +566,12 @@ fn draw_grid_editor_overlay(
     grid_focus: Option<GridFocus>,
     selected_flat: Option<usize>,
 ) {
-    let Some(dash) = app.dashboards.get(dash_idx) else { return; };
-    let DashboardLayout::Grid { rows } = &dash.layout else { return; };
+    let Some(dash) = app.dashboards.get(dash_idx) else {
+        return;
+    };
+    let DashboardLayout::Grid { rows } = &dash.layout else {
+        return;
+    };
 
     // Build col_scrolls like the dashboard renderer does.
     let col_scrolls: HashMap<(usize, usize), u16> = app
@@ -528,12 +588,8 @@ fn draw_grid_editor_overlay(
 
     for info in &col_infos {
         let (border_color, title_color) = match grid_focus {
-            Some(GridFocus::Row { row }) if row == info.row_idx => {
-                (Color::Yellow, Color::Yellow)
-            }
-            Some(GridFocus::Column { row, col })
-                if row == info.row_idx && col == info.col_idx =>
-            {
+            Some(GridFocus::Row { row }) if row == info.row_idx => (Color::Yellow, Color::Yellow),
+            Some(GridFocus::Column { row, col }) if row == info.row_idx && col == info.col_idx => {
                 (Color::Cyan, Color::Cyan)
             }
             Some(GridFocus::Card { row, col, .. })
@@ -588,10 +644,17 @@ fn draw_grid_editor_overlay(
         // Find which col_info contains this card, then compute its rect within the slot.
         let loc = dash.locate_grid_flat(flat);
         if let Some((ri, ci, _)) = loc {
-            if let Some(info) = col_infos.iter().find(|c| c.row_idx == ri && c.col_idx == ci) {
+            if let Some(info) = col_infos
+                .iter()
+                .find(|c| c.row_idx == ri && c.col_idx == ci)
+            {
                 // Re-run grid_layout with real heights to get the card slot rect.
                 let n_cols = rows.get(ri).map(|r| r.columns.len() as u16).unwrap_or(1);
-                let col_w = if n_cols > 0 { area.width / n_cols } else { area.width };
+                let col_w = if n_cols > 0 {
+                    area.width / n_cols
+                } else {
+                    area.width
+                };
                 let real_heights: Vec<u16> = dash
                     .cards_iter()
                     .map(|c| c.preferred_height(col_w, None))
@@ -611,12 +674,23 @@ fn draw_grid_editor_overlay(
 }
 
 fn draw_editor_help_line(f: &mut Frame, area: Rect, app: &App, is_grid: bool) {
-    let Some(editor) = app.editor.as_ref() else { return; };
+    let Some(editor) = app.editor.as_ref() else {
+        return;
+    };
 
     let focus_str: String = if is_grid {
         match editor.grid_focus {
-            Some(GridFocus::Card { row, col, pos_in_col }) => {
-                format!("Row {} · Col {} · Card {}  ", row + 1, col + 1, pos_in_col + 1)
+            Some(GridFocus::Card {
+                row,
+                col,
+                pos_in_col,
+            }) => {
+                format!(
+                    "Row {} · Col {} · Card {}  ",
+                    row + 1,
+                    col + 1,
+                    pos_in_col + 1
+                )
             }
             Some(GridFocus::Column { row, col }) => {
                 format!("Row {} · Col {} [column focus]  ", row + 1, col + 1)
@@ -625,7 +699,13 @@ fn draw_editor_help_line(f: &mut Frame, area: Rect, app: &App, is_grid: bool) {
                 format!("Row {} [row focus]  ", row + 1)
             }
             None => {
-                if app.dashboards.get(editor.dash_idx).map(|d| d.card_count()).unwrap_or(0) == 0 {
+                if app
+                    .dashboards
+                    .get(editor.dash_idx)
+                    .map(|d| d.card_count())
+                    .unwrap_or(0)
+                    == 0
+                {
                     "Empty grid — ".to_string()
                 } else {
                     String::new()
@@ -648,7 +728,10 @@ fn draw_editor_help_line(f: &mut Frame, area: Rect, app: &App, is_grid: bool) {
         Span::styled(keys, Style::new().dim()),
         Span::styled(dirty, Style::new().fg(Color::Yellow)),
     ]);
-    f.render_widget(Paragraph::new(line).style(Style::new().bg(Color::Black)), area);
+    f.render_widget(
+        Paragraph::new(line).style(Style::new().bg(Color::Black)),
+        area,
+    );
 }
 
 fn modal_rect(parent: Rect, w: u16, h: u16) -> Rect {
@@ -921,7 +1004,9 @@ fn draw_menu(
         crate::dashboard::editor::MenuContext::Card(idx) => format!(" Card #{} settings ", idx + 1),
         crate::dashboard::editor::MenuContext::Dashboard => " Dashboard settings ".to_string(),
         crate::dashboard::editor::MenuContext::Row(r) => format!(" Row {} settings ", r + 1),
-        crate::dashboard::editor::MenuContext::GridColumn(r, c) => format!(" Row {} col {} settings ", r + 1, c + 1),
+        crate::dashboard::editor::MenuContext::GridColumn(r, c) => {
+            format!(" Row {} col {} settings ", r + 1, c + 1)
+        }
     };
     let h = (items.len() as u16 + 4).min(area.height.saturating_sub(4));
     let r = modal_rect(area, 44, h.max(6));
@@ -1106,7 +1191,11 @@ fn draw_entity_list_item_override(
     let modal_h = if has_eid_field { 10 } else { 7 };
     let r = modal_rect(area, 50, modal_h);
     f.render_widget(Clear, r);
-    let hide_label = if hide_state { "[x] hide state" } else { "[ ] hide state" };
+    let hide_label = if hide_state {
+        "[x] hide state"
+    } else {
+        "[ ] hide state"
+    };
 
     let mut lines: Vec<Line<'_>> = Vec::new();
 
@@ -1117,8 +1206,14 @@ fn draw_entity_list_item_override(
         } else {
             Style::new().dim()
         };
-        lines.push(Line::styled("Entity ID (e.g. sensor.kitchen_temp)", eid_style));
-        let mut eid_spans = vec![Span::raw("> "), Span::styled(eid_buf.to_string(), eid_style)];
+        lines.push(Line::styled(
+            "Entity ID (e.g. sensor.kitchen_temp)",
+            eid_style,
+        ));
+        let mut eid_spans = vec![
+            Span::raw("> "),
+            Span::styled(eid_buf.to_string(), eid_style),
+        ];
         if focus_entity_id {
             eid_spans.push(Span::styled("_", Style::new().rapid_blink()));
         }
@@ -1132,8 +1227,14 @@ fn draw_entity_list_item_override(
     } else {
         Style::new().dim()
     };
-    lines.push(Line::styled("Name override (blank = use friendly name)", name_style));
-    let mut name_spans = vec![Span::raw("> "), Span::styled(name_buf.to_string(), name_style)];
+    lines.push(Line::styled(
+        "Name override (blank = use friendly name)",
+        name_style,
+    ));
+    let mut name_spans = vec![
+        Span::raw("> "),
+        Span::styled(name_buf.to_string(), name_style),
+    ];
     if !focus_entity_id {
         name_spans.push(Span::styled("_", Style::new().rapid_blink()));
     }
@@ -2048,19 +2149,19 @@ fn draw_dashboard_picker(
     );
 }
 
-fn draw_grid_row_picker(
-    f: &mut Frame,
-    area: Rect,
-    app: &App,
-    target_dash: usize,
-    selected: usize,
-) {
+fn draw_grid_row_picker(f: &mut Frame, area: Rect, app: &App, target_dash: usize, selected: usize) {
     let r = modal_rect(area, 50, 14);
     f.render_widget(Clear, r);
     let items: Vec<ListItem<'_>> = app
         .dashboards
         .get(target_dash)
-        .and_then(|d| if let DashboardLayout::Grid { rows } = &d.layout { Some(rows) } else { None })
+        .and_then(|d| {
+            if let DashboardLayout::Grid { rows } = &d.layout {
+                Some(rows)
+            } else {
+                None
+            }
+        })
         .map(|rows| {
             rows.iter()
                 .enumerate()
@@ -2069,7 +2170,12 @@ fn draw_grid_row_picker(
                         crate::dashboard::RowHeight::Fixed(n) => format!("{}r", n),
                         crate::dashboard::RowHeight::Auto => "auto".into(),
                     };
-                    ListItem::new(format!("  Row {}  [{} cols, height {}]", i + 1, row.columns.len(), h))
+                    ListItem::new(format!(
+                        "  Row {}  [{} cols, height {}]",
+                        i + 1,
+                        row.columns.len(),
+                        h
+                    ))
                 })
                 .collect()
         })
@@ -2101,7 +2207,13 @@ fn draw_grid_col_picker(
     let items: Vec<ListItem<'_>> = app
         .dashboards
         .get(target_dash)
-        .and_then(|d| if let DashboardLayout::Grid { rows } = &d.layout { rows.get(target_row) } else { None })
+        .and_then(|d| {
+            if let DashboardLayout::Grid { rows } = &d.layout {
+                rows.get(target_row)
+            } else {
+                None
+            }
+        })
         .map(|row| {
             row.columns
                 .iter()
