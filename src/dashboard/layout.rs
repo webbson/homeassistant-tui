@@ -59,6 +59,7 @@ pub fn grid_layout(
     area: Rect,
     col_scrolls: &std::collections::HashMap<(usize, usize), u16>,
     card_heights: &[u16],
+    card_fills: &[bool],
 ) -> (Vec<GridCardSlot>, Vec<ColInfo>) {
     let mut slots: Vec<GridCardSlot> = Vec::new();
     let mut col_infos: Vec<ColInfo> = Vec::new();
@@ -172,7 +173,18 @@ pub fn grid_layout(
                 }
                 heights
             } else {
-                col_card_heights.clone()
+                let mut heights = col_card_heights.clone();
+                let leftover = col_rect.height.saturating_sub(sum_natural);
+                if leftover > 0 {
+                    // Give leftover rows to the first expandable (Image/Graph) card.
+                    for (i, h) in heights.iter_mut().enumerate() {
+                        if card_fills.get(flat_idx + i).copied().unwrap_or(false) {
+                            *h += leftover;
+                            break;
+                        }
+                    }
+                }
+                heights
             };
 
             let needs_scrollbar = !fill && sum_natural > col_rect.height;
@@ -302,7 +314,7 @@ mod tests {
             (RowHeight::Fixed(10), 2, false),
             (RowHeight::Auto, 2, false),
         ]);
-        let (slots, col_infos) = grid_layout(&rows, area, &Default::default(), &[]);
+        let (slots, col_infos) = grid_layout(&rows, area, &Default::default(), &[], &[]);
         assert!(slots.is_empty(), "no cards → no slots");
         assert_eq!(col_infos.len(), 6, "3 rows × 2 cols");
         // Third row starts at y=20 and has height=10.
@@ -342,7 +354,7 @@ mod tests {
             }],
         }];
         let card_heights = [4u16, 6u16];
-        let (slots, col_infos) = grid_layout(&rows, area, &Default::default(), &card_heights);
+        let (slots, col_infos) = grid_layout(&rows, area, &Default::default(), &card_heights, &[]);
         assert_eq!(slots.len(), 2);
         assert_eq!(col_infos.len(), 1);
         assert!(!col_infos[0].needs_scrollbar, "fill_height → no scrollbar");
@@ -383,7 +395,7 @@ mod tests {
         let card_heights = [8u16, 8u16];
         let mut scrolls = std::collections::HashMap::new();
         scrolls.insert((0usize, 0usize), 8u16);
-        let (slots, col_infos) = grid_layout(&rows, area, &scrolls, &card_heights);
+        let (slots, col_infos) = grid_layout(&rows, area, &scrolls, &card_heights, &[]);
         assert_eq!(col_infos[0].needs_scrollbar, true);
         // First card (flat_idx 0) should not appear in slots.
         assert!(

@@ -685,7 +685,7 @@ fn draw_grid_editor_overlay(
     // Use zero heights — we only need col_infos for layout positions.
     let card_count = dash.card_count();
     let card_heights: Vec<u16> = vec![4; card_count];
-    let (_slots, col_infos) = grid_layout(rows, area, &col_scrolls, &card_heights);
+    let (_slots, col_infos) = grid_layout(rows, area, &col_scrolls, &card_heights, &[]);
 
     for info in &col_infos {
         let (border_color, title_color) = match grid_focus {
@@ -760,7 +760,7 @@ fn draw_grid_editor_overlay(
                     .cards_iter()
                     .map(|c| c.preferred_height(col_w, None))
                     .collect();
-                let (slots, _) = grid_layout(rows, area, &col_scrolls, &real_heights);
+                let (slots, _) = grid_layout(rows, area, &col_scrolls, &real_heights, &[]);
                 if let Some(slot) = slots.iter().find(|s| s.flat_idx == flat) {
                     f.render_widget(
                         Block::bordered().border_style(Style::new().fg(Color::Yellow).bold()),

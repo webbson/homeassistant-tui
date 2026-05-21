@@ -73,22 +73,40 @@ pub fn draw(
                 dash.cards_iter()
                     .zip(widths.iter())
                     .map(|(c, &w)| {
-                        let filtered_count =
-                            if let CardKind::FilteredEntityList {
+                        let dynamic_count = match &c.kind {
+                            CardKind::FilteredEntityList {
                                 instance, query, ..
-                            } = &c.kind
-                            {
+                            } => {
                                 let rt = app.instances.runtimes.get(instance);
                                 Some(crate::dashboard::query::resolve(rt, query).len())
-                            } else {
-                                None
-                            };
-                        c.preferred_height(w, filtered_count)
+                            }
+                            CardKind::AttributeList {
+                                instance,
+                                entity,
+                                attribute,
+                                limit,
+                                ..
+                            } => {
+                                let rt = app.instances.runtimes.get(instance);
+                                rt.and_then(|rt| rt.states.get(entity.as_str()))
+                                    .and_then(|s| s.attributes.get(attribute.as_str()))
+                                    .and_then(|v| v.as_array())
+                                    .map(|a| limit.map_or(a.len(), |lim| a.len().min(lim)))
+                            }
+                            _ => None,
+                        };
+                        c.preferred_height(w, dynamic_count)
                     })
                     .collect()
             };
 
-            let (slots, col_infos) = grid_layout(rows, area, &col_scrolls, &card_heights);
+            let card_fills: Vec<bool> = dash
+                .cards_iter()
+                .map(|c| matches!(c.kind, CardKind::Image { .. } | CardKind::Graph { .. }))
+                .collect();
+
+            let (slots, col_infos) =
+                grid_layout(rows, area, &col_scrolls, &card_heights, &card_fills);
 
             // Re-clamp scroll offsets and render scrollbars.
             for info in &col_infos {

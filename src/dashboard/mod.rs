@@ -1130,11 +1130,7 @@ impl Card {
     ///
     /// If `self.height` is set it always wins. Otherwise falls back to per-kind static defaults,
     /// with Text/EntityList/FilteredEntityList scaling with content.
-    pub fn preferred_height(
-        &self,
-        available_width: u16,
-        filtered_entity_count: Option<usize>,
-    ) -> u16 {
+    pub fn preferred_height(&self, available_width: u16, dynamic_count: Option<usize>) -> u16 {
         if let Some(h) = self.height {
             return h;
         }
@@ -1169,15 +1165,16 @@ impl Card {
             CardKind::FilteredEntityList {
                 hide_when_empty, ..
             } => {
-                if *hide_when_empty && filtered_entity_count == Some(0) {
+                if *hide_when_empty && dynamic_count == Some(0) {
                     return 0;
                 }
-                let count = filtered_entity_count.unwrap_or(4);
+                let count = dynamic_count.unwrap_or(4);
                 (count as u16).saturating_add(2).max(4)
             }
-            CardKind::AttributeList { limit, .. } => {
-                limit.map(|n| (n as u16).saturating_add(2)).unwrap_or(6)
-            }
+            CardKind::AttributeList { limit, .. } => match dynamic_count {
+                Some(n) => (n as u16).saturating_add(2),
+                None => limit.map(|n| (n as u16).saturating_add(2)).unwrap_or(6),
+            },
         }
     }
 

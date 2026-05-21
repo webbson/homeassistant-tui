@@ -11,6 +11,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 ### Changed
 
 ### Fixed
+- Grid layout: `attribute_list` card now computes preferred height from actual array length instead of the static default of 4 rows
+- Grid layout: `image` and `graph` cards in a non-fill column now expand to absorb any remaining column space
 
 ### Removed
 
