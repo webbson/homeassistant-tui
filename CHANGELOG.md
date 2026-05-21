@@ -9,6 +9,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 ### Added
 
 ### Changed
+- **Image card fills full card area** — switched from `Resize::Fit` (letterboxed) to `Resize::Scale` so the image scales to fill the entire card in grid layout.
 
 ### Fixed
 

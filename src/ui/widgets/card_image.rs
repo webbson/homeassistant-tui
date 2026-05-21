@@ -3,7 +3,7 @@ use ratatui::style::{Color, Style};
 use ratatui::widgets::{Block, Paragraph};
 use ratatui::Frame;
 use ratatui_image::protocol::StatefulProtocol;
-use ratatui_image::StatefulImage;
+use ratatui_image::{Resize, StatefulImage};
 
 use crate::ui::theme::{resolve_card_color, Theme};
 
@@ -39,7 +39,7 @@ pub fn render(
         return;
     }
     if let Some(p) = protocol {
-        f.render_stateful_widget(StatefulImage::default(), inner, p);
+        f.render_stateful_widget(StatefulImage::new().resize(Resize::Scale(None)), inner, p);
         f.render_widget(block, area);
     } else {
         f.render_widget(block, area);
