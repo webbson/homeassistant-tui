@@ -59,11 +59,19 @@ Read the current `version = "X.Y.Z"` line from `Cargo.toml`. Apply the bump:
 
 Print the new version. Confirm with the user.
 
-### 5. Update `Cargo.toml`
+### 5. Check formatting
+
+```bash
+cargo fmt -- --check
+```
+
+If it fails, run `cargo fmt`, then re-run the check. Abort if still failing.
+
+### 6. Update `Cargo.toml`
 
 Use the `Edit` tool to replace the `version = "X.Y.Z"` line under `[package]` with the new version. Run `cargo build --quiet` afterwards so `Cargo.lock` updates.
 
-### 6. Update `CHANGELOG.md`
+### 7. Update `CHANGELOG.md`
 
 Open `CHANGELOG.md` and:
 
@@ -75,11 +83,11 @@ Open `CHANGELOG.md` and:
 
 If the Unreleased section is empty, try to build a changelog with the commits that will be included, if unable ask user what to populate it with.
 
-### 7. Print the diff for review
+### 8. Print the diff for review
 
 Run `git diff Cargo.toml Cargo.lock CHANGELOG.md` and show it to the user. Wait for confirmation before committing.
 
-### 8. Commit + tag
+### 9. Commit + tag
 
 ```bash
 git add Cargo.toml Cargo.lock CHANGELOG.md
@@ -89,7 +97,7 @@ git tag -a vX.Y.Z -m "Release X.Y.Z"
 
 Use a HEREDOC for the tag message body — paste the body of the new CHANGELOG section into the annotation so `git show vX.Y.Z` displays the release notes.
 
-### 9. Report
+### 10. Report
 
 Print:
 
@@ -106,6 +114,7 @@ Do **NOT** push automatically. The user pushes when ready.
 - Never bypass hooks (`--no-verify`).
 - Never re-tag an existing version.
 - If `cargo build` fails after the version bump, roll the version change back with `git checkout -- Cargo.toml Cargo.lock` and report the build error.
+- If `cargo fmt -- --check` fails, run `cargo fmt` to fix, then verify clean before proceeding.
 
 ## What this skill does NOT do
 
