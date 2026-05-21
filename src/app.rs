@@ -257,6 +257,104 @@ impl App {
                     _ => {}
                 }
             }
+            Overlay::InputValue(ref mut s) => {
+                use crate::screens::InputModalKind;
+                match k.code {
+                    KeyCode::Enter => {
+                        match crate::ui::widgets::input_modal::validate_input_modal(s) {
+                            Err(msg) => {
+                                s.error = Some(msg);
+                            }
+                            Ok(()) => {
+                                let cmd =
+                                    crate::ui::widgets::input_modal::build_input_submit_cmd(s);
+                                let alias = s.alias.clone();
+                                if let Some(cmd) = cmd {
+                                    if !self.instances.send(&alias, cmd) {
+                                        self.last_error =
+                                            Some(format!("{alias}: no command channel"));
+                                    } else {
+                                        tracing::info!(
+                                            %alias,
+                                            entity_id = %s.entity_id,
+                                            "input modal submitted"
+                                        );
+                                    }
+                                }
+                                self.overlay = None;
+                            }
+                        }
+                    }
+                    KeyCode::Backspace => {
+                        if !s.buffer.is_empty() {
+                            s.buffer.pop();
+                            s.cursor = s.buffer.len();
+                        }
+                        s.error = None;
+                    }
+                    KeyCode::Up => {
+                        match &mut s.kind {
+                            InputModalKind::Select { selected, .. } => {
+                                if *selected > 0 {
+                                    *selected -= 1;
+                                }
+                            }
+                            InputModalKind::Number { step, min, .. } => {
+                                let step = *step;
+                                let min = *min;
+                                let v = s.buffer.parse::<f64>().unwrap_or(min) + step;
+                                s.buffer =
+                                    crate::ui::widgets::input_modal::format_number_for_input(v);
+                                s.cursor = s.buffer.len();
+                                s.error = None;
+                            }
+                            _ => {}
+                        }
+                    }
+                    KeyCode::Down => {
+                        match &mut s.kind {
+                            InputModalKind::Select { selected, options } => {
+                                if *selected + 1 < options.len() {
+                                    *selected += 1;
+                                }
+                            }
+                            InputModalKind::Number { step, max, .. } => {
+                                let step = *step;
+                                let max = *max;
+                                let v = s.buffer.parse::<f64>().unwrap_or(max) - step;
+                                s.buffer =
+                                    crate::ui::widgets::input_modal::format_number_for_input(v);
+                                s.cursor = s.buffer.len();
+                                s.error = None;
+                            }
+                            _ => {}
+                        }
+                    }
+                    KeyCode::Char(c) => {
+                        match &s.kind {
+                            InputModalKind::Number { .. } => {
+                                if c.is_ascii_digit()
+                                    || c == '.'
+                                    || (c == '-' && s.buffer.is_empty())
+                                {
+                                    s.buffer.push(c);
+                                    s.cursor = s.buffer.len();
+                                    s.error = None;
+                                }
+                            }
+                            InputModalKind::Select { .. } => {
+                                // navigation only
+                            }
+                            _ => {
+                                s.buffer.push(c);
+                                s.cursor = s.buffer.len();
+                                s.error = None;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
         }
     }
 
@@ -4123,6 +4221,48 @@ impl App {
     }
 
     fn dispatch_default(&mut self, alias: &Alias, entity_id: &EntityId) {
+        // input_* domains open an interactive modal instead of firing a direct service call.
+        let domain = entity_id.split_once('.').map(|(d, _)| d);
+        if matches!(
+            domain,
+            Some("input_number" | "input_text" | "input_select" | "input_datetime")
+        ) {
+            let state_opt = self
+                .instances
+                .runtimes
+                .get(alias)
+                .and_then(|rt| rt.states.get(entity_id))
+                .cloned();
+            if let Some(state) = state_opt {
+                let friendly = state
+                    .attributes
+                    .get("friendly_name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(entity_id.as_str())
+                    .to_string();
+                let kind = crate::ui::widgets::input_modal::build_input_modal_kind(
+                    domain.unwrap(),
+                    &state,
+                );
+                let buffer = state.state.clone();
+                let cursor = buffer.len();
+                self.overlay = Some(crate::screens::Overlay::InputValue(
+                    crate::screens::InputModalState {
+                        alias: alias.clone(),
+                        entity_id: entity_id.clone(),
+                        friendly_name: friendly,
+                        kind,
+                        buffer,
+                        cursor,
+                        error: None,
+                    },
+                ));
+            } else {
+                self.last_error = Some(format!("no state for {entity_id}"));
+            }
+            return;
+        }
+
         let entity_state = self
             .instances
             .runtimes
@@ -4137,9 +4277,7 @@ impl App {
                 }
             }
             None => {
-                self.last_error = Some(format!(
-                    "no default action for {entity_id} (free-form dialog: TBD)"
-                ));
+                self.last_error = Some(format!("no default action for {entity_id}"));
             }
         }
     }

@@ -11,6 +11,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - **FilteredEntityList overrides** — accepts `overrides: { <entity_id>: { name?, hide_state? } }` for per-entity display overrides.
 - **Editor entry overrides** — "Set entry name" and "Toggle hide state" menu items for EntityList/FilteredEntityList row overrides.
 - Enter on `button.*` and `input_button.*` entities calls the `press` service.
+- Enter on `input_number`, `input_text`, `input_select`, or `input_datetime` entities opens an input modal with attribute-driven validation (min/max for numbers, length limits for text, option list for select, ISO date/time format for datetime). `↑`/`↓` adjusts numbers by step or navigates select options; `Esc` cancels.
 
 ### Fixed
 - Lock entities now toggle correctly: `unlock` when locked, `lock` when unlocked. Unknown state still calls `unlock` (legacy behavior preserved).

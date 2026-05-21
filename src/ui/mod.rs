@@ -133,6 +133,9 @@ fn draw_overlay(f: &mut Frame, area: ratatui::layout::Rect, app: &App) {
                 app.instances.runtimes.len(),
             );
         }
+        Overlay::InputValue(ref modal_state) => {
+            widgets::input_modal::render(f, area, modal_state);
+        }
     }
 }
 

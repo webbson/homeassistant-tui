@@ -12,4 +12,5 @@ pub mod card_toggle;
 pub mod card_weather;
 pub mod entity_modal;
 pub mod help;
+pub mod input_modal;
 pub mod instance_bar;
