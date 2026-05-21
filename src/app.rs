@@ -579,6 +579,8 @@ impl App {
                 query,
                 selected,
                 picked,
+                original_title,
+                original_items,
             } => {
                 let rows = entity_search(&self.instances, instance, query);
                 match k.code {
@@ -617,10 +619,13 @@ impl App {
                         }
                         let inst = instance.clone();
                         let p = picked.clone();
+                        let orig_t = original_title.clone();
+                        let orig_i = original_items.clone();
                         editor.mode = EditorMode::EditingEntityListTitle {
                             instance: inst,
                             picked: p,
-                            title_buffer: String::new(),
+                            title_buffer: orig_t.unwrap_or_default(),
+                            original_items: orig_i,
                         };
                     }
                     _ => {}
@@ -631,6 +636,7 @@ impl App {
                 instance,
                 picked,
                 title_buffer,
+                original_items,
             } => {
                 match k.code {
                     KeyCode::Esc => editor.mode = EditorMode::Browse,
@@ -647,7 +653,15 @@ impl App {
                         let inst = instance.clone();
                         let entities: Vec<crate::dashboard::EntityListItem> = picked
                             .iter()
-                            .map(|(eid, _)| crate::dashboard::EntityListItem::Bare(eid.clone()))
+                            .map(|(eid, _)| {
+                                original_items
+                                    .iter()
+                                    .find(|item| item.entity_id() == eid.as_str())
+                                    .cloned()
+                                    .unwrap_or_else(|| {
+                                        crate::dashboard::EntityListItem::Bare(eid.clone())
+                                    })
+                            })
                             .collect();
                         editor.mode = EditorMode::Browse;
                         let kind = CardKind::EntityList {
@@ -4028,8 +4042,12 @@ impl App {
             CardKind::Gauge { instance, .. } => (CardTypeStub::Gauge, instance.clone(), None),
             CardKind::Graph { instance, .. } => (CardTypeStub::Graph, instance.clone(), None),
             CardKind::EntityList {
-                instance, entities, ..
+                instance,
+                entities,
+                title,
             } => {
+                let orig_title = title.clone();
+                let orig_items = entities.clone();
                 let picked: Vec<(String, String)> = entities
                     .iter()
                     .map(|item| {
@@ -4046,7 +4064,11 @@ impl App {
                         (eid.clone(), friendly)
                     })
                     .collect();
-                (CardTypeStub::EntityList, instance.clone(), Some(picked))
+                (
+                    CardTypeStub::EntityList,
+                    instance.clone(),
+                    Some((picked, orig_title, orig_items)),
+                )
             }
             CardKind::Text { .. } => {
                 self.last_error = Some("text cards have no entity to change".into());
@@ -4076,12 +4098,14 @@ impl App {
             CardKind::Weather { instance, .. } => (CardTypeStub::Weather, instance.clone(), None),
         };
         editor.edit_target = Some(idx);
-        editor.mode = if let Some(picked) = prefill {
+        editor.mode = if let Some((picked, orig_title, orig_items)) = prefill {
             EditorMode::PickingMulti {
                 instance,
                 query: String::new(),
                 selected: 0,
                 picked,
+                original_title: orig_title,
+                original_items: orig_items,
             }
         } else {
             EditorMode::PickingEntity {
@@ -5343,6 +5367,8 @@ fn picker_mode_for(kind: CardTypeStub, instance: String) -> EditorMode {
             query: String::new(),
             selected: 0,
             picked: Vec::new(),
+            original_title: None,
+            original_items: Vec::new(),
         },
         CardTypeStub::FilteredEntityList => EditorMode::EditingFilterQuery {
             instance,

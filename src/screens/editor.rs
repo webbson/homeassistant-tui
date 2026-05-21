@@ -128,11 +128,13 @@ pub fn draw(f: &mut Frame, area: Rect, app: &mut App) {
             query,
             selected,
             picked,
+            ..
         } => draw_multi_picker(f, area, app, instance, query, *selected, picked),
         EditorMode::EditingEntityListTitle {
             instance,
             picked,
             title_buffer,
+            ..
         } => draw_entity_list_title(f, area, instance, picked, title_buffer),
         EditorMode::EditEntityListItemOverride {
             name_buf,

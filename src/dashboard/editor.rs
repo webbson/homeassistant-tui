@@ -1,6 +1,6 @@
 use crate::dashboard::{
-    BarOrientation, Card, CardKind, CardSize, Dashboard, DashboardLayout, GraphSeries, GraphType,
-    Pos, RowHeight, StatsMetric,
+    BarOrientation, Card, CardKind, CardSize, Dashboard, DashboardLayout, EntityListItem,
+    GraphSeries, GraphType, Pos, RowHeight, StatsMetric,
 };
 
 const MAX_UNDO: usize = 32;
@@ -64,12 +64,18 @@ pub enum EditorMode {
         query: String,
         selected: usize,
         picked: Vec<(String, String)>,
+        /// Original title when editing an existing card; `None` for new cards.
+        original_title: Option<String>,
+        /// Original items when editing an existing card; preserves `Full` variants.
+        original_items: Vec<EntityListItem>,
     },
     /// Title input for the in-progress EntityList card.
     EditingEntityListTitle {
         instance: String,
         picked: Vec<(String, String)>,
         title_buffer: String,
+        /// Original items from the card being edited; used to preserve `Full` variants.
+        original_items: Vec<EntityListItem>,
     },
     /// Edit per-entry display overrides (name, hide_state) for a specific row in
     /// an EntityList or FilteredEntityList card.
