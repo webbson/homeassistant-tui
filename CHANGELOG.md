@@ -11,6 +11,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 ### Changed
 
 ### Fixed
+- **EntityList edit preserves title and per-entry overrides** — "Change entities" on an existing EntityList card no longer clears the card title or drops `name`/`hide_state` overrides set on individual entries.
 
 ### Removed
 
