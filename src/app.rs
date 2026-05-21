@@ -2973,7 +2973,6 @@ impl App {
                     KeyCode::Enter => {
                         let layout_idx = *selected;
                         let idx = editor.dash_idx;
-                        editor.mode = EditorMode::Browse;
                         if layout_idx == 1 {
                             if let Some(dash) = self.dashboards.get_mut(idx) {
                                 dash.layout =
@@ -2981,10 +2980,18 @@ impl App {
                             }
                             use crate::dashboard::editor::GridFocus;
                             editor.grid_focus = Some(GridFocus::Column { row: 0, col: 0 });
+                            // Grid has no rows yet — prompt immediately so the user
+                            // isn't dropped into a blank, unnavigable dashboard.
+                            editor.mode = EditorMode::PickingNewRowHeight {
+                                buf: tui_input::Input::default(),
+                            };
+                            self.status_msg = Some("add first row: enter height or leave blank for auto".into());
+                        } else {
+                            editor.mode = EditorMode::Browse;
+                            // Keep Free layout as-is (already set in create_new_dashboard).
+                            self.status_msg =
+                                Some("dashboard created — press 'a' to add cards, 's' to save".into());
                         }
-                        // Keep Free layout as-is (already set in create_new_dashboard).
-                        self.status_msg =
-                            Some("dashboard created — press 'a' to add cards, 's' to save".into());
                     }
                     _ => {}
                 }
