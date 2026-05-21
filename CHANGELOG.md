@@ -7,6 +7,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [0.5.1] – 2026-05-21
+
+### Added
 - **Grid dashboard creation prompts for first row** — creating a new grid-layout dashboard immediately opens the row-height picker so the user isn't left with a blank, unnavigable canvas.
 
 ### Changed
@@ -122,7 +132,8 @@ First tagged release. The initial milestones (M0–M5 + partial M6).
 - rustls 0.23 requires an explicit `CryptoProvider` — installed at process start so the first TLS handshake doesn't panic.
 - crossterm bumped to 0.29 to match ratatui 0.30.
 
-[Unreleased]: https://github.com/webbson/homeassistant-tui/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/webbson/homeassistant-tui/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/webbson/homeassistant-tui/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/webbson/homeassistant-tui/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/webbson/homeassistant-tui/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/webbson/homeassistant-tui/compare/v0.2.0...v0.3.0
