@@ -14,6 +14,14 @@ cargo fmt                # rustfmt; CI-style check: `cargo fmt -- --check`
 cargo run -- --config <path> --dashboards <path>
 ```
 
+## First-time setup (after cloning)
+
+```bash
+git config core.hooksPath .githooks
+```
+
+This activates the pre-commit hook that runs `cargo fmt -- --check` before every commit, preventing CI fmt failures.
+
 Toolchain is pinned via `rust-toolchain.toml` (stable + rustfmt + clippy). No vendored deps; `cargo build` fetches from crates.io.
 
 Run logs land in the XDG data dir (`~/Library/Application Support/ha-tui/log/` on macOS, `~/.local/share/ha-tui/log/` on Linux). Config and dashboards live at `~/.config/ha-tui/{config,dashboards}.yaml` on both platforms — `util::paths` deliberately ignores macOS's Apple-style config dir so the path is portable.

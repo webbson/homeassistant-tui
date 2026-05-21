@@ -1,0 +1,3 @@
+#!/bin/sh
+# Abort commit if rustfmt would make changes.
+cargo fmt -- --check
