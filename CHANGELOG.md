@@ -7,6 +7,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [0.4.0] – 2026-05-21
+
+### Added
 - **Entity details overlay** — press `D` on any dashboard card to open a fullscreen popup showing entity_id, state, last_changed, last_updated, and full attributes JSON. `j`/`k` scroll, `PgUp`/`PgDn` page, `Esc`/`q`/`D` close.
 - **Graph legend current value** — line, bar, and pie graph cards show the current formatted state value (with unit) next to each series name in the legend.
 - **EntityList per-entry overrides** — items accept `{entity, name?, hide_state?}` form for per-entity display overrides; bare strings still supported and round-trip unchanged.
@@ -20,6 +30,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Changed
 - Entity/EntityList/Gauge value formatting respects `display_precision`; when absent, whole numbers drop decimals (`21.0` → `21`).
+- Graph bar/pie charts use `BarChart`/`tui-piechart` ratatui widgets (previously hand-drawn with Canvas). Pie slices are filled; bar widths scale to card width.
+- All dim/secondary text uses `Style::new().dim()` instead of hardcoded `Color::DarkGray`, making the UI readable on both dark and light terminal themes.
 
 ### Removed
 
@@ -94,7 +106,8 @@ First tagged release. The initial milestones (M0–M5 + partial M6).
 - rustls 0.23 requires an explicit `CryptoProvider` — installed at process start so the first TLS handshake doesn't panic.
 - crossterm bumped to 0.29 to match ratatui 0.30.
 
-[Unreleased]: https://github.com/webbson/homeassistant-tui/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/webbson/homeassistant-tui/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/webbson/homeassistant-tui/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/webbson/homeassistant-tui/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/webbson/homeassistant-tui/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/webbson/homeassistant-tui/releases/tag/v0.1.0
