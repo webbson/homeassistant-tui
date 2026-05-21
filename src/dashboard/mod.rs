@@ -732,6 +732,54 @@ pub enum StatsMetric {
     Count,
 }
 
+/// A single entry in an `EntityList` card — either a bare entity ID string or
+/// a full object with optional per-entry display overrides.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(untagged)]
+pub enum EntityListItem {
+    Bare(EntityId),
+    Full {
+        entity: EntityId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        hide_state: Option<bool>,
+    },
+}
+
+impl EntityListItem {
+    pub fn entity_id(&self) -> &EntityId {
+        match self {
+            Self::Bare(e) | Self::Full { entity: e, .. } => e,
+        }
+    }
+
+    pub fn name_override(&self) -> Option<&str> {
+        if let Self::Full { name: Some(n), .. } = self {
+            Some(n.as_str())
+        } else {
+            None
+        }
+    }
+
+    pub fn hide_state_override(&self) -> Option<bool> {
+        if let Self::Full { hide_state, .. } = self {
+            *hide_state
+        } else {
+            None
+        }
+    }
+}
+
+/// Per-entity display overrides used by `FilteredEntityList`.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct EntityOverride {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hide_state: Option<bool>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CardKind {
@@ -786,8 +834,8 @@ pub enum CardKind {
     },
     EntityList {
         instance: Alias,
-        entities: Vec<EntityId>,
-        #[serde(default)]
+        entities: Vec<EntityListItem>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         title: Option<String>,
     },
     FilteredEntityList {
@@ -798,8 +846,10 @@ pub enum CardKind {
         hide_state: bool,
         #[serde(default)]
         hide_when_empty: bool,
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         title: Option<String>,
+        #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+        overrides: std::collections::BTreeMap<EntityId, EntityOverride>,
     },
     Clock {
         #[serde(default = "default_clock_format")]
@@ -1494,6 +1544,239 @@ pos: { col: 0, row: 0, w: 6, h: 4 }
         dash.grid_move_card_in_column(0, 0, 0, false); // move pos-0 down → pos-1
         // id0 should now be at flat index 1.
         assert_eq!(dash.flat_idx_of(id0), Some(1));
+    }
+
+    // ---- EntityListItem / EntityOverride YAML round-trip tests ----
+
+    #[test]
+    fn entity_list_bare_entries_round_trip() {
+        let yaml = r#"
+type: entity_list
+instance: home
+entities:
+  - light.kitchen
+  - light.bedroom
+pos: { col: 0, row: 0, w: 4, h: 4 }
+"#;
+        let card: Card = serde_yaml::from_str(yaml).unwrap();
+        let CardKind::EntityList { entities, .. } = &card.kind else {
+            panic!("expected EntityList");
+        };
+        assert_eq!(entities.len(), 2);
+        assert!(matches!(&entities[0], EntityListItem::Bare(e) if e == "light.kitchen"));
+        assert!(matches!(&entities[1], EntityListItem::Bare(e) if e == "light.bedroom"));
+        // Verify bare form is preserved on serialization (not expanded to {entity: ...}).
+        let back = serde_yaml::to_string(&card).unwrap();
+        assert!(back.contains("- light.kitchen"), "bare string form not preserved: {back}");
+        assert!(back.contains("- light.bedroom"), "bare string form not preserved: {back}");
+        assert!(!back.contains("entity: light.kitchen"), "bare was expanded: {back}");
+    }
+
+    #[test]
+    fn entity_list_full_entry_with_name_round_trip() {
+        let yaml = r#"
+type: entity_list
+instance: home
+entities:
+  - entity: light.kitchen
+    name: Kitchen
+pos: { col: 0, row: 0, w: 4, h: 4 }
+"#;
+        let card: Card = serde_yaml::from_str(yaml).unwrap();
+        let CardKind::EntityList { entities, .. } = &card.kind else {
+            panic!("expected EntityList");
+        };
+        assert_eq!(entities.len(), 1);
+        assert_eq!(entities[0].entity_id(), "light.kitchen");
+        assert_eq!(entities[0].name_override(), Some("Kitchen"));
+        assert_eq!(entities[0].hide_state_override(), None);
+        let back = serde_yaml::to_string(&card).unwrap();
+        assert!(back.contains("entity: light.kitchen"));
+        assert!(back.contains("name: Kitchen"));
+    }
+
+    #[test]
+    fn entity_list_full_entry_hide_state_round_trip() {
+        let yaml = r#"
+type: entity_list
+instance: home
+entities:
+  - entity: light.bedroom
+    hide_state: true
+pos: { col: 0, row: 0, w: 4, h: 4 }
+"#;
+        let card: Card = serde_yaml::from_str(yaml).unwrap();
+        let CardKind::EntityList { entities, .. } = &card.kind else {
+            panic!("expected EntityList");
+        };
+        assert_eq!(entities[0].hide_state_override(), Some(true));
+        let back = serde_yaml::to_string(&card).unwrap();
+        assert!(back.contains("hide_state: true"));
+    }
+
+    #[test]
+    fn entity_list_mixed_bare_and_full_round_trip() {
+        let yaml = r#"
+type: entity_list
+instance: home
+entities:
+  - light.kitchen
+  - entity: light.bedroom
+    name: Bedroom
+pos: { col: 0, row: 0, w: 4, h: 4 }
+"#;
+        let card: Card = serde_yaml::from_str(yaml).unwrap();
+        let CardKind::EntityList { entities, .. } = &card.kind else {
+            panic!("expected EntityList");
+        };
+        assert_eq!(entities.len(), 2);
+        assert!(matches!(&entities[0], EntityListItem::Bare(_)));
+        assert!(matches!(&entities[1], EntityListItem::Full { name: Some(_), .. }));
+        let back = serde_yaml::to_string(&card).unwrap();
+        assert!(back.contains("- light.kitchen"));
+        assert!(back.contains("name: Bedroom"));
+    }
+
+    #[test]
+    fn filtered_entity_list_overrides_round_trip() {
+        let yaml = r#"
+type: filtered_entity_list
+instance: home
+query: "light.*"
+hide_state: false
+overrides:
+  light.kitchen:
+    name: Kitchen
+    hide_state: true
+pos: { col: 0, row: 0, w: 4, h: 4 }
+"#;
+        let card: Card = serde_yaml::from_str(yaml).unwrap();
+        let CardKind::FilteredEntityList { overrides, .. } = &card.kind else {
+            panic!("expected FilteredEntityList");
+        };
+        let ov = overrides.get("light.kitchen").expect("override missing");
+        assert_eq!(ov.name.as_deref(), Some("Kitchen"));
+        assert_eq!(ov.hide_state, Some(true));
+        let back = serde_yaml::to_string(&card).unwrap();
+        assert!(back.contains("overrides:"));
+        assert!(back.contains("light.kitchen:"));
+    }
+
+    #[test]
+    fn filtered_entity_list_empty_overrides_omitted() {
+        let yaml = r#"
+type: filtered_entity_list
+instance: home
+query: "light.*"
+hide_state: false
+pos: { col: 0, row: 0, w: 4, h: 4 }
+"#;
+        let card: Card = serde_yaml::from_str(yaml).unwrap();
+        let CardKind::FilteredEntityList { overrides, .. } = &card.kind else {
+            panic!("expected FilteredEntityList");
+        };
+        assert!(overrides.is_empty());
+        let back = serde_yaml::to_string(&card).unwrap();
+        // Empty overrides map must not appear in serialized output.
+        assert!(!back.contains("overrides:"), "empty overrides should be omitted: {back}");
+    }
+
+    // Required canonical test names -----------------------------------------------
+
+    #[test]
+    fn entity_list_item_bare_round_trips() {
+        let yaml = r#"
+type: entity_list
+instance: home
+entities:
+  - light.kitchen
+pos: { col: 0, row: 0, w: 4, h: 4 }
+"#;
+        let card: Card = serde_yaml::from_str(yaml).unwrap();
+        let CardKind::EntityList { entities, .. } = &card.kind else {
+            panic!("expected EntityList");
+        };
+        assert!(matches!(&entities[0], EntityListItem::Bare(e) if e == "light.kitchen"));
+        let back = serde_yaml::to_string(&card).unwrap();
+        assert!(back.contains("- light.kitchen"), "bare string not preserved: {back}");
+        assert!(!back.contains("entity: light.kitchen"), "bare was expanded: {back}");
+    }
+
+    #[test]
+    fn entity_list_item_full_round_trips() {
+        let yaml = r#"
+type: entity_list
+instance: home
+entities:
+  - entity: light.kitchen
+    name: Kitchen
+    hide_state: true
+pos: { col: 0, row: 0, w: 4, h: 4 }
+"#;
+        let card: Card = serde_yaml::from_str(yaml).unwrap();
+        let CardKind::EntityList { entities, .. } = &card.kind else {
+            panic!("expected EntityList");
+        };
+        assert_eq!(entities[0].entity_id(), "light.kitchen");
+        assert_eq!(entities[0].name_override(), Some("Kitchen"));
+        assert_eq!(entities[0].hide_state_override(), Some(true));
+        let back = serde_yaml::to_string(&card).unwrap();
+        assert!(back.contains("entity: light.kitchen"));
+        assert!(back.contains("name: Kitchen"));
+        assert!(back.contains("hide_state: true"));
+    }
+
+    #[test]
+    fn entity_list_item_mixed_forms() {
+        let yaml = r#"
+type: entity_list
+instance: home
+entities:
+  - light.kitchen
+  - entity: light.bedroom
+    name: Bedroom
+pos: { col: 0, row: 0, w: 4, h: 4 }
+"#;
+        let card: Card = serde_yaml::from_str(yaml).unwrap();
+        let CardKind::EntityList { entities, .. } = &card.kind else {
+            panic!("expected EntityList");
+        };
+        assert_eq!(entities.len(), 2);
+        assert!(matches!(&entities[0], EntityListItem::Bare(_)));
+        assert!(matches!(&entities[1], EntityListItem::Full { name: Some(_), .. }));
+        let back = serde_yaml::to_string(&card).unwrap();
+        assert!(back.contains("- light.kitchen"));
+        assert!(back.contains("name: Bedroom"));
+    }
+
+    #[test]
+    fn filtered_entity_list_overrides_default_empty() {
+        let yaml = r#"
+type: filtered_entity_list
+instance: home
+query: "sensor.*"
+hide_state: false
+pos: { col: 0, row: 0, w: 4, h: 4 }
+"#;
+        let card: Card = serde_yaml::from_str(yaml).unwrap();
+        let CardKind::FilteredEntityList { overrides, .. } = &card.kind else {
+            panic!("expected FilteredEntityList");
+        };
+        assert!(overrides.is_empty(), "overrides should default to empty");
+    }
+
+    #[test]
+    fn filtered_entity_list_overrides_omitted_when_empty() {
+        let yaml = r#"
+type: filtered_entity_list
+instance: home
+query: "sensor.*"
+hide_state: false
+pos: { col: 0, row: 0, w: 4, h: 4 }
+"#;
+        let card: Card = serde_yaml::from_str(yaml).unwrap();
+        let back = serde_yaml::to_string(&card).unwrap();
+        assert!(!back.contains("overrides:"), "empty overrides should be omitted: {back}");
     }
 
     #[test]

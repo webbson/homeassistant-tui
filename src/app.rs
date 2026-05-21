@@ -533,8 +533,10 @@ impl App {
                             Some(title_buffer.trim().to_string())
                         };
                         let inst = instance.clone();
-                        let entities: Vec<String> =
-                            picked.iter().map(|(eid, _)| eid.clone()).collect();
+                        let entities: Vec<crate::dashboard::EntityListItem> = picked
+                            .iter()
+                            .map(|(eid, _)| crate::dashboard::EntityListItem::Bare(eid.clone()))
+                            .collect();
                         editor.mode = EditorMode::Browse;
                         let kind = CardKind::EntityList {
                             instance: inst,
@@ -549,6 +551,162 @@ impl App {
                         };
                         editor2.snapshot(dash);
                         editor2.add_card(dash, kind);
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::PickEntityListItemToOverride {
+                card_idx,
+                items,
+                selected,
+            } => {
+                let count = items.len();
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Up | KeyCode::Char('k') if *selected > 0 => *selected -= 1,
+                    KeyCode::Down | KeyCode::Char('j') if *selected + 1 < count => *selected += 1,
+                    KeyCode::Enter => {
+                        let cidx = *card_idx;
+                        let (item_idx, _) = items[*selected].clone();
+                        // Pre-populate from the card's current data for the chosen item.
+                        let (current_name, current_hide) = self
+                            .dashboards
+                            .get(dash_idx)
+                            .and_then(|d| d.card(cidx))
+                            .and_then(|c| {
+                                if let CardKind::EntityList { entities, .. } = &c.kind {
+                                    entities.get(item_idx).map(|item| {
+                                        let name = match item {
+                                            crate::dashboard::EntityListItem::Full {
+                                                name: Some(n),
+                                                ..
+                                            } => n.clone(),
+                                            _ => String::new(),
+                                        };
+                                        let hide = item.hide_state_override().unwrap_or(false);
+                                        (name, hide)
+                                    })
+                                } else {
+                                    None
+                                }
+                            })
+                            .unwrap_or((String::new(), false));
+                        editor.mode = EditorMode::EditEntityListItemOverride {
+                            card_idx: cidx,
+                            item_idx,
+                            entity_id: None, // EntityList uses positional index, not keyed id
+                            name_buf: current_name,
+                            hide_state: current_hide,
+                            focus_entity_id: false,
+                        };
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            EditorMode::EditEntityListItemOverride {
+                card_idx,
+                item_idx,
+                entity_id,
+                name_buf,
+                hide_state,
+                focus_entity_id,
+            } => {
+                // For FilteredEntityList: `entity_id = Some(buf)`, `focus_entity_id` starts
+                // true. Tab moves focus: entity_id → name → hide_state toggle.
+                // For EntityList: `entity_id = None`, `focus_entity_id = false`; Tab toggles
+                // hide_state directly.
+                match k.code {
+                    KeyCode::Esc => editor.mode = EditorMode::Browse,
+                    KeyCode::Tab => {
+                        if *focus_entity_id {
+                            // Advance from entity_id field to name field
+                            *focus_entity_id = false;
+                        } else {
+                            *hide_state = !*hide_state;
+                        }
+                    }
+                    KeyCode::Backspace => {
+                        if *focus_entity_id {
+                            if let Some(eid_buf) = entity_id.as_mut() {
+                                eid_buf.pop();
+                            }
+                        } else {
+                            name_buf.pop();
+                        }
+                    }
+                    KeyCode::Char(c) => {
+                        if *focus_entity_id {
+                            if let Some(eid_buf) = entity_id.as_mut() {
+                                eid_buf.push(c);
+                            }
+                        } else {
+                            name_buf.push(c);
+                        }
+                    }
+                    KeyCode::Enter => {
+                        if *focus_entity_id {
+                            // Confirm entity_id field and move focus to name field
+                            *focus_entity_id = false;
+                            return;
+                        }
+                        let card_idx = *card_idx;
+                        let item_idx = *item_idx;
+                        let entity_id = entity_id.clone();
+                        let name = if name_buf.trim().is_empty() {
+                            None
+                        } else {
+                            Some(name_buf.trim().to_string())
+                        };
+                        let hide = *hide_state;
+                        editor.mode = EditorMode::Browse;
+                        let Some(dash) = self.dashboards.get_mut(dash_idx) else {
+                            return;
+                        };
+                        let Some(editor2) = self.editor.as_mut() else {
+                            return;
+                        };
+                        editor2.snapshot(dash);
+                        if let Some(card) = dash.card_mut(card_idx) {
+                            match &mut card.kind {
+                                CardKind::EntityList { entities, .. } => {
+                                    if let Some(item) = entities.get_mut(item_idx) {
+                                        // Promote Bare → Full (or update existing Full)
+                                        let eid = item.entity_id().clone();
+                                        *item = if name.is_some() || hide {
+                                            crate::dashboard::EntityListItem::Full {
+                                                entity: eid,
+                                                name,
+                                                hide_state: if hide { Some(true) } else { None },
+                                            }
+                                        } else {
+                                            crate::dashboard::EntityListItem::Bare(eid)
+                                        };
+                                    }
+                                }
+                                CardKind::FilteredEntityList { overrides, .. } => {
+                                    if let Some(eid) = entity_id {
+                                        let eid = eid.trim().to_string();
+                                        if !eid.is_empty() {
+                                            if name.is_some() || hide {
+                                                let ov = overrides.entry(eid).or_insert_with(
+                                                    crate::dashboard::EntityOverride::default,
+                                                );
+                                                ov.name = name;
+                                                ov.hide_state =
+                                                    if hide { Some(true) } else { None };
+                                            } else {
+                                                overrides.remove(&eid);
+                                            }
+                                        }
+                                        // Empty entity_id → nothing to save, silently discard.
+                                    }
+                                }
+                                _ => {}
+                            }
+                            editor2.dirty = true;
+                        }
                     }
                     _ => {}
                 }
@@ -768,6 +926,7 @@ impl App {
                             hide_state: hide,
                             hide_when_empty: false,
                             title,
+                            overrides: std::collections::BTreeMap::new(),
                         };
                         let Some(dash) = self.dashboards.get_mut(dash_idx) else {
                             return;
@@ -2801,7 +2960,7 @@ impl App {
 
     fn open_menu(&mut self) {
         use crate::dashboard::editor::{
-            GridFocus, MenuContext, card_menu_items, column_menu_items,
+            GridFocus, MenuAction, MenuContext, MenuItem, card_menu_items, column_menu_items,
             dashboard_menu_items, grid_card_extra_items, row_menu_items,
         };
         use crate::dashboard::DashboardLayout;
@@ -2813,7 +2972,7 @@ impl App {
         let Some(dash) = self.dashboards.get(dash_idx) else { return; };
         let is_grid = matches!(&dash.layout, DashboardLayout::Grid { .. });
 
-        let (context, items) = if is_grid {
+        let (context, mut items) = if is_grid {
             match grid_focus {
                 Some(GridFocus::Row { row }) => {
                     (MenuContext::Row(row), row_menu_items())
@@ -2842,6 +3001,22 @@ impl App {
                 None => (MenuContext::Dashboard, dashboard_menu_items(false)),
             }
         };
+
+        // For EntityList / FilteredEntityList cards, offer per-entry override editing.
+        if let MenuContext::Card(card_idx) = context {
+            if let Some(card) = dash.card(card_idx) {
+                if matches!(
+                    &card.kind,
+                    CardKind::EntityList { .. } | CardKind::FilteredEntityList { .. }
+                ) {
+                    let insert_pos = items.len().saturating_sub(3); // before Move/Copy/Delete
+                    items.insert(
+                        insert_pos,
+                        MenuItem { action: MenuAction::EditEntryOverride, label: "Override entry…" },
+                    );
+                }
+            }
+        }
 
         if let Some(ed) = self.editor.as_mut() {
             ed.mode = EditorMode::Menu { context, items, selected: 0 };
@@ -2939,6 +3114,51 @@ impl App {
                         card_idx: idx,
                         current: current_size,
                     };
+                }
+            }
+            (A::EditEntryOverride, C::Card(card_idx)) => {
+                if let Some(dash) = self.dashboards.get(dash_idx) {
+                    if let Some(card) = dash.card(card_idx) {
+                        match &card.kind {
+                            CardKind::EntityList { entities, .. } => {
+                                // Show a list-picker so the user can choose which entry to override.
+                                if entities.is_empty() {
+                                    self.status_msg =
+                                        Some("EntityList has no entries to override.".to_string());
+                                    return;
+                                }
+                                let items: Vec<(usize, String)> = entities
+                                    .iter()
+                                    .enumerate()
+                                    .map(|(i, e)| (i, e.entity_id().clone()))
+                                    .collect();
+                                if let Some(ed) = self.editor.as_mut() {
+                                    ed.selected_card = Some(card_idx);
+                                    ed.mode = EditorMode::PickEntityListItemToOverride {
+                                        card_idx,
+                                        items,
+                                        selected: 0,
+                                    };
+                                }
+                            }
+                            CardKind::FilteredEntityList { .. } => {
+                                // No entity is resolved at menu-open time; start with an empty
+                                // entity_id field that the user must fill in.
+                                if let Some(ed) = self.editor.as_mut() {
+                                    ed.selected_card = Some(card_idx);
+                                    ed.mode = EditorMode::EditEntityListItemOverride {
+                                        card_idx,
+                                        item_idx: 0,
+                                        entity_id: Some(String::new()),
+                                        name_buf: String::new(),
+                                        hide_state: false,
+                                        focus_entity_id: true,
+                                    };
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
                 }
             }
             (A::DeleteCard, C::Card(idx)) => {
@@ -3557,7 +3777,8 @@ impl App {
             } => {
                 let picked: Vec<(String, String)> = entities
                     .iter()
-                    .map(|eid| {
+                    .map(|item| {
+                        let eid = item.entity_id();
                         let friendly = self
                             .instances
                             .runtimes
@@ -4634,7 +4855,10 @@ pub fn list_entities(
     match &card.kind {
         CK::EntityList {
             instance, entities, ..
-        } => Some((instance.clone(), entities.clone())),
+        } => Some((
+            instance.clone(),
+            entities.iter().map(|item| item.entity_id().clone()).collect(),
+        )),
         CK::FilteredEntityList {
             instance, query, ..
         } => {
@@ -4724,7 +4948,7 @@ fn build_typed_card(
         },
         CardTypeStub::EntityList => CardKind::EntityList {
             instance,
-            entities: vec![entity],
+            entities: vec![crate::dashboard::EntityListItem::Bare(entity)],
             title,
         },
         CardTypeStub::FilteredEntityList => unreachable!(

@@ -7,6 +7,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 ## [Unreleased]
 
 ### Added
+- **EntityList per-entry overrides** — items accept `{entity, name?, hide_state?}` form for per-entity display overrides; bare strings still supported and round-trip unchanged.
+- **FilteredEntityList overrides** — accepts `overrides: { <entity_id>: { name?, hide_state? } }` for per-entity display overrides.
+- **Editor entry overrides** — "Set entry name" and "Toggle hide state" menu items for EntityList/FilteredEntityList row overrides.
 
 ### Changed
 - Entity/EntityList/Gauge value formatting respects `display_precision`; when absent, whole numbers drop decimals (`21.0` → `21`).

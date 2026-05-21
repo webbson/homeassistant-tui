@@ -111,6 +111,25 @@ pub fn draw(f: &mut Frame, area: Rect, app: &mut App) {
             picked,
             title_buffer,
         } => draw_entity_list_title(f, area, instance, picked, title_buffer),
+        EditorMode::EditEntityListItemOverride {
+            name_buf,
+            hide_state,
+            entity_id,
+            focus_entity_id,
+            ..
+        } => draw_entity_list_item_override(
+            f,
+            area,
+            entity_id.as_deref(),
+            *focus_entity_id,
+            name_buf,
+            *hide_state,
+        ),
+        EditorMode::PickEntityListItemToOverride {
+            card_idx,
+            items,
+            selected,
+        } => draw_pick_entity_list_item(f, area, dash, *card_idx, items, *selected),
         EditorMode::ConfirmExit => draw_confirm(f, area, "Unsaved changes. Discard? (y/n)"),
         EditorMode::ConfirmDelete => draw_confirm(f, area, "Delete selected card? (y/n)"),
         EditorMode::Renaming { buffer } => draw_rename(f, area, buffer),
@@ -1068,6 +1087,124 @@ fn draw_text_input(f: &mut Frame, area: Rect, title: &str, hint: &str, buffer: &
         Paragraph::new(lines)
             .block(Block::bordered().title(format!(" {} (Enter=apply, Esc=cancel) ", title))),
         r,
+    );
+}
+
+// `entity_id`: `Some(buf)` for FilteredEntityList (user must supply entity_id);
+// `None` for EntityList (entity known from position).
+fn draw_entity_list_item_override(
+    f: &mut Frame,
+    area: Rect,
+    entity_id: Option<&str>,
+    focus_entity_id: bool,
+    name_buf: &str,
+    hide_state: bool,
+) {
+    let has_eid_field = entity_id.is_some();
+    let modal_h = if has_eid_field { 10 } else { 7 };
+    let r = modal_rect(area, 50, modal_h);
+    f.render_widget(Clear, r);
+    let hide_label = if hide_state { "[x] hide state" } else { "[ ] hide state" };
+
+    let mut lines: Vec<Line<'_>> = Vec::new();
+
+    // entity_id field — only shown for FilteredEntityList
+    if let Some(eid_buf) = entity_id {
+        let eid_style = if focus_entity_id {
+            Style::new().bold()
+        } else {
+            Style::new().dim()
+        };
+        lines.push(Line::styled("Entity ID (e.g. sensor.kitchen_temp)", eid_style));
+        let mut eid_spans = vec![Span::raw("> "), Span::styled(eid_buf.to_string(), eid_style)];
+        if focus_entity_id {
+            eid_spans.push(Span::styled("_", Style::new().rapid_blink()));
+        }
+        lines.push(Line::from(eid_spans));
+        lines.push(Line::raw(""));
+    }
+
+    // name field
+    let name_style = if !focus_entity_id {
+        Style::new().bold()
+    } else {
+        Style::new().dim()
+    };
+    lines.push(Line::styled("Name override (blank = use friendly name)", name_style));
+    let mut name_spans = vec![Span::raw("> "), Span::styled(name_buf.to_string(), name_style)];
+    if !focus_entity_id {
+        name_spans.push(Span::styled("_", Style::new().rapid_blink()));
+    }
+    lines.push(Line::from(name_spans));
+    lines.push(Line::raw(""));
+    lines.push(Line::styled(hide_label.to_string(), Style::new().bold()));
+    lines.push(Line::raw(""));
+
+    let footer = if has_eid_field && focus_entity_id {
+        "Tab / Enter advance · Esc cancel"
+    } else {
+        "Enter save · Tab toggle hide_state · Esc cancel"
+    };
+    lines.push(Line::styled(footer.to_string(), Style::new().dim()));
+
+    f.render_widget(
+        Paragraph::new(lines).block(Block::bordered().title(" Override entry ")),
+        r,
+    );
+}
+
+fn draw_pick_entity_list_item(
+    f: &mut Frame,
+    area: Rect,
+    dash: &crate::dashboard::Dashboard,
+    card_idx: usize,
+    items: &[(usize, String)],
+    selected: usize,
+) {
+    let h = (items.len() as u16 + 4)
+        .max(6)
+        .min(area.height.saturating_sub(4));
+    let r = modal_rect(area, 60, h);
+    f.render_widget(Clear, r);
+
+    // Build display labels: "entity_id (Name override)" if a name override is set
+    let list_items: Vec<ListItem<'_>> = items
+        .iter()
+        .map(|(item_idx, eid)| {
+            let label = dash
+                .card(card_idx)
+                .and_then(|c| {
+                    if let crate::dashboard::CardKind::EntityList { entities, .. } = &c.kind {
+                        entities.get(*item_idx).and_then(|e| {
+                            if let crate::dashboard::EntityListItem::Full {
+                                name: Some(n), ..
+                            } = e
+                            {
+                                Some(format!("{eid} ({n})"))
+                            } else {
+                                None
+                            }
+                        })
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or_else(|| eid.clone());
+            ListItem::new(Line::raw(label))
+        })
+        .collect();
+
+    let mut state = ListState::default();
+    if !list_items.is_empty() {
+        state.select(Some(selected.min(list_items.len() - 1)));
+    }
+    f.render_stateful_widget(
+        List::new(list_items)
+            .block(Block::bordered().title(" Pick entry to override (j/k · Enter · Esc) "))
+            .highlight_style(Style::new().reversed())
+            .highlight_symbol("▶ "),
+        r,
+        &mut state,
     );
 }
 

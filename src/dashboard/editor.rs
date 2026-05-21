@@ -71,6 +71,20 @@ pub enum EditorMode {
         picked: Vec<(String, String)>,
         title_buffer: String,
     },
+    /// Edit per-entry display overrides (name, hide_state) for a specific row in
+    /// an EntityList or FilteredEntityList card.
+    EditEntityListItemOverride {
+        card_idx: usize,
+        item_idx: usize,
+        /// `Some(entity_id)` for FilteredEntityList rows (keyed by id in the overrides map);
+        /// `None` for EntityList rows (stored directly on the item).
+        entity_id: Option<String>,
+        name_buf: String,
+        hide_state: bool,
+        /// Only `true` for the FilteredEntityList path while the user is still
+        /// typing the entity_id (before they press Tab or Enter to move to name).
+        focus_entity_id: bool,
+    },
     /// Rename current dashboard.
     Renaming {
         buffer: String,
@@ -333,6 +347,15 @@ pub enum EditorMode {
         forecast_days: u8,
         buf: String,
     },
+    /// Pick which EntityList item to edit an override for.
+    /// Opened before `EditEntityListItemOverride` for EntityList cards so the
+    /// user can choose which row rather than always defaulting to item 0.
+    PickEntityListItemToOverride {
+        card_idx: usize,
+        /// (item_idx, entity_id) pairs from the card's entity list.
+        items: Vec<(usize, String)>,
+        selected: usize,
+    },
     // ---- Cross-dashboard transfer flow ----
     /// Step 1: pick which dashboard to move/copy the card to.
     PickingTargetDashboard {
@@ -485,6 +508,8 @@ pub enum MenuAction {
     MoveColumnRight,
     // Dashboard-level grid actions
     AddRow,
+    // EntityList / FilteredEntityList per-entry overrides
+    EditEntryOverride,
     // Dashboard management
     DeleteDashboard,
 }

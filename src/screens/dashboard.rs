@@ -296,18 +296,25 @@ fn render_card(
             instance, entities, ..
         } => {
             let rt = app.instances.runtimes.get(instance);
+            let rows: Vec<widgets::card_entity_list::EntityListRow<'_>> = entities
+                .iter()
+                .map(|item| widgets::card_entity_list::EntityListRow {
+                    entity_id: item.entity_id(),
+                    name_override: item.name_override(),
+                    hide_state: item.hide_state_override().unwrap_or(false),
+                })
+                .collect();
             widgets::card_entity_list::render(
                 f,
                 rect,
                 &title,
                 instance,
-                entities,
+                &rows,
                 rt,
                 card.color.as_deref(),
                 &app.theme,
                 selected,
                 sub_index,
-                false,
             );
         }
         CardKind::FilteredEntityList {
@@ -315,6 +322,7 @@ fn render_card(
             query,
             hide_state,
             hide_when_empty,
+            overrides,
             ..
         } => {
             let rt = app.instances.runtimes.get(instance);
@@ -336,18 +344,28 @@ fn render_card(
                 // On the normal dashboard, skip rendering entirely (grid cells still occupied).
                 return;
             }
+            let rows: Vec<widgets::card_entity_list::EntityListRow<'_>> = entities
+                .iter()
+                .map(|eid| {
+                    let ov = overrides.get(eid);
+                    widgets::card_entity_list::EntityListRow {
+                        entity_id: eid,
+                        name_override: ov.and_then(|o| o.name.as_deref()),
+                        hide_state: ov.and_then(|o| o.hide_state).unwrap_or(*hide_state),
+                    }
+                })
+                .collect();
             widgets::card_entity_list::render(
                 f,
                 rect,
                 &title,
                 instance,
-                &entities,
+                &rows,
                 rt,
                 card.color.as_deref(),
                 &app.theme,
                 selected,
                 sub_index,
-                *hide_state,
             );
         }
         CardKind::Statistics {
