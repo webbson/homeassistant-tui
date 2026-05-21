@@ -117,7 +117,10 @@ impl App {
             self.show_help = false;
             return;
         }
-        if matches!(k.code, KeyCode::Char('?')) {
+        if matches!(k.code, KeyCode::Char('?'))
+            && self.overlay.is_none()
+            && !matches!(self.screen, Screen::Editor)
+        {
             self.show_help = true;
             return;
         }
@@ -3956,17 +3959,38 @@ impl App {
     }
 
     fn start_card_after_type(&mut self, kind: CardTypeStub) {
-        let Some(editor) = self.editor.as_mut() else {
+        if self.editor.is_none() {
             return;
-        };
+        }
         if matches!(kind, CardTypeStub::Text) {
+            // When editing an existing Text card, pre-fill from its current content.
+            // Extract the indices via a shared borrow before taking the mutable borrow below.
+            let edit_target = self.editor.as_ref().and_then(|e| e.edit_target);
+            let dash_idx = self.editor.as_ref().map(|e| e.dash_idx).unwrap_or(0);
+            let (title_buf, body_buf, focus_body) = if let Some(card_idx) = edit_target {
+                if let Some(card) = self.dashboards.get(dash_idx).and_then(|d| d.card(card_idx)) {
+                    if let crate::dashboard::CardKind::Text { markdown, title } = &card.kind {
+                        (title.clone().unwrap_or_default(), markdown.clone(), true)
+                    } else {
+                        (String::new(), String::new(), false)
+                    }
+                } else {
+                    (String::new(), String::new(), false)
+                }
+            } else {
+                (String::new(), String::new(), false)
+            };
+            let editor = self.editor.as_mut().unwrap();
             editor.mode = EditorMode::EditingTextBody {
-                title_buffer: String::new(),
-                body_buffer: String::new(),
-                focus_body: false,
+                title_buffer: title_buf,
+                body_buffer: body_buf,
+                focus_body,
             };
             return;
         }
+        let Some(editor) = self.editor.as_mut() else {
+            return;
+        };
         // Clock has no instance or entity — go straight to title input.
         if matches!(kind, CardTypeStub::Clock) {
             editor.mode = EditorMode::ClockAddTitle {

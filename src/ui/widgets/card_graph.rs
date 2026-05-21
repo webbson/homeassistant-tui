@@ -86,6 +86,7 @@ pub fn render_line(f: &mut Frame, args: GraphRender<'_>) {
         color: Color,
         label: String,
         points: Vec<(f64, f64)>,
+        orig_idx: usize,
     }
 
     let inner_w = inner.width.saturating_sub(4).max(4) as usize;
@@ -108,6 +109,7 @@ pub fn render_line(f: &mut Frame, args: GraphRender<'_>) {
             color: series_color(s, args.card_color, args.instance, args.theme),
             label: series_label(s).to_string(),
             points,
+            orig_idx: i,
         });
     }
 
@@ -206,7 +208,7 @@ pub fn render_line(f: &mut Frame, args: GraphRender<'_>) {
             };
             let swatch = Span::styled("█ ", Style::new().fg(s.color));
             let label = Span::styled(s.label.as_str(), Style::new().fg(Color::White));
-            let val_str = legend_value_str(args.current_states.get(i).and_then(|o| *o));
+            let val_str = legend_value_str(args.current_states.get(s.orig_idx).and_then(|o| *o));
             // Only append the value if there is enough room (swatch=2, space=2, label, space, value).
             let min_width = 2 + 2 + s.label.len() + 1 + val_str.len();
             let spans = if (row.width as usize) >= min_width {
