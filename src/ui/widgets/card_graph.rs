@@ -10,7 +10,7 @@ use ratatui::widgets::{Axis, Bar, BarChart, Block, Chart, Dataset, GraphType, Pa
 use ratatui::Frame;
 
 use crate::dashboard::{BarOrientation, GraphSeries};
-use crate::ha::EntityId;
+use crate::ha::{EntityId, EntityState};
 use crate::ui::theme::Theme;
 use crate::util::history::RingBuf;
 
@@ -21,6 +21,8 @@ pub struct GraphRender<'a> {
     pub series: &'a [GraphSeries],
     /// (entity, history) tuples in the same order as `series`.
     pub histories: &'a [(EntityId, Option<&'a RingBuf>)],
+    /// Current state for each series (same order as `series`). `None` if unavailable.
+    pub current_states: &'a [Option<&'a EntityState>],
     pub window: &'a str,
     pub card_color: Option<&'a str>,
     pub theme: &'a Theme,
@@ -54,6 +56,21 @@ fn short_name(entity: &EntityId) -> &str {
 
 fn series_label(s: &GraphSeries) -> &str {
     s.label.as_deref().unwrap_or_else(|| short_name(&s.entity))
+}
+
+fn legend_value_str(state: Option<&EntityState>) -> String {
+    match state {
+        None => "\u{2014}".into(), // em dash
+        Some(s) => {
+            let val = crate::ui::format::format_state(s, 1);
+            let unit = crate::ui::format::unit_of(s);
+            if unit.is_empty() {
+                val
+            } else {
+                format!("{val} {unit}")
+            }
+        }
+    }
 }
 
 pub fn render_line(f: &mut Frame, args: GraphRender<'_>) {
@@ -189,7 +206,19 @@ pub fn render_line(f: &mut Frame, args: GraphRender<'_>) {
             };
             let swatch = Span::styled("█ ", Style::new().fg(s.color));
             let label = Span::styled(s.label.as_str(), Style::new().fg(Color::White));
-            f.render_widget(Paragraph::new(Line::from(vec![swatch, label])), row);
+            let val_str = legend_value_str(args.current_states.get(i).and_then(|o| *o));
+            // Only append the value if there is enough room (swatch=2, space=2, label, space, value).
+            let min_width = 2 + 2 + s.label.len() + 1 + val_str.len();
+            let spans = if (row.width as usize) >= min_width {
+                let val_span = Span::styled(
+                    format!("  {val_str}"),
+                    Style::new().fg(Color::DarkGray),
+                );
+                vec![swatch, label, val_span]
+            } else {
+                vec![swatch, label]
+            };
+            f.render_widget(Paragraph::new(Line::from(spans)), row);
         }
     } else {
         let block = make_block(args.title, card_color, args.selected);
@@ -245,8 +274,9 @@ pub fn render_bar(
             let color = series_color(s, args.card_color, args.instance, args.theme);
             let raw_val = current.get(i).and_then(|(_, v)| *v);
             let u_val = raw_val.unwrap_or(0.0).max(0.0) as u64;
-            let base_label = series_label(s).to_string();
-            Bar::with_label(base_label, u_val).style(Style::new().fg(color))
+            let val_str = legend_value_str(args.current_states.get(i).and_then(|o| *o));
+            let label = format!("{} ({})", series_label(s), val_str);
+            Bar::with_label(label, u_val).style(Style::new().fg(color))
         })
         .collect();
 
@@ -273,6 +303,7 @@ pub fn render_pie(f: &mut Frame, args: GraphRender<'_>, current: &[(EntityId, Op
         color: Color,
         label: String,
         value: f64,
+        val_str: String,
     }
     let slices: Vec<Slice> = args
         .series
@@ -287,6 +318,7 @@ pub fn render_pie(f: &mut Frame, args: GraphRender<'_>, current: &[(EntityId, Op
                 color: series_color(s, args.card_color, args.instance, args.theme),
                 label: series_label(s).to_string(),
                 value: v,
+                val_str: legend_value_str(args.current_states.get(i).and_then(|o| *o)),
             })
         })
         .collect();
@@ -391,7 +423,7 @@ pub fn render_pie(f: &mut Frame, args: GraphRender<'_>, current: &[(EntityId, Op
                 height: 1,
             };
             let swatch = Span::styled("█ ", Style::new().fg(slice.color));
-            let label_text = format!("{} {:.0}%", slice.label, pct);
+            let label_text = format!("{} {} ({:.0}%)", slice.label, slice.val_str, pct);
             let label = Span::styled(label_text, Style::new().fg(Color::White));
             f.render_widget(Paragraph::new(Line::from(vec![swatch, label])), row);
         }
@@ -413,4 +445,56 @@ fn downsample(values: &[f64], target: usize) -> Vec<f64> {
         out.push(avg);
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::legend_value_str;
+    use crate::ha::EntityState;
+    use serde_json::json;
+
+    fn make_state(state: &str, attrs: serde_json::Value) -> EntityState {
+        EntityState {
+            entity_id: "test.entity".to_string(),
+            state: state.to_string(),
+            attributes: attrs,
+            last_changed: None,
+            last_updated: None,
+        }
+    }
+
+    #[test]
+    fn none_gives_em_dash() {
+        assert_eq!(legend_value_str(None), "\u{2014}");
+    }
+
+    #[test]
+    fn numeric_with_unit() {
+        let s = make_state("21.0", json!({"unit_of_measurement": "°C"}));
+        assert_eq!(legend_value_str(Some(&s)), "21 °C");
+    }
+
+    #[test]
+    fn numeric_no_unit() {
+        let s = make_state("21.0", json!({}));
+        assert_eq!(legend_value_str(Some(&s)), "21");
+    }
+
+    #[test]
+    fn non_numeric_state() {
+        let s = make_state("on", json!({}));
+        assert_eq!(legend_value_str(Some(&s)), "on");
+    }
+
+    #[test]
+    fn whole_number_no_trailing_decimals() {
+        let s = make_state("42.0", json!({}));
+        assert_eq!(legend_value_str(Some(&s)), "42");
+    }
+
+    #[test]
+    fn fractional_rounded_to_1dp() {
+        let s = make_state("21.567", json!({"unit_of_measurement": "%"}));
+        assert_eq!(legend_value_str(Some(&s)), "21.6 %");
+    }
 }

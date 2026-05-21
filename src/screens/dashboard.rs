@@ -228,12 +228,22 @@ fn render_card(
                     )
                 })
                 .collect();
+            let current_states: Vec<Option<&crate::ha::EntityState>> = entities
+                .iter()
+                .map(|s| {
+                    app.instances
+                        .runtimes
+                        .get(instance)
+                        .and_then(|rt| rt.states.get(&s.entity))
+                })
+                .collect();
             let graph_args = GraphRender {
                 area: rect,
                 title: &title,
                 instance,
                 series: entities,
                 histories: &histories,
+                current_states: &current_states,
                 window,
                 card_color: card.color.as_deref(),
                 theme: &app.theme,
