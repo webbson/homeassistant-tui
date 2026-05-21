@@ -7,7 +7,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [0.5.0] – 2026-05-21
+
+### Added
 - **AttributeList card** — renders an entity attribute array (e.g. `top10`) as a scrollable list with a configurable per-row template. Supports `{key}`, `{key|round}`, `{key|int}`, `{key|thousands}`, `{rank}`, and `{index}` tokens. Optional `limit` caps the number of rows shown. Add via the editor palette (`a` → "attribute list") or directly in YAML.
+- **Cursor movement in editor text inputs** — Left/Right/Home/End/Delete move the cursor within any editor text buffer. Ctrl+A/E jump to start/end; Ctrl+W deletes the word before the cursor.
 
 ### Changed
 
@@ -109,7 +120,8 @@ First tagged release. The initial milestones (M0–M5 + partial M6).
 - rustls 0.23 requires an explicit `CryptoProvider` — installed at process start so the first TLS handshake doesn't panic.
 - crossterm bumped to 0.29 to match ratatui 0.30.
 
-[Unreleased]: https://github.com/webbson/homeassistant-tui/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/webbson/homeassistant-tui/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/webbson/homeassistant-tui/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/webbson/homeassistant-tui/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/webbson/homeassistant-tui/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/webbson/homeassistant-tui/compare/v0.1.0...v0.2.0
