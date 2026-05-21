@@ -9,6 +9,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 ### Added
 
 ### Changed
+- Entity/EntityList/Gauge value formatting respects `display_precision`; when absent, whole numbers drop decimals (`21.0` → `21`).
 
 ### Fixed
 

@@ -24,6 +24,7 @@ pub fn render(
     size: CardSize,
     theme: &Theme,
     selected: bool,
+    attrs: &serde_json::Map<String, serde_json::Value>,
 ) {
     let base_color = crate::ui::theme::resolve_card_color(card_color, instance, theme);
     let mut block = Block::bordered()
@@ -106,10 +107,13 @@ pub fn render(
     }
 
     let label_str: String = match value {
-        Some(v) => match unit {
-            Some(u) if !u.is_empty() => format!("{v:.1} {u}"),
-            _ => format!("{v:.1}"),
-        },
+        Some(v) => {
+            let formatted = crate::ui::format::format_f64_smart(v, attrs, 1);
+            match unit {
+                Some(u) if !u.is_empty() => format!("{formatted} {u}"),
+                _ => formatted,
+            }
+        }
         None => "—".into(),
     };
 

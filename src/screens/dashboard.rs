@@ -183,12 +183,16 @@ fn render_card(
             needle,
             ..
         } => {
-            let value = app
+            let empty_attrs = serde_json::Map::new();
+            let entity_state = app
                 .instances
                 .runtimes
                 .get(instance)
-                .and_then(|rt| rt.states.get(entity))
-                .and_then(|s| s.state.parse::<f64>().ok());
+                .and_then(|rt| rt.states.get(entity));
+            let value = entity_state.and_then(|s| s.state.parse::<f64>().ok());
+            let attrs = entity_state
+                .and_then(|s| s.attributes.as_object())
+                .unwrap_or(&empty_attrs);
             widgets::card_gauge::render(
                 f,
                 rect,
@@ -204,6 +208,7 @@ fn render_card(
                 card.size,
                 &app.theme,
                 selected,
+                attrs,
             );
         }
         CardKind::Graph {
