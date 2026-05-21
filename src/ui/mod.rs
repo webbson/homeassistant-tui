@@ -136,6 +136,18 @@ fn draw_overlay(f: &mut Frame, area: ratatui::layout::Rect, app: &App) {
         Overlay::InputValue(ref modal_state) => {
             widgets::input_modal::render(f, area, modal_state);
         }
+        Overlay::EntityDetails {
+            alias,
+            entity_id,
+            scroll,
+        } => {
+            let state = app
+                .instances
+                .runtimes
+                .get(alias)
+                .and_then(|rt| rt.states.get(entity_id));
+            widgets::entity_modal::render_entity_details(f, area, entity_id, state, *scroll);
+        }
     }
 }
 
@@ -147,7 +159,7 @@ fn draw_footer(f: &mut Frame, area: ratatui::layout::Rect, app: &App) {
     } else {
         let s = match &app.screen {
             Screen::Dashboard { .. } => {
-                "1..9 switch · h/l cards · j/k rows in list card · ⏎ activate · e edit · E entities · i instances · ? help"
+                "1..9 switch · h/l cards · j/k rows · ⏎ activate · D details · e edit · E entities · i instances · ? help"
                     .to_string()
             }
             Screen::Editor => {

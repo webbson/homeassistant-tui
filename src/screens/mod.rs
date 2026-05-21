@@ -36,6 +36,11 @@ pub enum Overlay {
         selected: usize,
     },
     InputValue(InputModalState),
+    EntityDetails {
+        alias: Alias,
+        entity_id: EntityId,
+        scroll: u16,
+    },
 }
 
 #[derive(Debug, Clone)]

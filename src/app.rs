@@ -177,6 +177,15 @@ impl App {
                 }
             }
             KeyCode::Enter => self.trigger_default_action(),
+            KeyCode::Char('D') => {
+                if let Some((alias, entity_id)) = self.selected_dashboard_entity() {
+                    self.overlay = Some(Overlay::EntityDetails {
+                        alias,
+                        entity_id,
+                        scroll: 0,
+                    });
+                }
+            }
             _ => {}
         }
     }
@@ -352,6 +361,16 @@ impl App {
                             }
                         }
                     }
+                    _ => {}
+                }
+            }
+            Overlay::EntityDetails { scroll, .. } => {
+                match k.code {
+                    KeyCode::Char('q') | KeyCode::Char('D') => self.overlay = None,
+                    KeyCode::Char('j') | KeyCode::Down => *scroll = scroll.saturating_add(1),
+                    KeyCode::Char('k') | KeyCode::Up => *scroll = scroll.saturating_sub(1),
+                    KeyCode::PageDown => *scroll = scroll.saturating_add(10),
+                    KeyCode::PageUp => *scroll = scroll.saturating_sub(10),
                     _ => {}
                 }
             }
@@ -4187,6 +4206,25 @@ impl App {
             tracing::info!(%instance, %entity, %service, "media service call dispatched");
         }
         true
+    }
+
+    fn selected_dashboard_entity(&self) -> Option<(crate::config::Alias, crate::ha::EntityId)> {
+        let Screen::Dashboard {
+            idx,
+            selected_card,
+            sub_index,
+        } = &self.screen
+        else {
+            return None;
+        };
+        let dash = self.dashboards.get(*idx)?;
+        let card = dash.card(*selected_card)?;
+        if let Some((alias, entities)) = list_entities(card, &self.instances) {
+            let eid = entities.get(*sub_index).cloned()?;
+            return Some((alias, eid));
+        }
+        let (alias, entity) = card.entity_ref()?;
+        Some((alias.clone(), entity.clone()))
     }
 
     fn trigger_default_action(&mut self) {

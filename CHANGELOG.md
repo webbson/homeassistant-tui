@@ -7,6 +7,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 ## [Unreleased]
 
 ### Added
+- **Entity details overlay** — press `D` on any dashboard card to open a fullscreen popup showing entity_id, state, last_changed, last_updated, and full attributes JSON. `j`/`k` scroll, `PgUp`/`PgDn` page, `Esc`/`q`/`D` close.
 - **Graph legend current value** — line, bar, and pie graph cards show the current formatted state value (with unit) next to each series name in the legend.
 - **EntityList per-entry overrides** — items accept `{entity, name?, hide_state?}` form for per-entity display overrides; bare strings still supported and round-trip unchanged.
 - **FilteredEntityList overrides** — accepts `overrides: { <entity_id>: { name?, hide_state? } }` for per-entity display overrides.

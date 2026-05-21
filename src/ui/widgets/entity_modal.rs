@@ -5,6 +5,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::Frame;
 
+use crate::ha::EntityId;
+
 use crate::config::Alias;
 use crate::ha::{ConnStatus, EntityState, InstanceRuntime};
 use crate::screens::entities::EntityRow;
@@ -177,6 +179,61 @@ pub fn render_instance_list<'a, I>(
         .highlight_style(Style::new().reversed())
         .highlight_symbol("▶ ");
     f.render_stateful_widget(list, inner, &mut state);
+}
+
+pub fn render_entity_details(
+    f: &mut Frame,
+    area: Rect,
+    entity_id: &EntityId,
+    state: Option<&crate::ha::EntityState>,
+    scroll: u16,
+) {
+    let w = (area.width as f32 * 0.85) as u16;
+    let h = (area.height as f32 * 0.85) as u16;
+    let r = modal_rect(area, w, h);
+    f.render_widget(Clear, r);
+
+    let title = state
+        .and_then(|s| s.attributes.get("friendly_name"))
+        .and_then(|v| v.as_str())
+        .unwrap_or(entity_id.as_str());
+    let block = Block::bordered().title(format!(" {title} "));
+    let inner = block.inner(r);
+    f.render_widget(block, r);
+
+    let [body, footer] =
+        Layout::vertical([Constraint::Fill(1), Constraint::Length(1)]).areas(inner);
+
+    let content = match state {
+        None => "No state available.".to_string(),
+        Some(s) => {
+            let attrs = serde_json::to_string_pretty(&s.attributes)
+                .unwrap_or_else(|_| "<unserializable>".into());
+            format!(
+                "entity_id:    {}\nstate:        {}\nlast_changed: {}\nlast_updated: {}\n\nattributes:\n{}",
+                s.entity_id,
+                s.state,
+                s.last_changed.as_deref().unwrap_or("-"),
+                s.last_updated.as_deref().unwrap_or("-"),
+                attrs
+            )
+        }
+    };
+
+    f.render_widget(
+        Paragraph::new(content)
+            .wrap(Wrap { trim: false })
+            .scroll((scroll, 0)),
+        body,
+    );
+
+    f.render_widget(
+        Paragraph::new(Line::from(vec![Span::styled(
+            " j/k scroll · PgUp/PgDn page · Esc/q/D close",
+            Style::new().dim(),
+        )])),
+        footer,
+    );
 }
 
 fn modal_rect(parent: Rect, w: u16, h: u16) -> Rect {
