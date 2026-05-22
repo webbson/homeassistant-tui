@@ -682,10 +682,20 @@ fn draw_grid_editor_overlay(
         .map(|((_, ri, ci), &offset)| ((*ri, *ci), offset))
         .collect();
 
-    // Use zero heights — we only need col_infos for layout positions.
-    let card_count = dash.card_count();
-    let card_heights: Vec<u16> = vec![4; card_count];
-    let (_slots, col_infos) = grid_layout(rows, area, &col_scrolls, &card_heights, &[]);
+    // Compute per-card heights identically to the main renderer so the selector
+    // overlay aligns with what the user sees (filtered lists resolved, sizes honored,
+    // hide-when-empty kept visible in editor).
+    let real_heights = compute_card_heights(dash, rows, area.width, app, true);
+    let card_fills: Vec<bool> = dash
+        .cards_iter()
+        .map(|c| {
+            matches!(
+                c.kind,
+                crate::dashboard::CardKind::Image { .. } | crate::dashboard::CardKind::Graph { .. }
+            )
+        })
+        .collect();
+    let (_slots, col_infos) = grid_layout(rows, area, &col_scrolls, &real_heights, &card_fills);
 
     for info in &col_infos {
         let (border_color, title_color) = match grid_focus {
@@ -742,36 +752,63 @@ fn draw_grid_editor_overlay(
 
     // Highlight the selected card with a yellow border on top of everything.
     if let Some(flat) = selected_flat {
-        // Find which col_info contains this card, then compute its rect within the slot.
-        let loc = dash.locate_grid_flat(flat);
-        if let Some((ri, ci, _)) = loc {
-            if let Some(info) = col_infos
-                .iter()
-                .find(|c| c.row_idx == ri && c.col_idx == ci)
-            {
-                // Re-run grid_layout with real heights to get the card slot rect.
-                let n_cols = rows.get(ri).map(|r| r.columns.len() as u16).unwrap_or(1);
-                let col_w = if n_cols > 0 {
-                    area.width / n_cols
-                } else {
-                    area.width
-                };
-                let real_heights: Vec<u16> = dash
-                    .cards_iter()
-                    .map(|c| c.preferred_height(col_w, None))
-                    .collect();
-                let (slots, _) = grid_layout(rows, area, &col_scrolls, &real_heights, &[]);
-                if let Some(slot) = slots.iter().find(|s| s.flat_idx == flat) {
-                    f.render_widget(
-                        Block::bordered().border_style(Style::new().fg(Color::Yellow).bold()),
-                        slot.rect,
-                    );
-                }
-                // Also highlight the focused column border in a brighter shade.
-                let _ = info; // already drawn above
+        let (slots, _) = grid_layout(rows, area, &col_scrolls, &real_heights, &card_fills);
+        if let Some(slot) = slots.iter().find(|s| s.flat_idx == flat) {
+            f.render_widget(
+                Block::bordered().border_style(Style::new().fg(Color::Yellow).bold()),
+                slot.rect,
+            );
+        }
+    }
+}
+
+fn compute_card_heights(
+    dash: &crate::dashboard::Dashboard,
+    rows: &[crate::dashboard::GridRow],
+    area_width: u16,
+    app: &App,
+    in_editor: bool,
+) -> Vec<u16> {
+    let mut widths: Vec<u16> = Vec::new();
+    for row in rows.iter() {
+        let n = row.columns.len() as u16;
+        let base = if n > 0 { area_width / n } else { area_width };
+        let rem = if n > 0 { area_width % n } else { 0 };
+        for (ci, col) in row.columns.iter().enumerate() {
+            let w = base + if ci == row.columns.len() - 1 { rem } else { 0 };
+            for _ in &col.cards {
+                widths.push(w);
             }
         }
     }
+    dash.cards_iter()
+        .zip(widths.iter())
+        .map(|(c, &w)| {
+            let dynamic_count = match &c.kind {
+                crate::dashboard::CardKind::FilteredEntityList {
+                    instance, query, ..
+                } => {
+                    let rt = app.instances.runtimes.get(instance);
+                    Some(crate::dashboard::query::resolve(rt, query).len())
+                }
+                crate::dashboard::CardKind::AttributeList {
+                    instance,
+                    entity,
+                    attribute,
+                    limit,
+                    ..
+                } => {
+                    let rt = app.instances.runtimes.get(instance);
+                    rt.and_then(|rt| rt.states.get(entity.as_str()))
+                        .and_then(|s| s.attributes.get(attribute.as_str()))
+                        .and_then(|v| v.as_array())
+                        .map(|a| limit.map_or(a.len(), |lim| a.len().min(lim)))
+                }
+                _ => None,
+            };
+            c.preferred_height(w, dynamic_count, in_editor)
+        })
+        .collect()
 }
 
 fn draw_editor_help_line(f: &mut Frame, area: Rect, app: &App, is_grid: bool) {

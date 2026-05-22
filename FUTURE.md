@@ -9,4 +9,6 @@ Might be implemented if possible
 - - action (run action interface)
 - - event log
 - - event (trigger event)
-- - update
+- media card 
+- - local player 
+- - play/pause next/prev status

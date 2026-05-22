@@ -95,7 +95,7 @@ pub fn draw(
                             }
                             _ => None,
                         };
-                        c.preferred_height(w, dynamic_count)
+                        c.preferred_height(w, dynamic_count, in_editor)
                     })
                     .collect()
             };

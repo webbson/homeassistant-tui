@@ -1126,16 +1126,24 @@ impl Card {
 
     /// Compute the preferred terminal-row height for a grid-layout column.
     /// `available_width` is the column width in terminal columns (for text-wrap).
-    /// `filtered_entity_count` is the resolved entity count for FilteredEntityList (None = unknown).
+    /// `dynamic_count` is the resolved entity count for FilteredEntityList / AttributeList.
+    /// `in_editor` keeps FilteredEntityList with `hide_when_empty` visible as a placeholder.
     ///
     /// If `self.height` is set it always wins. Otherwise falls back to per-kind static defaults,
-    /// with Text/EntityList/FilteredEntityList scaling with content.
-    pub fn preferred_height(&self, available_width: u16, dynamic_count: Option<usize>) -> u16 {
+    /// scaled to honor `CardSize::Large` (needs room for big-text glyphs) and `CardSize::Small`.
+    pub fn preferred_height(
+        &self,
+        available_width: u16,
+        dynamic_count: Option<usize>,
+        in_editor: bool,
+    ) -> u16 {
         if let Some(h) = self.height {
             return h;
         }
         let inner_w = (available_width.saturating_sub(2)).max(1) as usize;
-        match &self.kind {
+        // Border (2) + big-text glyph (4) — minimum so `big_text::fits` succeeds.
+        const LARGE_MIN: u16 = 6;
+        let base = match &self.kind {
             CardKind::Entity { .. } | CardKind::Toggle { .. } => 3,
             CardKind::Gauge { .. } => 5,
             CardKind::Clock { .. } => 3,
@@ -1151,7 +1159,6 @@ impl Card {
             CardKind::Image { .. } => 10,
             CardKind::Graph { .. } => 10,
             CardKind::Text { markdown, .. } => {
-                // Count visual lines including soft-wrapping.
                 let lines: u16 = markdown
                     .split('\n')
                     .map(|l| {
@@ -1159,13 +1166,13 @@ impl Card {
                         ((chars + inner_w - 1) / inner_w) as u16
                     })
                     .sum();
-                lines.max(1) + 2 // +2 for border
+                lines.max(1) + 2
             }
             CardKind::EntityList { entities, .. } => (entities.len() as u16).saturating_add(2),
             CardKind::FilteredEntityList {
                 hide_when_empty, ..
             } => {
-                if *hide_when_empty && dynamic_count == Some(0) {
+                if *hide_when_empty && dynamic_count == Some(0) && !in_editor {
                     return 0;
                 }
                 let count = dynamic_count.unwrap_or(4);
@@ -1175,6 +1182,14 @@ impl Card {
                 Some(n) => (n as u16).saturating_add(2),
                 None => limit.map(|n| (n as u16).saturating_add(2)).unwrap_or(6),
             },
+        };
+        match self.size {
+            CardSize::Large => base.max(LARGE_MIN),
+            CardSize::Small => match &self.kind {
+                CardKind::Weather { .. } | CardKind::MediaPlayer { .. } => 3,
+                _ => base,
+            },
+            CardSize::Normal => base,
         }
     }
 
