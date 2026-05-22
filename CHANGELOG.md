@@ -7,6 +7,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [0.5.3] – 2026-05-22
+
+### Added
 - Release pipeline via `cargo-dist`: tagged pushes (`v*`) build macOS (arm64/x64) and Linux (x64/arm64) binaries, attach them to a GitHub Release, and publish a Homebrew formula to `webbson/homebrew-tap`. Install with `brew install webbson/tap/ha-tui` or the shell installer linked from the release page.
 
 ### Changed
@@ -14,8 +24,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Removed
 - Windows build target and Windows terminal documentation. Re-add by appending `x86_64-pc-windows-msvc` to `workspace.metadata.dist.targets` in `Cargo.toml`.
-
-### Fixed
 
 ## [0.5.2] – 2026-05-21
 
@@ -141,7 +149,8 @@ First tagged release. The initial milestones (M0–M5 + partial M6).
 - rustls 0.23 requires an explicit `CryptoProvider` — installed at process start so the first TLS handshake doesn't panic.
 - crossterm bumped to 0.29 to match ratatui 0.30.
 
-[Unreleased]: https://github.com/webbson/homeassistant-tui/compare/v0.5.2...HEAD
+[Unreleased]: https://github.com/webbson/homeassistant-tui/compare/v0.5.3...HEAD
+[0.5.3]: https://github.com/webbson/homeassistant-tui/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/webbson/homeassistant-tui/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/webbson/homeassistant-tui/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/webbson/homeassistant-tui/compare/v0.4.0...v0.5.0
