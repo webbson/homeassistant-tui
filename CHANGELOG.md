@@ -9,13 +9,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 ### Added
 
 ### Changed
+
+### Fixed
+
+### Removed
+
+## [0.5.4] – 2026-05-22
+
+### Changed
 - Grid `preferred_height` now honors `CardSize::Large` (minimum 6 rows so `big_text` glyphs always fit) and `CardSize::Small` for Weather/MediaPlayer (3 rows). Previously the size setting was a no-op on grid layouts because cards had no fixed height and big-text never fit.
 
 ### Fixed
 - Grid editor: `FilteredEntityList` cards with `hide_when_empty: true` now stay visible as a dimmed placeholder when empty, so they can still be selected and edited. Hidden cards no longer disappear from the editor.
 - Grid editor: the yellow selection border now matches the card's actual rendered height. The overlay used a fixed dummy height of 4 and ignored dynamic entity counts / size settings, drawing the selection box in the wrong place.
-
-### Removed
 
 ## [0.5.3] – 2026-05-22
 
@@ -152,7 +158,8 @@ First tagged release. The initial milestones (M0–M5 + partial M6).
 - rustls 0.23 requires an explicit `CryptoProvider` — installed at process start so the first TLS handshake doesn't panic.
 - crossterm bumped to 0.29 to match ratatui 0.30.
 
-[Unreleased]: https://github.com/webbson/homeassistant-tui/compare/v0.5.3...HEAD
+[Unreleased]: https://github.com/webbson/homeassistant-tui/compare/v0.5.4...HEAD
+[0.5.4]: https://github.com/webbson/homeassistant-tui/compare/v0.5.3...v0.5.4
 [0.5.3]: https://github.com/webbson/homeassistant-tui/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/webbson/homeassistant-tui/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/webbson/homeassistant-tui/compare/v0.5.0...v0.5.1
