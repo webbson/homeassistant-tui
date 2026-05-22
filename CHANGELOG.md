@@ -7,12 +7,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 ## [Unreleased]
 
 ### Added
+- Release pipeline via `cargo-dist`: tagged pushes (`v*`) build macOS (arm64/x64) and Linux (x64/arm64) binaries, attach them to a GitHub Release, and publish a Homebrew formula to `webbson/homebrew-tap`. Install with `brew install webbson/tap/ha-tui` or the shell installer linked from the release page.
 
 ### Changed
-
-### Fixed
+- `ci.yml` now runs only test/clippy/fmt on `main` pushes and pull requests; release artifacts are produced by the new `release.yml` (cargo-dist) on tag pushes. The previous Windows build target was dropped — Windows is no longer published.
 
 ### Removed
+- Windows build target and Windows terminal documentation. Re-add by appending `x86_64-pc-windows-msvc` to `workspace.metadata.dist.targets` in `Cargo.toml`.
+
+### Fixed
 
 ## [0.5.2] – 2026-05-21
 

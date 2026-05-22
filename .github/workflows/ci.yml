@@ -2,7 +2,8 @@ name: CI
 
 on:
   push:
-    tags: ['v*']
+    branches: [main]
+  pull_request:
   workflow_dispatch:
 
 env:
@@ -15,7 +16,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -29,92 +30,3 @@ jobs:
         run: cargo clippy --all-targets --all-features
       - name: test
         run: cargo test --all-features
-
-  build:
-    name: build (${{ matrix.target }})
-    needs: test
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            artifact: ha-tui
-            archive: ha-tui-linux-x86_64.tar.gz
-          - os: ubuntu-latest
-            target: aarch64-unknown-linux-gnu
-            artifact: ha-tui
-            archive: ha-tui-linux-aarch64.tar.gz
-            cross: true
-          - os: macos-latest
-            target: x86_64-apple-darwin
-            artifact: ha-tui
-            archive: ha-tui-macos-x86_64.tar.gz
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            artifact: ha-tui
-            archive: ha-tui-macos-aarch64.tar.gz
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            artifact: ha-tui.exe
-            archive: ha-tui-windows-x86_64.zip
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{ matrix.target }}
-      - name: install cross (linux aarch64)
-        if: matrix.cross
-        run: cargo install cross --locked
-      - name: build
-        shell: bash
-        run: |
-          if [ "${{ matrix.cross }}" = "true" ]; then
-            cross build --release --target ${{ matrix.target }}
-          else
-            cargo build --release --target ${{ matrix.target }}
-          fi
-      - name: package (unix)
-        if: runner.os != 'Windows'
-        shell: bash
-        run: |
-          mkdir -p dist
-          cp target/${{ matrix.target }}/release/${{ matrix.artifact }} dist/
-          cp README.md LICENSE 2>/dev/null || true
-          cp -r config dist/ 2>/dev/null || true
-          tar -czf ${{ matrix.archive }} -C dist .
-      - name: package (windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path dist | Out-Null
-          Copy-Item "target/${{ matrix.target }}/release/${{ matrix.artifact }}" -Destination dist/
-          if (Test-Path README.md) { Copy-Item README.md -Destination dist/ }
-          if (Test-Path config) { Copy-Item -Recurse config -Destination dist/ }
-          Compress-Archive -Path dist/* -DestinationPath ${{ matrix.archive }}
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.archive }}
-          path: ${{ matrix.archive }}
-          retention-days: 30
-
-  release:
-    name: release
-    needs: build
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-      - name: publish
-        uses: softprops/action-gh-release@v2
-        with:
-          files: artifacts/**/*
-          generate_release_notes: true
