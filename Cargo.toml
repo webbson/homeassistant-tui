@@ -4,6 +4,8 @@ version = "0.5.2"
 edition = "2021"
 description = "Terminal UI for Home Assistant — multi-instance dashboards with mouse + keyboard"
 license = "MIT"
+repository = "https://github.com/webbson/homeassistant-tui"
+homepage = "https://github.com/webbson/homeassistant-tui"
 
 [[bin]]
 name = "ha-tui"
@@ -45,3 +47,28 @@ tempfile = "3"
 lto = "thin"
 strip = "symbols"
 codegen-units = 1
+
+[profile.dist]
+inherits = "release"
+lto = "thin"
+
+# Config for 'dist'
+[workspace.metadata.dist]
+# The preferred dist version to use in CI (Cargo.toml SemVer syntax)
+cargo-dist-version = "0.31.0"
+# CI backends to support
+ci = "github"
+# The installers to generate for each app
+installers = ["shell", "homebrew"]
+# A GitHub repo to push Homebrew formulas to
+tap = "webbson/homebrew-tap"
+# Publish jobs to run in CI
+publish-jobs = ["homebrew"]
+# Target platforms to build apps for (Rust target-triple syntax)
+targets = ["aarch64-apple-darwin", "aarch64-unknown-linux-gnu", "x86_64-apple-darwin", "x86_64-unknown-linux-gnu"]
+# Which actions to run on pull requests
+pr-run-mode = "plan"
+# Whether to install an updater program
+install-updater = false
+# Path that installers should place binaries in
+install-path = "CARGO_HOME"

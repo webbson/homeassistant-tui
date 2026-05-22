@@ -13,6 +13,27 @@ Terminal UI for [Home Assistant](https://www.home-assistant.io/). Multi-instance
 
 ## Install
 
+### Homebrew (macOS & Linux)
+
+```bash
+brew install webbson/tap/ha-tui
+```
+
+### Shell installer (macOS & Linux)
+
+Grab the script linked from the [latest release](https://github.com/webbson/homeassistant-tui/releases/latest); it drops the binary in `~/.cargo/bin`.
+
+```bash
+curl --proto '=https' --tlsv1.2 -LsSf \
+  https://github.com/webbson/homeassistant-tui/releases/latest/download/ha-tui-installer.sh | sh
+```
+
+### Prebuilt tarballs
+
+Download from the [releases page](https://github.com/webbson/homeassistant-tui/releases/latest) — macOS arm64/x64 and Linux arm64/x64 are published per tag.
+
+### From source
+
 ```bash
 # Rust toolchain (one-time)
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
@@ -322,7 +343,6 @@ Forecasts refresh automatically every 30 minutes.
 ## Terminal requirements
 
 - Linux / macOS: any modern terminal (iTerm2, Alacritty, kitty, WezTerm, gnome-terminal) works.
-- Windows: use **Windows Terminal** or Alacritty. The legacy `conhost` terminal does not support SGR mouse encoding.
 - 256-color or true-color recommended for the instance color palette.
 - Some weather glyphs (☀ ⛅ ☁ 🌧 ❄ 🌫 ⛈) require a font with emoji/Unicode coverage (e.g. Nerd Fonts, Iosevka, or any system font on macOS/Linux).
 
@@ -350,7 +370,6 @@ This is an early build (v0.1). Implemented milestones:
 - [x] Image / camera proxy cards
 - [ ] Free-form service-call dialog
 - [ ] OAuth (refresh-token) auth flow
-- [ ] Windows CI build
 - [ ] Comment-preserving YAML save
 
 ## License
