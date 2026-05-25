@@ -7,12 +7,10 @@ use crate::dashboard::{
     Card, CardId, CardKind, CardSize, Dashboard, DashboardFile, DashboardLayout, Grid, Pos,
 };
 
-const EXAMPLE_CONFIG: &str = include_str!("../../config/config.example.yaml");
+const STUB_CONFIG: &str = "instances: []\nlog_level: info\n";
 
 const WELCOME_MARKDOWN: &str = "# Welcome to ha-tui\n\n\
-1. Edit `~/.config/ha-tui/config.yaml` and add your Home Assistant URL + long-lived token.\n\
-2. Restart ha-tui.\n\
-3. Press `e` to enter the editor and build your own dashboards.\n\n\
+Press `i` then `a` to add your first Home Assistant instance.\n\n\
 Press `?` for keybindings. Docs: https://github.com/webbson/homeassistant-tui";
 
 #[derive(Debug, Default)]
@@ -29,7 +27,7 @@ pub fn ensure_files(config_path: &Path, dashboards_path: &Path) -> Result<Bootst
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("mkdir -p {}", parent.display()))?;
         }
-        std::fs::write(config_path, EXAMPLE_CONFIG)
+        std::fs::write(config_path, STUB_CONFIG)
             .with_context(|| format!("write {}", config_path.display()))?;
         report.config_created = true;
     }
@@ -85,6 +83,10 @@ mod tests {
         assert!(r.dashboards_created);
         assert!(cfg.exists());
         assert!(dash.exists());
+        // Stub config must parse as valid YAML with an empty instances list.
+        let content = std::fs::read_to_string(&cfg).unwrap();
+        let parsed: serde_yaml::Value = serde_yaml::from_str(&content).unwrap();
+        assert_eq!(parsed["instances"].as_sequence().map(|s| s.len()), Some(0));
     }
 
     #[test]

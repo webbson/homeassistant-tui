@@ -17,14 +17,19 @@ use tracing::{error, info};
 use tui_input::backend::crossterm::EventHandler as TInputHandler;
 use tui_input::Input as TInput;
 
-use crate::config::{self, Alias, Config};
+use std::sync::Arc;
+
+use tokio::sync::Notify;
+
+use crate::config::{self, Alias, Config, InstanceConfig};
 use crate::dashboard::editor::{CardTypeStub, EditorMode, EditorState};
 use crate::dashboard::{self, CardKind, Dashboard};
 use crate::event::AppEvent;
 use crate::ha::{
-    client, EntityId, ForecastDay, ForecastKind, ImageFetchKind, InstanceRegistry, InstanceRuntime,
+    client, EntityId, ForecastDay, ForecastKind, ImageFetchKind, InstanceHandle, InstanceRegistry,
+    InstanceRuntime,
 };
-use crate::screens::{Overlay, Screen};
+use crate::screens::{InstanceFormField, InstanceFormMode, InstanceFormState, Overlay, Screen};
 use crate::ui;
 use crate::ui::theme::Theme;
 use crate::util::history::RingBuf;
@@ -34,6 +39,7 @@ const HISTORY_CAP: usize = 8192;
 pub struct App {
     pub should_quit: bool,
     pub config: Option<Config>,
+    pub config_path: Option<PathBuf>,
     pub instances: InstanceRegistry,
     pub screen: Screen,
     pub theme: Theme,
@@ -80,6 +86,7 @@ impl App {
         Self {
             should_quit: false,
             config: None,
+            config_path: None,
             instances: InstanceRegistry::new(),
             screen: Screen::default(),
             theme: Theme::empty(),
@@ -269,6 +276,99 @@ impl App {
                     KeyCode::Up | KeyCode::Char('k') if *selected > 0 => *selected -= 1,
                     KeyCode::Down | KeyCode::Char('j') if *selected + 1 < total => *selected += 1,
                     KeyCode::Enter => self.overlay = None,
+                    KeyCode::Char('a') => {
+                        self.overlay = Some(Overlay::InstanceForm(Box::new(
+                            InstanceFormState::new_add(),
+                        )));
+                    }
+                    KeyCode::Char('e') => {
+                        let sel = *selected;
+                        if let Some(inst) = self.config.as_ref().and_then(|c| c.instances.get(sel))
+                        {
+                            let form = InstanceFormState::new_edit(
+                                &inst.alias.clone(),
+                                &inst.url.clone(),
+                                inst.color.as_deref(),
+                            );
+                            self.overlay = Some(Overlay::InstanceForm(Box::new(form)));
+                        }
+                    }
+                    KeyCode::Char('d') => {
+                        let sel = *selected;
+                        if let Some(inst) = self.config.as_ref().and_then(|c| c.instances.get(sel))
+                        {
+                            let alias = inst.alias.clone();
+                            let (affected_cards, affected_dashboards) =
+                                self.count_instance_references(&alias);
+                            self.overlay = Some(Overlay::InstanceDeleteConfirm {
+                                alias,
+                                affected_cards,
+                                affected_dashboards,
+                            });
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Overlay::InstanceForm(ref mut form) => {
+                use tui_input::backend::crossterm::EventHandler as TIHandler;
+                match k.code {
+                    KeyCode::Esc => {
+                        if form.first_run {
+                            self.should_quit = true;
+                        } else {
+                            self.overlay = Some(Overlay::InstanceList { selected: 0 });
+                        }
+                    }
+                    KeyCode::Tab | KeyCode::Down => {
+                        form.focus = form.focus.next();
+                    }
+                    KeyCode::BackTab | KeyCode::Up => {
+                        form.focus = form.focus.prev();
+                    }
+                    KeyCode::Enter => {
+                        // Clone to avoid borrow conflict calling submit
+                        let form_clone = *form.clone();
+                        self.submit_instance_form(form_clone);
+                    }
+                    _ => {
+                        let ev = crossterm::event::Event::Key(k);
+                        match form.focus {
+                            InstanceFormField::Host => {
+                                form.host_buf.handle_event(&ev);
+                            }
+                            InstanceFormField::Ssl => {
+                                if k.code == KeyCode::Char(' ') {
+                                    form.ssl = !form.ssl;
+                                }
+                            }
+                            InstanceFormField::Alias => {
+                                form.alias_buf.handle_event(&ev);
+                            }
+                            InstanceFormField::Token => {
+                                form.token_buf.handle_event(&ev);
+                            }
+                            InstanceFormField::Color => {
+                                form.color_buf.handle_event(&ev);
+                            }
+                        }
+                    }
+                }
+            }
+            Overlay::InstanceDeleteConfirm { alias, .. } => {
+                let alias = alias.clone();
+                match k.code {
+                    KeyCode::Char('y') => {
+                        self.overlay = None;
+                        // async remove — spawn to avoid blocking the event loop
+                        let tx = self.tx.clone();
+                        // We'll handle this inline via a sync path since the async remove
+                        // needs to be awaited; post a synthetic event instead.
+                        let _ = tx.send(AppEvent::RemoveInstance { alias });
+                    }
+                    KeyCode::Char('n') => {
+                        self.overlay = Some(Overlay::InstanceList { selected: 0 });
+                    }
                     _ => {}
                 }
             }
@@ -5326,6 +5426,9 @@ impl App {
                 info!(version = %version, "newer ha-tui release available");
                 self.update_available = Some(version);
             }
+            AppEvent::RemoveInstance { alias } => {
+                self.perform_remove_instance(&alias);
+            }
         }
     }
 
@@ -5489,6 +5592,254 @@ impl App {
                     hours,
                 },
             );
+        }
+    }
+
+    // ── Instance mutation helpers ───────────────────────────────────────────
+
+    fn config_instances(&self) -> &[InstanceConfig] {
+        self.config.as_ref().map_or(&[], |c| c.instances.as_slice())
+    }
+
+    fn config_instances_mut(&mut self) -> &mut Vec<InstanceConfig> {
+        self.config
+            .get_or_insert_with(|| Config {
+                instances: Vec::new(),
+                log_level: "info".into(),
+                dashboards_path: None,
+            })
+            .instances
+            .as_mut()
+    }
+
+    /// Count how many cards and dashboards reference a given alias.
+    fn count_instance_references(&self, alias: &str) -> (usize, usize) {
+        let mut cards = 0usize;
+        let mut dashes = 0usize;
+        for dash in &self.dashboards {
+            let before = cards;
+            for card in dash.cards_iter() {
+                if card.instance_ref().map_or(false, |a| a == alias) {
+                    cards += 1;
+                }
+            }
+            if cards > before {
+                dashes += 1;
+            }
+        }
+        (cards, dashes)
+    }
+
+    fn save_config(&mut self) {
+        let Some(cfg) = &self.config else { return };
+        let Some(path) = &self.config_path else {
+            return;
+        };
+        if let Err(e) = crate::config::persist::save(cfg, path) {
+            self.status_msg = Some(format!("config save failed: {e}"));
+        }
+    }
+
+    fn save_dashboards(&mut self) {
+        let Some(path) = self.dashboards_path.clone() else {
+            return;
+        };
+        let file = crate::dashboard::DashboardFile {
+            dashboards: self.dashboards.clone(),
+        };
+        if let Err(e) = crate::dashboard::persist::save(&file, &path) {
+            self.status_msg = Some(format!("dashboards save failed: {e}"));
+        }
+    }
+
+    fn spawn_instance(&mut self, inst: &InstanceConfig) {
+        let rt = InstanceRuntime::new(inst.alias.clone(), inst.url.clone());
+        let shutdown = Arc::new(Notify::new());
+        let (tx_cmd, join) = client::spawn(inst.clone(), self.tx.clone(), shutdown.clone());
+        self.instances.add(
+            rt,
+            InstanceHandle {
+                command_tx: tx_cmd,
+                shutdown,
+                join,
+            },
+        );
+    }
+
+    fn rebuild_theme(&mut self) {
+        if let Some(cfg) = &self.config {
+            self.theme = crate::ui::theme::Theme::from_config(cfg);
+        }
+    }
+
+    /// Add a brand-new instance: validate, resolve token, spawn client, persist.
+    fn add_instance_from_form(&mut self, mut new: InstanceConfig) -> Result<(), String> {
+        let others = self.config_instances().to_vec();
+        crate::config::load::validate_one(&new, &others, None).map_err(|e| e.to_string())?;
+        crate::config::load::resolve_token(&mut new).map_err(|e| e.to_string())?;
+        self.spawn_instance(&new.clone());
+        self.config_instances_mut().push(new);
+        self.rebuild_theme();
+        self.save_config();
+        Ok(())
+    }
+
+    /// Remove an instance and prune its cards from all dashboards.
+    fn perform_remove_instance(&mut self, alias: &str) {
+        self.instances.remove_nowait(alias);
+        for dash in &mut self.dashboards {
+            dash.retain_cards(|c| c.instance_ref().map_or(true, |a| a != alias));
+        }
+        if let Some(cfg) = &mut self.config {
+            cfg.instances.retain(|i| i.alias != alias);
+        }
+        self.rebuild_theme();
+        self.save_dashboards();
+        self.save_config();
+        self.status_msg = Some(format!("removed instance '{alias}'"));
+    }
+
+    /// Update an existing instance. Handles rename cascade + reconnect.
+    fn update_instance_from_form(
+        &mut self,
+        original_alias: &str,
+        mut new: InstanceConfig,
+    ) -> Result<(), String> {
+        let others = self.config_instances().to_vec();
+        crate::config::load::validate_one(&new, &others, Some(original_alias))
+            .map_err(|e| e.to_string())?;
+
+        let old_inst = self
+            .config_instances()
+            .iter()
+            .find(|i| i.alias == original_alias)
+            .cloned()
+            .ok_or_else(|| format!("instance '{original_alias}' not found"))?;
+
+        // Preserve existing token if form left it blank (edit mode)
+        if new.token.is_none() && new.resolved_token.is_none() {
+            new.token = old_inst.token.clone();
+            new.token_file = old_inst.token_file.clone();
+            new.resolved_token = old_inst.resolved_token.clone();
+        } else {
+            crate::config::load::resolve_token(&mut new).map_err(|e| e.to_string())?;
+        }
+
+        let alias_changed = new.alias != original_alias;
+        let color_only = !alias_changed
+            && new.url == old_inst.url
+            && new.resolved_token == old_inst.resolved_token;
+
+        if color_only {
+            // Just update color + rebuild theme, no reconnect.
+            if let Some(i) = self
+                .config_instances_mut()
+                .iter_mut()
+                .find(|i| i.alias == original_alias)
+            {
+                i.color = new.color;
+            }
+            self.rebuild_theme();
+            self.save_config();
+            return Ok(());
+        }
+
+        // Rename cascade: rewrite all card instance refs.
+        if alias_changed {
+            for dash in &mut self.dashboards {
+                for card in dash.cards_iter_mut() {
+                    if let Some(inst_field) = card.instance_mut() {
+                        if inst_field == original_alias {
+                            *inst_field = new.alias.clone();
+                        }
+                    }
+                }
+            }
+        }
+
+        // Shutdown old client.
+        self.instances.remove_nowait(original_alias);
+
+        // Update config entry.
+        if let Some(i) = self
+            .config_instances_mut()
+            .iter_mut()
+            .find(|i| i.alias == original_alias)
+        {
+            *i = new.clone();
+        }
+
+        // Spawn new client.
+        self.spawn_instance(&new);
+        self.rebuild_theme();
+
+        if alias_changed {
+            self.save_dashboards();
+        }
+        self.save_config();
+        Ok(())
+    }
+
+    /// Validate and submit an instance form (called from key handler).
+    fn submit_instance_form(&mut self, form: InstanceFormState) {
+        if form.host_buf.value().trim().is_empty() {
+            if let Some(Overlay::InstanceForm(ref mut f)) = self.overlay {
+                f.error = Some("host cannot be empty".into());
+            }
+            return;
+        }
+        let alias_val = form.effective_alias();
+        let url_val = form.build_url();
+        let token_val = form.token_buf.value().to_string();
+        let color_val = form.color_buf.value().trim().to_string();
+
+        let color = if color_val.is_empty() {
+            None
+        } else {
+            Some(color_val)
+        };
+
+        // Validate color if provided.
+        if let Some(ref c) = color {
+            if crate::ui::theme::parse_color(c).is_none() {
+                if let Some(Overlay::InstanceForm(ref mut f)) = self.overlay {
+                    f.error = Some(format!("unknown color '{c}' — use a name or #rrggbb"));
+                }
+                return;
+            }
+        }
+
+        let new_inst = InstanceConfig {
+            alias: alias_val,
+            url: url_val,
+            token: if token_val.is_empty() {
+                None
+            } else {
+                Some(token_val)
+            },
+            token_file: None,
+            color,
+            resolved_token: None,
+        };
+
+        let result = match &form.mode {
+            InstanceFormMode::New => self.add_instance_from_form(new_inst),
+            InstanceFormMode::Edit { original_alias } => {
+                let orig = original_alias.clone();
+                self.update_instance_from_form(&orig, new_inst)
+            }
+        };
+
+        match result {
+            Ok(()) => {
+                self.overlay = Some(Overlay::InstanceList { selected: 0 });
+                self.status_msg = Some("instance saved".into());
+            }
+            Err(e) => {
+                if let Some(Overlay::InstanceForm(ref mut f)) = self.overlay {
+                    f.error = Some(e);
+                }
+            }
         }
     }
 }
@@ -5963,12 +6314,6 @@ pub async fn run(
     if let (Some(cfg_path), Some(dash_path)) = (&effective_config, &effective_dashboards) {
         match crate::util::bootstrap::ensure_files(cfg_path, dash_path) {
             Ok(report) => {
-                if report.config_created {
-                    app.status_msg = Some(format!(
-                        "created {} — edit it with your HA URL+token, then restart",
-                        cfg_path.display()
-                    ));
-                }
                 if report.dashboards_created && app.dashboards_path.is_none() {
                     app.dashboards_path = Some(dash_path.clone());
                 }
@@ -5980,20 +6325,36 @@ pub async fn run(
         }
     }
 
-    match config::load::load(config_path.as_deref()) {
-        Ok(cfg) => {
-            app.theme = Theme::from_config(&cfg);
-            for inst in &cfg.instances {
-                let rt = InstanceRuntime::new(inst.alias.clone(), inst.url.clone());
-                let tx_cmd = client::spawn(inst.clone(), tx.clone());
-                app.instances.add(rt, tx_cmd);
-            }
-            app.config = Some(cfg);
-        }
-        Err(e) => {
-            error!(error = %e, "config load failed");
-            app.last_error = Some(format!("config: {e}"));
-        }
+    app.config_path = effective_config.clone();
+
+    let cfg = match config::load::load(config_path.as_deref()) {
+        Ok(c) => c,
+        Err(_) => Config {
+            instances: Vec::new(),
+            log_level: "info".into(),
+            dashboards_path: None,
+        },
+    };
+    app.theme = Theme::from_config(&cfg);
+    for inst in &cfg.instances {
+        let rt = InstanceRuntime::new(inst.alias.clone(), inst.url.clone());
+        let shutdown = Arc::new(Notify::new());
+        let (tx_cmd, join) = client::spawn(inst.clone(), tx.clone(), shutdown.clone());
+        app.instances.add(
+            rt,
+            InstanceHandle {
+                command_tx: tx_cmd,
+                shutdown,
+                join,
+            },
+        );
+    }
+    let is_first_run = cfg.instances.is_empty();
+    app.config = Some(cfg);
+    if is_first_run {
+        app.overlay = Some(Overlay::InstanceForm(Box::new(
+            InstanceFormState::new_first_run(),
+        )));
     }
 
     match dashboard::persist::load(dashboards_path.as_deref()) {

@@ -179,6 +179,21 @@ impl Dashboard {
         }
     }
 
+    /// Remove cards that don't satisfy `pred`. Empty columns/rows are kept in
+    /// place to avoid layout surprises.
+    pub fn retain_cards(&mut self, mut pred: impl FnMut(&Card) -> bool) {
+        match &mut self.layout {
+            DashboardLayout::Free { cards, .. } => cards.retain(|c| pred(c)),
+            DashboardLayout::Grid { rows } => {
+                for row in rows.iter_mut() {
+                    for col in row.columns.iter_mut() {
+                        col.cards.retain(|c| pred(c));
+                    }
+                }
+            }
+        }
+    }
+
     /// Get card by flat index.
     pub fn card(&self, idx: usize) -> Option<&Card> {
         self.cards_iter().nth(idx)
@@ -1104,6 +1119,43 @@ impl Card {
             | CardKind::EntityList { .. }
             | CardKind::FilteredEntityList { .. }
             | CardKind::Clock { .. } => None,
+        }
+    }
+
+    /// Return a mutable reference to the instance alias for card kinds that
+    /// have one (all except Text and Clock).
+    pub fn instance_mut(&mut self) -> Option<&mut Alias> {
+        match &mut self.kind {
+            CardKind::Entity { instance, .. }
+            | CardKind::Toggle { instance, .. }
+            | CardKind::Gauge { instance, .. }
+            | CardKind::Graph { instance, .. }
+            | CardKind::EntityList { instance, .. }
+            | CardKind::FilteredEntityList { instance, .. }
+            | CardKind::Statistics { instance, .. }
+            | CardKind::MediaPlayer { instance, .. }
+            | CardKind::Image { instance, .. }
+            | CardKind::Weather { instance, .. }
+            | CardKind::AttributeList { instance, .. } => Some(instance),
+            CardKind::Text { .. } | CardKind::Clock { .. } => None,
+        }
+    }
+
+    /// Return the instance alias for card kinds that have one.
+    pub fn instance_ref(&self) -> Option<&Alias> {
+        match &self.kind {
+            CardKind::Entity { instance, .. }
+            | CardKind::Toggle { instance, .. }
+            | CardKind::Gauge { instance, .. }
+            | CardKind::Graph { instance, .. }
+            | CardKind::EntityList { instance, .. }
+            | CardKind::FilteredEntityList { instance, .. }
+            | CardKind::Statistics { instance, .. }
+            | CardKind::MediaPlayer { instance, .. }
+            | CardKind::Image { instance, .. }
+            | CardKind::Weather { instance, .. }
+            | CardKind::AttributeList { instance, .. } => Some(instance),
+            CardKind::Text { .. } | CardKind::Clock { .. } => None,
         }
     }
 

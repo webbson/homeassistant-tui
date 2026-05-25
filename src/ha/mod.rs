@@ -3,7 +3,7 @@ pub mod protocol;
 pub mod registry;
 pub mod rest;
 
-pub use registry::InstanceRegistry;
+pub use registry::{InstanceHandle, InstanceRegistry};
 
 use indexmap::IndexMap;
 use serde_json::Value;

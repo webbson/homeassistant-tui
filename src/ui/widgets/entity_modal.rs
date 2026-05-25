@@ -144,41 +144,63 @@ pub fn render_instance_list<'a, I>(
     I: Iterator<Item = &'a InstanceRuntime>,
 {
     let h = (count as u16)
-        .saturating_add(4)
-        .clamp(6, area.height.saturating_sub(4));
-    let r = modal_rect(area, 60, h);
+        .saturating_add(6)
+        .clamp(8, area.height.saturating_sub(4));
+    let r = modal_rect(area, 64, h);
     f.render_widget(Clear, r);
 
     let block = Block::bordered().title(format!(" Instances ({count}) "));
     let inner = block.inner(r);
     f.render_widget(block, r);
 
-    let items: Vec<ListItem<'_>> = runtimes
-        .map(|rt| {
-            let color = theme.instance_color(&rt.alias);
-            let status = match rt.status {
-                ConnStatus::Connected => Span::styled("connected", Style::new().green()),
-                ConnStatus::Connecting => Span::styled("connecting", Style::new().yellow()),
-                ConnStatus::Authenticating => Span::styled("authenticating", Style::new().yellow()),
-                ConnStatus::Failed => Span::styled("failed", Style::new().red()),
-                ConnStatus::Disconnected => Span::styled("disconnected", Style::new().dim()),
-            };
-            ListItem::new(Line::from(vec![
-                Span::styled(format!("{:<12} ", rt.alias), Style::new().fg(color).bold()),
-                status,
-                Span::raw(format!("   {} entities", rt.states.len())),
-            ]))
-        })
-        .collect();
+    let [body, hint_row] = ratatui::layout::Layout::vertical([
+        ratatui::layout::Constraint::Min(1),
+        ratatui::layout::Constraint::Length(1),
+    ])
+    .split(inner)[..] else {
+        return;
+    };
 
-    let mut state = ListState::default();
-    if count > 0 {
-        state.select(Some(selected.min(count - 1)));
+    if count == 0 {
+        f.render_widget(
+            Paragraph::new("(no instances — press a to add one)").style(Style::new().dim()),
+            body,
+        );
+    } else {
+        let items: Vec<ListItem<'_>> = runtimes
+            .map(|rt| {
+                let color = theme.instance_color(&rt.alias);
+                let status = match rt.status {
+                    ConnStatus::Connected => Span::styled("connected", Style::new().green()),
+                    ConnStatus::Connecting => Span::styled("connecting", Style::new().yellow()),
+                    ConnStatus::Authenticating => {
+                        Span::styled("authenticating", Style::new().yellow())
+                    }
+                    ConnStatus::Failed => Span::styled("failed", Style::new().red()),
+                    ConnStatus::Disconnected => Span::styled("disconnected", Style::new().dim()),
+                };
+                ListItem::new(Line::from(vec![
+                    Span::styled(format!("{:<12} ", rt.alias), Style::new().fg(color).bold()),
+                    status,
+                    Span::raw(format!("   {} entities", rt.states.len())),
+                ]))
+            })
+            .collect();
+
+        let mut list_state = ListState::default();
+        if count > 0 {
+            list_state.select(Some(selected.min(count - 1)));
+        }
+        let list = List::new(items)
+            .highlight_style(Style::new().reversed())
+            .highlight_symbol("▶ ");
+        f.render_stateful_widget(list, body, &mut list_state);
     }
-    let list = List::new(items)
-        .highlight_style(Style::new().reversed())
-        .highlight_symbol("▶ ");
-    f.render_stateful_widget(list, inner, &mut state);
+
+    f.render_widget(
+        Paragraph::new("a add · e edit · d delete · Esc close").style(Style::new().dim()),
+        hint_row,
+    );
 }
 
 pub fn render_entity_details(

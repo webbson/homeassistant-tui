@@ -7,10 +7,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 ## [Unreleased]
 
 ### Added
+- **Instance management UI**: press `i` to open the instance list, then `a` add / `e` edit / `d` delete an instance — no more editing YAML by hand and restarting.
+- Instance form fields: name (alias), WebSocket URL, token (masked), and optional color.
+- On first launch with no config file the add-instance modal opens automatically; Esc quits.
+- Rename cascade: renaming an instance rewrites all card references in `dashboards.yaml` automatically.
+- Delete guard: deleting an instance shows how many cards will be removed before confirming.
+- Config is now persisted on every add/edit/delete so changes survive restart.
 
 ### Changed
-
-### Fixed
+- First-run bootstrap writes a minimal `instances: []` stub config instead of the example file.
+- Token round-trip: raw `${ENV_VAR}` / `token_file:` forms are preserved on save; only the resolved value is used at runtime.
 
 ### Removed
 

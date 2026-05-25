@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{Duration as ChronoDuration, Utc};
@@ -6,7 +7,8 @@ use color_eyre::eyre::eyre;
 use color_eyre::Result;
 use futures::{SinkExt, StreamExt};
 use serde_json::Value;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Notify};
+use tokio::task::JoinHandle;
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{debug, info, warn};
 
@@ -22,23 +24,25 @@ use crate::ha::{
 pub fn spawn(
     inst: InstanceConfig,
     tx_app: mpsc::UnboundedSender<AppEvent>,
-) -> mpsc::UnboundedSender<HaCommand> {
+    shutdown: Arc<Notify>,
+) -> (mpsc::UnboundedSender<HaCommand>, JoinHandle<()>) {
     let (tx_cmd, rx_cmd) = mpsc::unbounded_channel::<HaCommand>();
-    tokio::spawn(async move {
-        run_loop(inst, tx_app, rx_cmd).await;
+    let handle = tokio::spawn(async move {
+        run_loop(inst, tx_app, rx_cmd, shutdown).await;
     });
-    tx_cmd
+    (tx_cmd, handle)
 }
 
 async fn run_loop(
     inst: InstanceConfig,
     tx_app: mpsc::UnboundedSender<AppEvent>,
     mut rx_cmd: mpsc::UnboundedReceiver<HaCommand>,
+    shutdown: Arc<Notify>,
 ) {
     let mut backoff = Duration::from_secs(1);
     loop {
         emit_status(&tx_app, &inst.alias, ConnStatus::Connecting, None);
-        match connect_once(&inst, &tx_app, &mut rx_cmd).await {
+        match connect_once(&inst, &tx_app, &mut rx_cmd, &shutdown).await {
             Ok(()) => {
                 info!(alias = %inst.alias, "ha client exited cleanly");
                 emit_status(&tx_app, &inst.alias, ConnStatus::Disconnected, None);
@@ -54,7 +58,15 @@ async fn run_loop(
                 );
             }
         }
-        tokio::time::sleep(backoff).await;
+        // Interruptible backoff sleep so shutdown can cancel even a never-connecting client.
+        tokio::select! {
+            _ = tokio::time::sleep(backoff) => {}
+            _ = shutdown.notified() => {
+                info!(alias = %inst.alias, "ha client shutdown during backoff");
+                emit_status(&tx_app, &inst.alias, ConnStatus::Disconnected, None);
+                return;
+            }
+        }
         backoff = (backoff * 2).min(Duration::from_secs(30));
     }
 }
@@ -63,6 +75,7 @@ async fn connect_once(
     inst: &InstanceConfig,
     tx_app: &mpsc::UnboundedSender<AppEvent>,
     rx_cmd: &mut mpsc::UnboundedReceiver<HaCommand>,
+    shutdown: &Arc<Notify>,
 ) -> Result<()> {
     let (ws_stream, _) = tokio_tungstenite::connect_async(&inst.url).await?;
     let (mut sink, mut stream) = ws_stream.split();
@@ -74,9 +87,9 @@ async fn connect_once(
     }
 
     let token = inst
-        .token
+        .resolved_token
         .as_deref()
-        .ok_or_else(|| eyre!("token missing"))?
+        .ok_or_else(|| eyre!("token missing — was resolve_token called?"))?
         .to_string();
     let ws_url = inst.url.clone();
     send(
@@ -140,6 +153,11 @@ async fn connect_once(
                     tx_app,
                 )
                 .await?;
+            }
+            _ = shutdown.notified() => {
+                info!(alias = %inst.alias, "ha client received shutdown signal");
+                emit_status(tx_app, &inst.alias, ConnStatus::Disconnected, None);
+                return Ok(());
             }
         }
     }

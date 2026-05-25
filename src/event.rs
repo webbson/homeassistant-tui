@@ -51,4 +51,7 @@ pub enum AppEvent {
     UpdateAvailable {
         version: String,
     },
+    RemoveInstance {
+        alias: Alias,
+    },
 }
