@@ -334,11 +334,16 @@ impl App {
                     _ => {
                         let ev = crossterm::event::Event::Key(k);
                         match form.focus {
+                            InstanceFormField::Host => {
+                                form.host_buf.handle_event(&ev);
+                            }
+                            InstanceFormField::Ssl => {
+                                if k.code == KeyCode::Char(' ') {
+                                    form.ssl = !form.ssl;
+                                }
+                            }
                             InstanceFormField::Alias => {
                                 form.alias_buf.handle_event(&ev);
-                            }
-                            InstanceFormField::Url => {
-                                form.url_buf.handle_event(&ev);
                             }
                             InstanceFormField::Token => {
                                 form.token_buf.handle_event(&ev);
@@ -5777,8 +5782,8 @@ impl App {
 
     /// Validate and submit an instance form (called from key handler).
     fn submit_instance_form(&mut self, form: InstanceFormState) {
-        let alias_val = form.alias_buf.value().trim().to_string();
-        let url_val = form.url_buf.value().trim().to_string();
+        let alias_val = form.effective_alias();
+        let url_val = form.build_url();
         let token_val = form.token_buf.value().to_string();
         let color_val = form.color_buf.value().trim().to_string();
 

@@ -24,7 +24,7 @@ pub fn render_instance_form(f: &mut Frame, area: Rect, state: &InstanceFormState
         InstanceFormMode::Edit { .. } => " Edit Instance ",
     };
 
-    let modal_h = 16u16;
+    let modal_h = 18u16;
     let modal_w = 60u16;
     let r = modal_rect(area, modal_w, modal_h);
     f.render_widget(Clear, r);
@@ -35,8 +35,11 @@ pub fn render_instance_form(f: &mut Frame, area: Rect, state: &InstanceFormState
     let inner = block.inner(r);
     f.render_widget(block, r);
 
-    let [alias_label, alias_field, url_label, url_field, token_label, token_field, color_label, color_field, _gap, hint_row, error_row] =
+    // host label, host field, ssl row, token label, token field,
+    // name label, name field, color label, color field, gap, hint, error
+    let [host_label, host_field, ssl_row, token_label, token_field, name_label, name_field, color_label, color_field, _gap, hint_row, error_row] =
         Layout::vertical([
+            Constraint::Length(1),
             Constraint::Length(1),
             Constraint::Length(1),
             Constraint::Length(1),
@@ -54,25 +57,40 @@ pub fn render_instance_form(f: &mut Frame, area: Rect, state: &InstanceFormState
         return;
     };
 
+    // Host
     render_field(
         f,
-        alias_label,
-        alias_field,
-        "Name",
-        state.alias_buf.value(),
-        state.focus == InstanceFormField::Alias,
-        false,
-    );
-    render_field(
-        f,
-        url_label,
-        url_field,
-        "URL",
-        state.url_buf.value(),
-        state.focus == InstanceFormField::Url,
+        host_label,
+        host_field,
+        "Host / IP",
+        state.host_buf.value(),
+        state.focus == InstanceFormField::Host,
         false,
     );
 
+    // SSL toggle
+    let ssl_focused = state.focus == InstanceFormField::Ssl;
+    let ssl_prefix = if ssl_focused { "▶ " } else { "  " };
+    let checkbox = if state.ssl { "[x]" } else { "[ ]" };
+    let scheme = if state.ssl { "wss://" } else { "ws://" };
+    let ssl_style = if ssl_focused {
+        Style::new().bold()
+    } else {
+        Style::new().dim()
+    };
+    let ssl_line = Line::from(vec![
+        Span::raw(ssl_prefix),
+        Span::styled(format!("{checkbox} SSL  "), ssl_style),
+        Span::styled(scheme, Style::new().dim()),
+        if ssl_focused {
+            Span::styled("  Space to toggle", Style::new().dim())
+        } else {
+            Span::raw("")
+        },
+    ]);
+    f.render_widget(Paragraph::new(ssl_line), ssl_row);
+
+    // Token
     let token_display = if state.token_buf.value().is_empty() {
         match &state.mode {
             InstanceFormMode::Edit { .. } => "(unchanged)".to_string(),
@@ -91,20 +109,40 @@ pub fn render_instance_form(f: &mut Frame, area: Rect, state: &InstanceFormState
         state.token_buf.value().is_empty() && matches!(&state.mode, InstanceFormMode::Edit { .. }),
     );
 
+    // Name (alias) — optional, auto-derived when empty
+    let alias_val = state.alias_buf.value();
+    let alias_placeholder = if alias_val.is_empty() {
+        format!("(auto: {})", state.effective_alias())
+    } else {
+        String::new()
+    };
+    let alias_display = if alias_val.is_empty() {
+        &alias_placeholder
+    } else {
+        alias_val
+    };
+    render_field(
+        f,
+        name_label,
+        name_field,
+        "Name (optional)",
+        alias_display,
+        state.focus == InstanceFormField::Alias,
+        alias_val.is_empty(),
+    );
+
+    // Color
     render_field(
         f,
         color_label,
         color_field,
-        "Color (opt)",
+        "Color (optional)",
         state.color_buf.value(),
         state.focus == InstanceFormField::Color,
         false,
     );
 
-    let hint = match &state.mode {
-        InstanceFormMode::New => "Tab next field · Enter add · Esc cancel",
-        InstanceFormMode::Edit { .. } => "Tab next field · Enter save · Esc cancel",
-    };
+    let hint = "Tab next · Space toggle SSL · Enter save · Esc cancel";
     f.render_widget(Paragraph::new(hint).style(Style::new().dim()), hint_row);
 
     if let Some(err) = &state.error {
