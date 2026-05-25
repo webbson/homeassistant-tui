@@ -7,18 +7,28 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [0.6.0] – 2026-05-25
+
+### Added
 - **Instance management UI**: press `i` to open the instance list, then `a` add / `e` edit / `d` delete an instance — no more editing YAML by hand and restarting.
-- Instance form fields: name (alias), WebSocket URL, token (masked), and optional color.
+- Instance form: Host/IP field + SSL checkbox — the full `ws(s)://host/api/websocket` URL is built automatically on save.
+- Name field is optional; auto-derives from the first hostname label when left blank.
+- Token field is masked with `•`; in edit mode an empty token preserves the existing value.
 - On first launch with no config file the add-instance modal opens automatically; Esc quits.
-- Rename cascade: renaming an instance rewrites all card references in `dashboards.yaml` automatically.
+- Rename cascade: renaming an instance rewrites all card `instance:` references in `dashboards.yaml` automatically.
 - Delete guard: deleting an instance shows how many cards will be removed before confirming.
-- Config is now persisted on every add/edit/delete so changes survive restart.
+- Config persisted on every add/edit/delete so changes survive restart.
 
 ### Changed
 - First-run bootstrap writes a minimal `instances: []` stub config instead of the example file.
 - Token round-trip: raw `${ENV_VAR}` / `token_file:` forms are preserved on save; only the resolved value is used at runtime.
-
-### Removed
 
 ## [0.5.4] – 2026-05-22
 
@@ -164,7 +174,8 @@ First tagged release. The initial milestones (M0–M5 + partial M6).
 - rustls 0.23 requires an explicit `CryptoProvider` — installed at process start so the first TLS handshake doesn't panic.
 - crossterm bumped to 0.29 to match ratatui 0.30.
 
-[Unreleased]: https://github.com/webbson/homeassistant-tui/compare/v0.5.4...HEAD
+[Unreleased]: https://github.com/webbson/homeassistant-tui/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/webbson/homeassistant-tui/compare/v0.5.4...v0.6.0
 [0.5.4]: https://github.com/webbson/homeassistant-tui/compare/v0.5.3...v0.5.4
 [0.5.3]: https://github.com/webbson/homeassistant-tui/compare/v0.5.2...v0.5.3
 [0.5.2]: https://github.com/webbson/homeassistant-tui/compare/v0.5.1...v0.5.2
