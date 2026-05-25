@@ -15,3 +15,4 @@ pub mod entity_modal;
 pub mod help;
 pub mod input_modal;
 pub mod instance_bar;
+pub mod instance_form;

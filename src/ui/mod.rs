@@ -134,6 +134,22 @@ fn draw_overlay(f: &mut Frame, area: ratatui::layout::Rect, app: &App) {
                 app.instances.runtimes.len(),
             );
         }
+        Overlay::InstanceForm(ref form_state) => {
+            widgets::instance_form::render_instance_form(f, area, form_state);
+        }
+        Overlay::InstanceDeleteConfirm {
+            alias,
+            affected_cards,
+            affected_dashboards,
+        } => {
+            widgets::instance_form::render_instance_delete_confirm(
+                f,
+                area,
+                alias,
+                *affected_cards,
+                *affected_dashboards,
+            );
+        }
         Overlay::InputValue(ref modal_state) => {
             widgets::input_modal::render(f, area, modal_state);
         }

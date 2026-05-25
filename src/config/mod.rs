@@ -1,4 +1,5 @@
 pub mod load;
+pub mod persist;
 
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
@@ -19,7 +20,7 @@ fn default_log_level() -> String {
     "info".into()
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct InstanceConfig {
     pub alias: Alias,
     pub url: String,
@@ -29,6 +30,9 @@ pub struct InstanceConfig {
     pub token_file: Option<PathBuf>,
     #[serde(default)]
     pub color: Option<String>,
+    /// Resolved plaintext token — populated at load time, never serialised.
+    #[serde(skip)]
+    pub resolved_token: Option<String>,
 }
 
 impl Config {

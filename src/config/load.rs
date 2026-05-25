@@ -16,10 +16,7 @@ pub fn load(explicit: Option<&Path>) -> Result<Config> {
     };
 
     if !path.exists() {
-        return Err(eyre!(
-            "config not found at {} — copy config/config.example.yaml there",
-            path.display()
-        ));
+        return Err(eyre!("config not found at {}", path.display()));
     }
 
     let raw = std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
@@ -34,16 +31,16 @@ pub fn load(explicit: Option<&Path>) -> Result<Config> {
     Ok(cfg)
 }
 
-fn resolve_token(inst: &mut InstanceConfig) -> Result<()> {
+pub fn resolve_token(inst: &mut InstanceConfig) -> Result<()> {
     if let Some(t) = &inst.token {
-        inst.token = Some(expand_env(t)?);
+        inst.resolved_token = Some(expand_env(t)?);
         return Ok(());
     }
     if let Some(file) = &inst.token_file {
         let path = expand_tilde(file);
         let val = std::fs::read_to_string(&path)
             .with_context(|| format!("read token_file {}", path.display()))?;
-        inst.token = Some(val.trim().to_string());
+        inst.resolved_token = Some(val.trim().to_string());
         return Ok(());
     }
     Err(eyre!(
@@ -81,9 +78,6 @@ fn expand_tilde(p: &Path) -> PathBuf {
 }
 
 fn validate(cfg: &Config) -> Result<()> {
-    if cfg.instances.is_empty() {
-        return Err(eyre!("config has no instances"));
-    }
     let mut seen = std::collections::HashSet::new();
     for i in &cfg.instances {
         if !seen.insert(&i.alias) {
@@ -94,6 +88,34 @@ fn validate(cfg: &Config) -> Result<()> {
                 "instance {} url must start with ws:// or wss://",
                 i.alias
             ));
+        }
+    }
+    Ok(())
+}
+
+/// Validate a single `InstanceConfig` against an existing list.
+/// Pass `exclude_alias` when editing an existing instance so its old alias is
+/// not treated as a collision.
+pub fn validate_one(
+    inst: &InstanceConfig,
+    others: &[InstanceConfig],
+    exclude_alias: Option<&str>,
+) -> Result<()> {
+    if inst.alias.trim().is_empty() {
+        return Err(eyre!("alias cannot be empty"));
+    }
+    if inst.url.trim().is_empty() {
+        return Err(eyre!("url cannot be empty"));
+    }
+    if !inst.url.starts_with("ws://") && !inst.url.starts_with("wss://") {
+        return Err(eyre!("url must start with ws:// or wss://"));
+    }
+    for o in others {
+        if exclude_alias.map_or(false, |ex| ex == o.alias.as_str()) {
+            continue;
+        }
+        if o.alias == inst.alias {
+            return Err(eyre!("duplicate instance alias: {}", inst.alias));
         }
     }
     Ok(())
@@ -123,6 +145,7 @@ instances:
         let cfg = load(Some(f.path())).unwrap();
         assert_eq!(cfg.instances.len(), 1);
         assert_eq!(cfg.instances[0].token.as_deref(), Some("abc"));
+        assert_eq!(cfg.instances[0].resolved_token.as_deref(), Some("abc"));
     }
 
     #[test]
@@ -137,7 +160,13 @@ instances:
 "#,
         );
         let cfg = load(Some(f.path())).unwrap();
-        assert_eq!(cfg.instances[0].token.as_deref(), Some("secret123"));
+        // raw token field preserved
+        assert_eq!(cfg.instances[0].token.as_deref(), Some("${HA_TEST_TOK}"));
+        // resolved_token holds the expanded value
+        assert_eq!(
+            cfg.instances[0].resolved_token.as_deref(),
+            Some("secret123")
+        );
     }
 
     #[test]
