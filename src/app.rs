@@ -5782,6 +5782,12 @@ impl App {
 
     /// Validate and submit an instance form (called from key handler).
     fn submit_instance_form(&mut self, form: InstanceFormState) {
+        if form.host_buf.value().trim().is_empty() {
+            if let Some(Overlay::InstanceForm(ref mut f)) = self.overlay {
+                f.error = Some("host cannot be empty".into());
+            }
+            return;
+        }
         let alias_val = form.effective_alias();
         let url_val = form.build_url();
         let token_val = form.token_buf.value().to_string();

@@ -102,7 +102,7 @@ pub fn validate_one(
     exclude_alias: Option<&str>,
 ) -> Result<()> {
     if inst.alias.trim().is_empty() {
-        return Err(eyre!("alias cannot be empty"));
+        return Err(eyre!("name cannot be empty"));
     }
     if inst.url.trim().is_empty() {
         return Err(eyre!("url cannot be empty"));
