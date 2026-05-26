@@ -75,3 +75,7 @@ pr-run-mode = "plan"
 install-updater = false
 # Path that installers should place binaries in
 install-path = "CARGO_HOME"
+
+[workspace.metadata.dist.dependencies.apt]
+libdbus-1-dev = { targets = ["aarch64-unknown-linux-gnu", "x86_64-unknown-linux-gnu"] }
+pkg-config = { targets = ["aarch64-unknown-linux-gnu", "x86_64-unknown-linux-gnu"] }

@@ -11,6 +11,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 ### Changed
 
 ### Fixed
+- Declare `libdbus-1-dev` / `pkg-config` as cargo-dist system-dependencies so the release workflow is regenerated correctly and dist's freshness check no longer fails
 
 ### Removed
 
