@@ -1,3 +1,6 @@
 #!/bin/sh
 # Abort commit if rustfmt would make changes.
-cargo fmt -- --check
+cargo fmt -- --check || exit 1
+
+# Abort commit on any clippy warning or error.
+cargo clippy --all-targets -- -D warnings 2>&1 || exit 1

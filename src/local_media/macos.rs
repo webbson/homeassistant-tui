@@ -203,6 +203,7 @@ fn non_empty(s: &str) -> Option<String> {
 mod tests {
     use super::*;
 
+    #[allow(clippy::type_complexity)]
     fn parse_meta(
         raw: &str,
     ) -> (

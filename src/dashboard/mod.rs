@@ -1248,7 +1248,7 @@ impl Card {
                     .split('\n')
                     .map(|l| {
                         let chars = l.chars().count().max(1);
-                        ((chars + inner_w - 1) / inner_w) as u16
+                        chars.div_ceil(inner_w) as u16
                     })
                     .sum();
                 lines.max(1) + 2

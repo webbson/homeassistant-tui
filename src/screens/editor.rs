@@ -541,7 +541,7 @@ pub fn draw(f: &mut Frame, area: Rect, app: &mut App) {
 }
 
 fn draw_attr_list_pick_attr(f: &mut Frame, area: Rect, candidates: &[String], selected: usize) {
-    let height = (candidates.len() + 2).max(5).min(18) as u16;
+    let height = (candidates.len() + 2).clamp(5, 18) as u16;
     let r = modal_rect(area, 52, height);
     f.render_widget(Clear, r);
     let block =
@@ -722,7 +722,7 @@ fn draw_grid_editor_overlay(
             if card_n == 1 { "" } else { "s" }
         );
 
-        let is_inactive = matches!(grid_focus, None)
+        let is_inactive = grid_focus.is_none()
             || matches!(
                 grid_focus,
                 Some(GridFocus::Card { row, col, .. }) | Some(GridFocus::Column { row, col })
@@ -772,8 +772,8 @@ fn compute_card_heights(
     let mut widths: Vec<u16> = Vec::new();
     for row in rows.iter() {
         let n = row.columns.len() as u16;
-        let base = if n > 0 { area_width / n } else { area_width };
-        let rem = if n > 0 { area_width % n } else { 0 };
+        let base = area_width.checked_div(n).unwrap_or(area_width);
+        let rem = area_width.checked_rem(n).unwrap_or(0);
         for (ci, col) in row.columns.iter().enumerate() {
             let w = base + if ci == row.columns.len() - 1 { rem } else { 0 };
             for _ in &col.cards {

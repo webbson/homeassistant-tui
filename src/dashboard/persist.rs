@@ -158,7 +158,7 @@ dashboards:
 
     #[test]
     fn grid_dashboard_roundtrip() {
-        use crate::dashboard::{GridColumn, GridRow, RowHeight};
+        use crate::dashboard::RowHeight;
         let yaml = r#"
 dashboards:
   - name: "Stacked"

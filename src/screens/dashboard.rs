@@ -66,8 +66,8 @@ pub fn draw(
                 let mut widths: Vec<u16> = Vec::new();
                 for row in rows.iter() {
                     let n = row.columns.len() as u16;
-                    let base = if n > 0 { area.width / n } else { area.width };
-                    let rem = if n > 0 { area.width % n } else { 0 };
+                    let base = area.width.checked_div(n).unwrap_or(area.width);
+                    let rem = area.width.checked_rem(n).unwrap_or(0);
                     for (ci, col) in row.columns.iter().enumerate() {
                         let w = base + if ci == row.columns.len() - 1 { rem } else { 0 };
                         for _ in &col.cards {

@@ -171,15 +171,11 @@ impl App {
             KeyCode::Esc => self.should_quit = true,
             KeyCode::Up | KeyCode::Char('k') => self.move_selection(-1),
             KeyCode::Down | KeyCode::Char('j') => self.move_selection(1),
-            KeyCode::PageUp => {
-                if !self.scroll_grid_column(-1) {
-                    self.move_selection(-10);
-                }
+            KeyCode::PageUp if !self.scroll_grid_column(-1) => {
+                self.move_selection(-10);
             }
-            KeyCode::PageDown => {
-                if !self.scroll_grid_column(1) {
-                    self.move_selection(10);
-                }
+            KeyCode::PageDown if !self.scroll_grid_column(1) => {
+                self.move_selection(10);
             }
             KeyCode::Left | KeyCode::Char('h') => self.move_card_selection(-1),
             KeyCode::Right | KeyCode::Char('l') => self.move_card_selection(1),
@@ -426,10 +422,8 @@ impl App {
                         s.error = None;
                     }
                     KeyCode::Up => match &mut s.kind {
-                        InputModalKind::Select { selected, .. } => {
-                            if *selected > 0 {
-                                *selected -= 1;
-                            }
+                        InputModalKind::Select { selected, .. } if *selected > 0 => {
+                            *selected -= 1;
                         }
                         InputModalKind::Number { step, min, .. } => {
                             let step = *step;
@@ -442,10 +436,10 @@ impl App {
                         _ => {}
                     },
                     KeyCode::Down => match &mut s.kind {
-                        InputModalKind::Select { selected, options } => {
-                            if *selected + 1 < options.len() {
-                                *selected += 1;
-                            }
+                        InputModalKind::Select { selected, options }
+                            if *selected + 1 < options.len() =>
+                        {
+                            *selected += 1;
                         }
                         InputModalKind::Number { step, max, .. } => {
                             let step = *step;
@@ -3321,27 +3315,21 @@ impl App {
             }
             KeyCode::Char('h') | KeyCode::Left => {
                 self.navigate_editor_left(dash_idx);
-                return;
             }
             KeyCode::Char('l') | KeyCode::Right => {
                 self.navigate_editor_right(dash_idx);
-                return;
             }
             KeyCode::Char('k') | KeyCode::Up => {
                 self.navigate_editor_up(dash_idx);
-                return;
             }
             KeyCode::Char('j') | KeyCode::Down => {
                 self.navigate_editor_down(dash_idx);
-                return;
             }
             KeyCode::Char('R') => {
                 self.editor_focus_row(dash_idx);
-                return;
             }
             KeyCode::Char('C') => {
                 self.editor_focus_column(dash_idx);
-                return;
             }
             KeyCode::Char('H') => {
                 editor.snapshot(dash);
@@ -5677,7 +5665,7 @@ impl App {
                                 && self
                                     .image_cache
                                     .get(&key)
-                                    .map_or(false, |e| e.protocol.is_some() && e.error.is_none());
+                                    .is_some_and(|e| e.protocol.is_some() && e.error.is_none());
                             if already_valid {
                                 tracing::warn!(entity = %entity, "skipping protocol rebuild — valid art already cached");
                             } else {
@@ -6020,7 +6008,7 @@ impl App {
         for dash in &self.dashboards {
             let before = cards;
             for card in dash.cards_iter() {
-                if card.instance_ref().map_or(false, |a| a == alias) {
+                if card.instance_ref().is_some_and(|a| a == alias) {
                     cards += 1;
                 }
             }
@@ -6089,7 +6077,7 @@ impl App {
     fn perform_remove_instance(&mut self, alias: &str) {
         self.instances.remove_nowait(alias);
         for dash in &mut self.dashboards {
-            dash.retain_cards(|c| c.instance_ref().map_or(true, |a| a != alias));
+            dash.retain_cards(|c| c.instance_ref().is_none_or(|a| a != alias));
         }
         if let Some(cfg) = &mut self.config {
             cfg.instances.retain(|i| i.alias != alias);

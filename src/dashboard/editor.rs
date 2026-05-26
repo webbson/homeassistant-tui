@@ -1154,9 +1154,7 @@ fn clamp_dim(v: u16, delta: i32, headroom: u16) -> u16 {
 }
 
 pub fn card_at(dash: &Dashboard, col: u16, row: u16) -> Option<usize> {
-    if dash.free_grid().is_none() {
-        return None;
-    }
+    dash.free_grid()?;
     // Iterate in reverse so newest (drawn last) wins.
     let cards: Vec<_> = dash.cards_iter().enumerate().collect();
     for (i, c) in cards.into_iter().rev() {

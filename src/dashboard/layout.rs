@@ -88,8 +88,8 @@ pub fn grid_layout(
     let remaining = area
         .height
         .saturating_sub((sum_fixed as f32 * scale) as u16);
-    let auto_share = if n_auto > 0 {
-        (remaining / n_auto).max(MIN_ROW_HEIGHT)
+    let auto_share = if let Some(share) = remaining.checked_div(n_auto) {
+        share.max(MIN_ROW_HEIGHT)
     } else {
         0
     };
@@ -396,7 +396,7 @@ mod tests {
         let mut scrolls = std::collections::HashMap::new();
         scrolls.insert((0usize, 0usize), 8u16);
         let (slots, col_infos) = grid_layout(&rows, area, &scrolls, &card_heights, &[]);
-        assert_eq!(col_infos[0].needs_scrollbar, true);
+        assert!(col_infos[0].needs_scrollbar);
         // First card (flat_idx 0) should not appear in slots.
         assert!(
             !slots.iter().any(|s| s.flat_idx == 0),
