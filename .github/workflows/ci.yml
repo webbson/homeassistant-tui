@@ -23,6 +23,9 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: install system deps (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update -q && sudo apt-get install -y libdbus-1-dev pkg-config
       - name: fmt check
         if: matrix.os == 'ubuntu-latest'
         run: cargo fmt --all -- --check
