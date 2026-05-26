@@ -2,14 +2,24 @@
   "hooks": {
     "PostToolUse": [
       {
-        "matcher": {"tool": "Edit|Write", "file_pattern": ".*\\.rs$"},
-        "command": "cd /Users/tom.stevens/git/homeassistant-tui && cargo fmt && cargo clippy --all-targets --quiet 2>&1 | head -30"
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd /Users/tom.stevens/git/homeassistant-tui && cargo fmt && cargo clippy --all-targets --quiet 2>&1 | head -30"
+          }
+        ]
       }
     ],
     "PreToolUse": [
       {
-        "matcher": {"tool": "Write", "file_pattern": ".*\\.(env|token).*|config/.*\\.yaml$"},
-        "command": "echo 'Blocked: potential token/config file' && exit 1"
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo \"$CLAUDE_FILE_PATHS\" | grep -qE '\\.(env|token)|config/.*\\.yaml$' && echo 'Blocked: potential token/config file' && exit 1 || exit 0"
+          }
+        ]
       }
     ]
   }

@@ -111,7 +111,7 @@ pub fn validate_one(
         return Err(eyre!("url must start with ws:// or wss://"));
     }
     for o in others {
-        if exclude_alias.map_or(false, |ex| ex == o.alias.as_str()) {
+        if exclude_alias == Some(o.alias.as_str()) {
             continue;
         }
         if o.alias == inst.alias {
