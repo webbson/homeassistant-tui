@@ -14,6 +14,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Removed
 
+## [0.7.1] – 2026-05-26
+
+### Changed
+- Pre-commit hook now enforces `cargo clippy --all-targets -- -D warnings` in addition to `cargo fmt --check`, so clippy warnings block commits
+- `.claude/settings.json` hooks updated to current Claude Code schema
+
 ## [0.7.0] – 2026-05-26
 
 ### Added
@@ -196,7 +202,8 @@ First tagged release. The initial milestones (M0–M5 + partial M6).
 - rustls 0.23 requires an explicit `CryptoProvider` — installed at process start so the first TLS handshake doesn't panic.
 - crossterm bumped to 0.29 to match ratatui 0.30.
 
-[Unreleased]: https://github.com/webbson/homeassistant-tui/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/webbson/homeassistant-tui/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/webbson/homeassistant-tui/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/webbson/homeassistant-tui/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/webbson/homeassistant-tui/compare/v0.5.4...v0.6.0
 [0.5.4]: https://github.com/webbson/homeassistant-tui/compare/v0.5.3...v0.5.4
