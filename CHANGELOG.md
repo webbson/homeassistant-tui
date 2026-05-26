@@ -7,6 +7,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [0.7.0] – 2026-05-26
+
+### Added
 - Update checker now re-checks every 6 hours (was once at startup only)
 - Help overlay (`?`) shows the upgrade command (`brew upgrade ha-tui`, `cargo install ha-tui`, or releases URL) when a newer version is available
 - Redesigned `media_player` card with optional cover art, artist/album row, prev/play-pause/next controls, progress bar, and vertical volume bar
@@ -21,6 +31,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - Spotify progress bar duration is now correct — AppleScript `duration of track` returns milliseconds for Spotify (seconds for Music.app); the `/1000` conversion is now applied to Spotify duration only. `player position` and `sound volume` wrapped in `try` blocks so unsupported properties don't abort the whole script.
 - Cover art is now centered in a square sub-rect so it doesn't appear at top-left in landscape card areas
 - Mouse left-click on ⏮/⏵/⏭ controls dispatches the correct media command; click zones are centered on the 7-cell control block rather than splitting the full card width into thirds
+- Local media cover art now reloads on track change — Spotify reuses the same file path so path comparison alone never triggered a reload
+- Progress bar position now interpolates from `media_position_updated_at` so it advances smoothly between HA state pushes
 
 ### Removed
 
@@ -184,7 +196,8 @@ First tagged release. The initial milestones (M0–M5 + partial M6).
 - rustls 0.23 requires an explicit `CryptoProvider` — installed at process start so the first TLS handshake doesn't panic.
 - crossterm bumped to 0.29 to match ratatui 0.30.
 
-[Unreleased]: https://github.com/webbson/homeassistant-tui/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/webbson/homeassistant-tui/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/webbson/homeassistant-tui/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/webbson/homeassistant-tui/compare/v0.5.4...v0.6.0
 [0.5.4]: https://github.com/webbson/homeassistant-tui/compare/v0.5.3...v0.5.4
 [0.5.3]: https://github.com/webbson/homeassistant-tui/compare/v0.5.2...v0.5.3
