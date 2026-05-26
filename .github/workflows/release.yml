@@ -136,6 +136,9 @@ jobs:
           pattern: artifacts-*
           path: target/distrib/
           merge-multiple: true
+      - name: Install system deps (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -q && sudo apt-get install -y libdbus-1-dev pkg-config
       - name: Install dependencies
         run: |
           ${{ matrix.packages_install }}
