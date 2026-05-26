@@ -7,6 +7,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 ## [Unreleased]
 
 ### Added
+- Update checker now re-checks every 6 hours (was once at startup only)
+- Help overlay (`?`) shows the upgrade command (`brew upgrade ha-tui`, `cargo install ha-tui`, or releases URL) when a newer version is available
 
 ### Changed
 

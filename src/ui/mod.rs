@@ -27,7 +27,11 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     draw_overlay(f, area, app);
     draw_footer(f, footer, app);
     if app.show_help {
-        widgets::help::render(f, area);
+        let update = app
+            .update_available
+            .as_deref()
+            .map(|v| (v, app.upgrade_cmd));
+        widgets::help::render(f, area, update);
     }
 }
 

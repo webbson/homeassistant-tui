@@ -48,6 +48,7 @@ pub struct App {
     pub editor: Option<EditorState>,
     pub overlay: Option<Overlay>,
     pub update_available: Option<String>,
+    pub upgrade_cmd: &'static str,
     pub dashboards_path: Option<PathBuf>,
     pub last_terminal_size: (u16, u16),
     pub mouse_drag: Option<MouseDrag>,
@@ -95,6 +96,7 @@ impl App {
             editor: None,
             overlay: None,
             update_available: None,
+            upgrade_cmd: crate::util::update_check::detect_upgrade_cmd(),
             dashboards_path: None,
             last_terminal_size: (0, 0),
             mouse_drag: None,
@@ -6379,13 +6381,18 @@ pub async fn run(
     app.last_terminal_size = (initial.width, initial.height);
     terminal.draw(|f| ui::draw(f, &mut app))?;
 
-    // Best-effort async release check; never blocks startup.
+    // Best-effort async release check; fires immediately then every 6 h.
     let update_tx = tx.clone();
     tokio::spawn(async move {
-        if let Some(version) =
-            crate::util::update_check::check_latest(env!("CARGO_PKG_VERSION")).await
-        {
-            let _ = update_tx.send(AppEvent::UpdateAvailable { version });
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(6 * 3600));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            interval.tick().await;
+            if let Some(version) =
+                crate::util::update_check::check_latest(env!("CARGO_PKG_VERSION")).await
+            {
+                let _ = update_tx.send(AppEvent::UpdateAvailable { version });
+            }
         }
     });
 

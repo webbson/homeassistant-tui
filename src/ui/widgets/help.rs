@@ -5,9 +5,12 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph};
 use ratatui::Frame;
 
-pub fn render(f: &mut Frame, area: Rect) {
+/// `update`: `Some((version, upgrade_cmd))` when a newer release is available.
+pub fn render(f: &mut Frame, area: Rect, update: Option<(&str, &str)>) {
+    let base_h: u16 = 22;
+    let update_h: u16 = if update.is_some() { 4 } else { 0 };
     let w = 64u16.min(area.width.saturating_sub(4));
-    let h = 22u16.min(area.height.saturating_sub(2));
+    let h = (base_h + update_h).min(area.height.saturating_sub(2));
     let x = area.x + area.width.saturating_sub(w) / 2;
     let y = area.y + area.height.saturating_sub(h) / 2;
     let r = Rect {
@@ -18,7 +21,7 @@ pub fn render(f: &mut Frame, area: Rect) {
     };
     f.render_widget(Clear, r);
 
-    let entries: Vec<(&str, &str)> = vec![
+    let mut entries: Vec<(&str, &str)> = vec![
         ("Esc", "quit (or close current overlay/editor)"),
         ("?", "toggle this help"),
         ("E", "entity search modal"),
@@ -40,6 +43,19 @@ pub fn render(f: &mut Frame, area: Rect) {
         ("a / d / u / s", "add / delete / undo / save"),
         ("m", "menu (card or dashboard settings)"),
     ];
+
+    // Owned strings for the update section so they outlive the match.
+    let version_line;
+    let cmd_line;
+    if let Some((ver, cmd)) = update {
+        version_line = format!("↑ v{ver} available");
+        cmd_line = format!("run: {cmd}");
+        entries.push(("", ""));
+        entries.push(("Update", ""));
+        entries.push((&version_line, ""));
+        entries.push((&cmd_line, ""));
+    }
+
     let lines: Vec<Line<'_>> = entries
         .into_iter()
         .map(|(k, v)| {
