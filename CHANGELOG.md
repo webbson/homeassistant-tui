@@ -11,6 +11,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 ### Changed
 
 ### Fixed
+- CI workflow skips `chore(release):` commits so tests don't redundantly run on release pushes
 
 ### Removed
 

@@ -11,6 +11,7 @@ env:
 
 jobs:
   test:
+    if: "!startsWith(github.event.head_commit.message, 'chore(release):')"
     name: test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
