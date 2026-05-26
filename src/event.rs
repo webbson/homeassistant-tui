@@ -2,6 +2,7 @@ use chrono::{DateTime, Utc};
 
 use crate::config::Alias;
 use crate::ha::{ConnStatus, EntityId, EntityState, ForecastDay};
+use crate::local_media::LocalMediaSnapshot;
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -53,5 +54,11 @@ pub enum AppEvent {
     },
     RemoveInstance {
         alias: Alias,
+    },
+    LocalMediaUpdate(LocalMediaSnapshot),
+    /// Cover art bytes loaded from a local file path; decoded into a protocol in the handler.
+    LocalArtLoaded {
+        path: std::path::PathBuf,
+        bytes: Vec<u8>,
     },
 }

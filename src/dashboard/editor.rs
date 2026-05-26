@@ -571,6 +571,10 @@ pub enum MenuAction {
     EditAttrListAttr,
     EditAttrListTemplate,
     EditAttrListLimit,
+    // MediaPlayer / LocalMediaPlayer toggle actions
+    ToggleMediaCover,
+    ToggleMediaVolume,
+    ToggleMediaProgress,
 }
 
 #[derive(Debug, Clone)]
@@ -709,6 +713,44 @@ pub fn card_menu_items(card: &Card) -> Vec<MenuItem> {
         items.push(MenuItem {
             action: MenuAction::ToggleTicker,
             label: "Toggle ticker mode",
+        });
+    }
+    if let CardKind::MediaPlayer {
+        show_cover,
+        show_volume,
+        show_progress,
+        ..
+    }
+    | CardKind::LocalMediaPlayer {
+        show_cover,
+        show_volume,
+        show_progress,
+        ..
+    } = &card.kind
+    {
+        items.push(MenuItem {
+            action: MenuAction::ToggleMediaCover,
+            label: if *show_cover {
+                "Cover art: on"
+            } else {
+                "Cover art: off"
+            },
+        });
+        items.push(MenuItem {
+            action: MenuAction::ToggleMediaVolume,
+            label: if *show_volume {
+                "Volume bar: on"
+            } else {
+                "Volume bar: off"
+            },
+        });
+        items.push(MenuItem {
+            action: MenuAction::ToggleMediaProgress,
+            label: if *show_progress {
+                "Progress bar: on"
+            } else {
+                "Progress bar: off"
+            },
         });
     }
     if matches!(card.kind, CardKind::AttributeList { .. }) {
@@ -851,6 +893,7 @@ pub enum CardTypeStub {
     Clock,
     Statistics,
     MediaPlayer,
+    LocalMediaPlayer,
     Image,
     Weather,
     AttributeList,
@@ -868,6 +911,7 @@ impl CardTypeStub {
         CardTypeStub::Clock,
         CardTypeStub::Statistics,
         CardTypeStub::MediaPlayer,
+        CardTypeStub::LocalMediaPlayer,
         CardTypeStub::Image,
         CardTypeStub::Weather,
         CardTypeStub::AttributeList,
@@ -884,6 +928,7 @@ impl CardTypeStub {
             CardTypeStub::Clock => "clock",
             CardTypeStub::Statistics => "statistics",
             CardTypeStub::MediaPlayer => "media player",
+            CardTypeStub::LocalMediaPlayer => "local media player",
             CardTypeStub::Image => "image / camera",
             CardTypeStub::Weather => "weather",
             CardTypeStub::AttributeList => "attribute list (entity attr array)",
@@ -1083,6 +1128,7 @@ impl EditorState {
             | CardKind::Clock { title, .. }
             | CardKind::Statistics { title, .. }
             | CardKind::MediaPlayer { title, .. }
+            | CardKind::LocalMediaPlayer { title, .. }
             | CardKind::Image { title, .. }
             | CardKind::Weather { title, .. }
             | CardKind::AttributeList { title, .. } => {

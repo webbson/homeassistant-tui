@@ -61,6 +61,7 @@ impl InstanceRuntime {
 pub enum ImageFetchKind {
     Image,
     Camera,
+    MediaPlayerThumbnail,
 }
 
 #[derive(Debug, Clone, Copy)]

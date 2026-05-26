@@ -16,6 +16,7 @@ mod config;
 mod dashboard;
 mod event;
 mod ha;
+mod local_media;
 mod screens;
 mod ui;
 mod util;

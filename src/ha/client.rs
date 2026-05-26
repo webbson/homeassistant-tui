@@ -378,6 +378,14 @@ async fn handle_cmd(
                         crate::ha::rest::fetch_camera_proxy(&base_url, entity_clone.as_str(), &tok)
                             .await
                     }
+                    ImageFetchKind::MediaPlayerThumbnail => {
+                        crate::ha::rest::fetch_media_player_thumbnail(
+                            &base_url,
+                            entity_clone.as_str(),
+                            &tok,
+                        )
+                        .await
+                    }
                 };
                 let _ = tx_clone.send(crate::event::AppEvent::HaImageBytes {
                     instance: alias_clone,

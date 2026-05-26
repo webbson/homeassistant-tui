@@ -68,11 +68,23 @@ pub struct App {
     pub image_picker: Option<ratatui_image::picker::Picker>,
     /// Per-column scroll offsets for grid dashboards: (dash_idx, row_idx, col_idx) → rows scrolled.
     pub column_scroll: HashMap<(usize, usize, usize), u16>,
+    /// Latest snapshot from the local media player task.
+    pub local_media: Option<crate::local_media::LocalMediaSnapshot>,
+    /// Command sender for the local media player task (None when no LocalMediaPlayer card exists).
+    pub local_media_tx: Option<mpsc::UnboundedSender<crate::local_media::LocalCommand>>,
+    /// Decoded cover art for the local media player (keyed by art path to detect changes).
+    pub local_art_cache: Option<(PathBuf, ratatui_image::protocol::StatefulProtocol)>,
+    /// Hit-test map for the current dashboard render: (flat_card_idx, rendered Rect).
+    pub last_card_areas: Vec<(usize, Rect)>,
 }
 
 pub struct ImageCacheEntry {
-    pub protocol: ratatui_image::protocol::StatefulProtocol,
+    /// `None` means a sentinel: fetch was attempted but failed (no retry until track changes).
+    pub protocol: Option<ratatui_image::protocol::StatefulProtocol>,
     pub error: Option<String>,
+    /// `media_content_id` at the time this art was fetched.
+    /// Used to skip re-fetching on HA reconnect when the same track is still playing.
+    pub content_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -110,6 +122,10 @@ impl App {
             image_inflight: HashSet::new(),
             image_picker: None,
             column_scroll: HashMap::new(),
+            local_media: None,
+            local_media_tx: None,
+            local_art_cache: None,
+            last_card_areas: Vec::new(),
         }
     }
 
@@ -3516,6 +3532,7 @@ impl App {
                         | crate::dashboard::CardKind::Clock { title, .. }
                         | crate::dashboard::CardKind::Statistics { title, .. }
                         | crate::dashboard::CardKind::MediaPlayer { title, .. }
+                        | crate::dashboard::CardKind::LocalMediaPlayer { title, .. }
                         | crate::dashboard::CardKind::Image { title, .. }
                         | crate::dashboard::CardKind::Weather { title, .. }
                         | crate::dashboard::CardKind::AttributeList { title, .. } => title.clone(),
@@ -3897,6 +3914,49 @@ impl App {
                     if let Some(card) = dash.card_mut(idx) {
                         if let CardKind::Gauge { needle, .. } = &mut card.kind {
                             *needle = !*needle;
+                            if let Some(ed) = self.editor.as_mut() {
+                                ed.dirty = true;
+                            }
+                        }
+                    }
+                }
+            }
+            (A::ToggleMediaCover, C::Card(idx))
+            | (A::ToggleMediaVolume, C::Card(idx))
+            | (A::ToggleMediaProgress, C::Card(idx)) => {
+                if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                    if let Some(ed) = self.editor.as_mut() {
+                        ed.snapshot(dash);
+                    }
+                    if let Some(card) = dash.card_mut(idx) {
+                        let toggled = match (&mut card.kind, &action) {
+                            (
+                                CardKind::MediaPlayer { show_cover, .. }
+                                | CardKind::LocalMediaPlayer { show_cover, .. },
+                                A::ToggleMediaCover,
+                            ) => {
+                                *show_cover = !*show_cover;
+                                true
+                            }
+                            (
+                                CardKind::MediaPlayer { show_volume, .. }
+                                | CardKind::LocalMediaPlayer { show_volume, .. },
+                                A::ToggleMediaVolume,
+                            ) => {
+                                *show_volume = !*show_volume;
+                                true
+                            }
+                            (
+                                CardKind::MediaPlayer { show_progress, .. }
+                                | CardKind::LocalMediaPlayer { show_progress, .. },
+                                A::ToggleMediaProgress,
+                            ) => {
+                                *show_progress = !*show_progress;
+                                true
+                            }
+                            _ => false,
+                        };
+                        if toggled {
                             if let Some(ed) = self.editor.as_mut() {
                                 ed.dirty = true;
                             }
@@ -4418,8 +4478,8 @@ impl App {
                 );
                 return;
             }
-            CardKind::Clock { .. } => {
-                self.last_error = Some("clock cards have no entity to change".into());
+            CardKind::Clock { .. } | CardKind::LocalMediaPlayer { .. } => {
+                self.last_error = Some("this card type has no entity to change".into());
                 return;
             }
             CardKind::Statistics { instance, .. } => {
@@ -4497,6 +4557,28 @@ impl App {
             editor.mode = EditorMode::ClockAddTitle {
                 title_buffer: TInput::default(),
             };
+            return;
+        }
+        // LocalMediaPlayer has no instance or entity — create immediately.
+        if matches!(kind, CardTypeStub::LocalMediaPlayer) {
+            let dash_idx = editor.dash_idx;
+            let card_kind = CardKind::LocalMediaPlayer {
+                title: None,
+                show_cover: true,
+                show_volume: true,
+                show_progress: true,
+            };
+            editor.mode = EditorMode::Browse;
+            if let Some(dash) = self.dashboards.get_mut(dash_idx) {
+                if let Some(ed) = self.editor.as_mut() {
+                    ed.snapshot(dash);
+                    ed.add_card(dash, card_kind);
+                }
+            }
+            // Spawn local media task if not already running.
+            if self.local_media_tx.is_none() {
+                self.local_media_tx = Some(crate::local_media::spawn(self.tx.clone()));
+            }
             return;
         }
         // Statistics: has instance + entity, then extra metric/window/unit steps.
@@ -4633,7 +4715,14 @@ impl App {
     }
 
     fn handle_mouse(&mut self, m: MouseEvent) {
-        // Only the editor uses mouse for card manipulation in this milestone.
+        // Dashboard view: clicks on media player controls dispatch prev/play/next.
+        if let Screen::Dashboard { idx, .. } = self.screen {
+            if m.kind == MouseEventKind::Down(MouseButton::Left) {
+                self.handle_mouse_dashboard(idx, m.column, m.row);
+            }
+        }
+
+        // Only the editor uses mouse for card manipulation.
         if !matches!(self.screen, Screen::Editor) {
             return;
         }
@@ -4679,7 +4768,121 @@ impl App {
         }
     }
 
-    /// Returns `true` if the key was consumed by a MediaPlayer card action.
+    /// Handle left-click in dashboard view: fires prev/play/next when the click lands on
+    /// the controls row of a media player card; ignores all other clicks.
+    fn handle_mouse_dashboard(&mut self, dash_idx: usize, mx: u16, my: u16) {
+        use ratatui::layout::Position;
+        let pos = Position { x: mx, y: my };
+
+        let Some(&(flat_idx, card_rect)) =
+            self.last_card_areas.iter().find(|(_, r)| r.contains(pos))
+        else {
+            return;
+        };
+
+        let Some(card) = self.dashboards.get(dash_idx).and_then(|d| d.card(flat_idx)) else {
+            return;
+        };
+
+        enum MediaKind {
+            Ha(String, String),
+            Local,
+        }
+        let (media_kind, show_cover, show_volume, show_progress) = match &card.kind {
+            CardKind::MediaPlayer {
+                instance,
+                entity,
+                show_cover,
+                show_volume,
+                show_progress,
+                ..
+            } => (
+                MediaKind::Ha(instance.clone(), entity.clone()),
+                *show_cover,
+                *show_volume,
+                *show_progress,
+            ),
+            CardKind::LocalMediaPlayer {
+                show_cover,
+                show_volume,
+                show_progress,
+                ..
+            } => (MediaKind::Local, *show_cover, *show_volume, *show_progress),
+            _ => return,
+        };
+
+        let has_cover = match &media_kind {
+            MediaKind::Ha(inst, ent) => self.image_cache.contains_key(&(inst.clone(), ent.clone())),
+            MediaKind::Local => self.local_art_cache.is_some(),
+        };
+
+        // Mirror the layout math from card_media_player::render_content
+        let inner_x = card_rect.x + 1;
+        let inner_y = card_rect.y + 1;
+        let inner_width = card_rect.width.saturating_sub(2);
+        let inner_height = card_rect.height.saturating_sub(2);
+        let content_width = if show_volume && inner_width > 4 {
+            inner_width - 1
+        } else {
+            inner_width
+        };
+        let info_rows: u16 = 3 + if show_progress { 1 } else { 0 };
+        let cover_rows: u16 = if show_cover && has_cover {
+            inner_height.saturating_sub(info_rows)
+        } else {
+            0
+        };
+        let controls_y = inner_y + cover_rows + 2; // +2 = title row + artist row
+
+        if my != controls_y {
+            return;
+        }
+
+        // Controls text "⏮  ⏵  ⏭" is 7 cells, centered in content_width.
+        // Glyph offsets within text: ⏮=0, ⏵/⏸=3, ⏭=6.
+        // Split at midpoints between glyphs (offsets 2 and 5) so each button
+        // gets a generous hit zone regardless of card width.
+        let rel_x = mx.saturating_sub(inner_x);
+        let ctrl_w: u16 = 7;
+        let ctrl_start = content_width.saturating_sub(ctrl_w) / 2;
+        let b1 = ctrl_start + 2; // boundary between prev and play zones
+        let b2 = ctrl_start + 5; // boundary between play and next zones
+        let service = if rel_x < b1 {
+            "media_previous_track"
+        } else if rel_x >= b2 {
+            "media_next_track"
+        } else {
+            "media_play_pause"
+        };
+
+        match media_kind {
+            MediaKind::Local => {
+                use crate::local_media::LocalCommand;
+                let cmd = match service {
+                    "media_play_pause" => LocalCommand::PlayPause,
+                    "media_next_track" => LocalCommand::Next,
+                    "media_previous_track" => LocalCommand::Prev,
+                    _ => return,
+                };
+                if let Some(tx) = &self.local_media_tx {
+                    let _ = tx.send(cmd);
+                }
+            }
+            MediaKind::Ha(instance, entity) => {
+                let cmd = crate::ha::HaCommand::CallService {
+                    domain: "media_player".to_string(),
+                    service: service.to_string(),
+                    service_data: serde_json::Value::Null,
+                    target: serde_json::json!({ "entity_id": entity }),
+                };
+                if !self.instances.send(&instance, cmd) {
+                    self.last_error = Some(format!("{instance}: no command channel"));
+                }
+            }
+        }
+    }
+
+    /// Returns `true` if the key was consumed by a MediaPlayer or LocalMediaPlayer card action.
     fn handle_key_media_player(&mut self, ch: char) -> bool {
         let Screen::Dashboard {
             idx, selected_card, ..
@@ -4691,6 +4894,28 @@ impl App {
         let Some(card) = self.dashboards.get(idx).and_then(|d| d.card(selected_card)) else {
             return false;
         };
+
+        // Route local media player keys to the local task
+        if matches!(card.kind, CardKind::LocalMediaPlayer { .. }) {
+            use crate::local_media::LocalCommand;
+            let Some(service) = crate::actions::media_service_for_key(ch) else {
+                return false;
+            };
+            let local_cmd = match service {
+                "media_play_pause" => LocalCommand::PlayPause,
+                "media_next_track" => LocalCommand::Next,
+                "media_previous_track" => LocalCommand::Prev,
+                "volume_up" => LocalCommand::VolumeUp,
+                "volume_down" => LocalCommand::VolumeDown,
+                "volume_mute" => LocalCommand::Mute,
+                _ => return false,
+            };
+            if let Some(tx) = &self.local_media_tx {
+                let _ = tx.send(local_cmd);
+            }
+            return true;
+        }
+
         let CardKind::MediaPlayer {
             instance, entity, ..
         } = &card.kind
@@ -5333,13 +5558,66 @@ impl App {
                 self.fetch_weather_forecasts(&instance);
             }
             AppEvent::HaEntityUpdated { instance, state } => {
+                let is_media_player = state.entity_id.starts_with("media_player.");
+
+                // For media players, detect track changes via media_title (stable per track).
+                // media_content_id is NOT used because many integrations (Sonos, etc.) embed
+                // session tokens or mutable parameters that change on every position update.
+                // On track change: evict the cached art so the render-time trigger picks up
+                // fresh art on the next tick. Never call refresh_image_card_if_needed for
+                // media players — that path unconditionally dispatches a fetch.
+                let old_media_title = is_media_player
+                    .then(|| {
+                        self.instances
+                            .runtimes
+                            .get(&instance)
+                            .and_then(|rt| rt.states.get(&state.entity_id))
+                            .and_then(|s| s.attributes.get("media_title"))
+                            .and_then(|v| v.as_str())
+                            .map(str::to_string)
+                    })
+                    .flatten();
+                let new_media_title = is_media_player
+                    .then(|| {
+                        state
+                            .attributes
+                            .get("media_title")
+                            .and_then(|v| v.as_str())
+                            .map(str::to_string)
+                    })
+                    .flatten();
+
                 if let Some(rt) = self.instances.get_mut(&instance) {
                     rt.states.insert(state.entity_id.clone(), state.clone());
                     rt.last_update = Some(std::time::Instant::now());
                 }
                 self.record_history(&instance, &state.entity_id, &state.state);
-                // Re-fetch image/camera cards when their entity state changes.
-                self.refresh_image_card_if_needed(&instance, &state.entity_id.clone());
+
+                if is_media_player {
+                    // Only evict when both old and new titles are Some and differ.
+                    // If new_media_title is None (transient HA push or position-only update),
+                    // keep the cached art — evicting on None causes repeated fetch/protocol
+                    // rebuild cycles that manifest as cover art flickering.
+                    let track_changed = matches!(
+                        (&old_media_title, &new_media_title),
+                        (Some(old), Some(new)) if old != new
+                    );
+                    if track_changed {
+                        tracing::debug!(
+                            entity = %state.entity_id,
+                            old = ?old_media_title,
+                            new = ?new_media_title,
+                            "media player track changed — evicting cover art cache"
+                        );
+                        let key = (instance.clone(), state.entity_id.clone());
+                        self.image_cache.remove(&key);
+                        self.image_inflight.remove(&key);
+                    }
+                    // Never call refresh_image_card_if_needed for media players here —
+                    // that would re-dispatch fetches on every rapid position/volume update.
+                } else {
+                    self.refresh_image_card_if_needed(&instance, &state.entity_id);
+                }
             }
             AppEvent::HaServiceError { instance, error } => {
                 self.last_error = Some(format!("{instance}: {error}"));
@@ -5372,27 +5650,68 @@ impl App {
                             "image fetch succeeded"
                         );
                         if let Some(picker) = &mut self.image_picker {
-                            match image::load_from_memory(&bytes) {
-                                Ok(img) => {
-                                    let (w, h) = (img.width(), img.height());
-                                    let protocol = picker.new_resize_protocol(img);
-                                    tracing::info!(
-                                        entity = %entity,
-                                        width = w,
-                                        height = h,
-                                        "image decoded + protocol built"
-                                    );
-                                    self.image_cache.insert(
-                                        key,
-                                        ImageCacheEntry {
-                                            protocol,
-                                            error: None,
-                                        },
-                                    );
-                                }
-                                Err(e) => {
-                                    tracing::warn!(entity = %entity, error = %e, "image decode failed");
-                                    // Keep any existing cached frame; only log the error.
+                            // Store media_title as the track stamp — it is stable across
+                            // state updates (unlike media_content_id which many integrations
+                            // embed with mutable session tokens).
+                            let content_id = entity
+                                .starts_with("media_player.")
+                                .then(|| {
+                                    self.instances
+                                        .runtimes
+                                        .values()
+                                        .find_map(|rt| rt.states.get(&entity))
+                                        .and_then(|s| s.attributes.get("media_title"))
+                                        .and_then(|v| v.as_str())
+                                        .map(str::to_string)
+                                })
+                                .flatten();
+                            // For media players: never replace a valid protocol while the
+                            // same track is playing. Creating a new StatefulProtocol marks it
+                            // as "needs transmission" → full image retransmit on next draw →
+                            // visible flicker. Track changes are handled by explicit cache
+                            // eviction in HaEntityUpdated (on media_title change), so any
+                            // HaImageBytes arriving while a valid protocol exists is a
+                            // redundant fetch — skip it.
+                            // For Image/Camera entities: always update (no track concept).
+                            let already_valid = entity.starts_with("media_player.")
+                                && self
+                                    .image_cache
+                                    .get(&key)
+                                    .map_or(false, |e| e.protocol.is_some() && e.error.is_none());
+                            if already_valid {
+                                tracing::warn!(entity = %entity, "skipping protocol rebuild — valid art already cached");
+                            } else {
+                                match image::load_from_memory(&bytes) {
+                                    Ok(img) => {
+                                        let (w, h) = (img.width(), img.height());
+                                        let protocol = picker.new_resize_protocol(img);
+                                        tracing::warn!(
+                                            entity = %entity,
+                                            width = w,
+                                            height = h,
+                                            "image decoded + protocol built"
+                                        );
+                                        self.image_cache.insert(
+                                            key,
+                                            ImageCacheEntry {
+                                                protocol: Some(protocol),
+                                                error: None,
+                                                content_id,
+                                            },
+                                        );
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!(entity = %entity, error = %e, "image decode failed");
+                                        // Insert sentinel so render-time trigger stops retrying.
+                                        self.image_cache.insert(
+                                            key,
+                                            ImageCacheEntry {
+                                                protocol: None,
+                                                error: Some(e.to_string()),
+                                                content_id: None,
+                                            },
+                                        );
+                                    }
                                 }
                             }
                         } else {
@@ -5402,6 +5721,15 @@ impl App {
                     Err(e) => {
                         tracing::warn!(entity = %entity, error = %e, "image fetch failed");
                         self.last_error = Some(format!("image fetch {entity}: {e}"));
+                        // Insert sentinel so the render-time trigger stops retrying on every tick.
+                        self.image_cache.insert(
+                            key,
+                            ImageCacheEntry {
+                                protocol: None,
+                                error: Some(e.to_string()),
+                                content_id: None,
+                            },
+                        );
                     }
                 }
             }
@@ -5431,28 +5759,93 @@ impl App {
             AppEvent::RemoveInstance { alias } => {
                 self.perform_remove_instance(&alias);
             }
+            AppEvent::LocalMediaUpdate(snapshot) => {
+                let old_art = self.local_media.as_ref().and_then(|s| s.art_path.clone());
+                let old_title = self.local_media.as_ref().and_then(|s| s.title.clone());
+                let new_art = snapshot.art_path.clone();
+                let new_title = snapshot.title.clone();
+                self.local_media = Some(snapshot);
+                if new_art != old_art || new_title != old_title {
+                    match new_art {
+                        Some(path) => {
+                            let path2 = path.clone();
+                            let tx2 = self.tx.clone();
+                            tokio::spawn(async move {
+                                if let Ok(bytes) = tokio::fs::read(&path2).await {
+                                    let _ = tx2.send(AppEvent::LocalArtLoaded { path, bytes });
+                                }
+                            });
+                        }
+                        None => {
+                            self.local_art_cache = None;
+                        }
+                    }
+                }
+            }
+            AppEvent::LocalArtLoaded { path, bytes } => {
+                if let Some(picker) = &self.image_picker {
+                    if let Ok(img) = image::load_from_memory(&bytes) {
+                        let protocol = picker.new_resize_protocol(img);
+                        self.local_art_cache = Some((path, protocol));
+                    }
+                }
+            }
         }
     }
 
-    /// Trigger an image fetch for all Image cards on dashboards matching `instance`,
-    /// parallel to `fetch_sparkline_history`.
+    /// Trigger an image fetch for all Image and MediaPlayer (show_cover) cards matching `instance`.
     fn fetch_image_cards(&mut self, instance: &Alias) {
         let mut entities: Vec<String> = Vec::new();
         for dash in &self.dashboards {
             for card in dash.cards_iter() {
-                if let crate::dashboard::CardKind::Image {
-                    instance: card_inst,
-                    source,
-                    ..
-                } = &card.kind
-                {
-                    if card_inst == instance {
+                match &card.kind {
+                    crate::dashboard::CardKind::Image {
+                        instance: card_inst,
+                        source,
+                        ..
+                    } if card_inst == instance => {
                         let entity = match source {
                             crate::dashboard::ImageSource::ImageEntity { entity } => entity.clone(),
                             crate::dashboard::ImageSource::Camera { entity } => entity.clone(),
                         };
                         entities.push(entity);
                     }
+                    crate::dashboard::CardKind::MediaPlayer {
+                        instance: card_inst,
+                        entity,
+                        show_cover: true,
+                        ..
+                    } if card_inst == instance => {
+                        let key = (instance.clone(), entity.clone());
+                        // Skip if we already have valid art and the track hasn't provably changed.
+                        // Many integrations (Sonos, etc.) use media_content_id with mutable
+                        // tokens — only treat as "new track" when both sides are present and differ.
+                        // (Same "provably changed" rule as the HaImageBytes guard.)
+                        let skip = if let Some(cached) = self.image_cache.get(&key) {
+                            if cached.protocol.is_some() && cached.error.is_none() {
+                                let current_title = self
+                                    .instances
+                                    .runtimes
+                                    .get(instance)
+                                    .and_then(|rt| rt.states.get(entity))
+                                    .and_then(|s| s.attributes.get("media_title"))
+                                    .and_then(|v| v.as_str())
+                                    .map(str::to_string);
+                                let cached_title = cached.content_id.clone(); // stores media_title at fetch time
+                                !(cached_title.is_some()
+                                    && current_title.is_some()
+                                    && cached_title != current_title)
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        };
+                        if !skip {
+                            entities.push(entity.clone());
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
@@ -5522,20 +5915,16 @@ impl App {
         }
     }
 
-    /// Look up whether an entity is an image or camera source across all dashboards.
+    /// Look up the fetch kind for an entity across all dashboards (Image, Camera, MediaPlayer).
     fn image_fetch_kind_for(&self, instance: &Alias, entity: &EntityId) -> Option<ImageFetchKind> {
         for dash in &self.dashboards {
             for card in dash.cards_iter() {
-                if let crate::dashboard::CardKind::Image {
-                    instance: card_inst,
-                    source,
-                    ..
-                } = &card.kind
-                {
-                    if card_inst != instance {
-                        continue;
-                    }
-                    match source {
+                match &card.kind {
+                    crate::dashboard::CardKind::Image {
+                        instance: card_inst,
+                        source,
+                        ..
+                    } if card_inst == instance => match source {
                         crate::dashboard::ImageSource::ImageEntity { entity: e } if e == entity => {
                             return Some(ImageFetchKind::Image);
                         }
@@ -5543,7 +5932,16 @@ impl App {
                             return Some(ImageFetchKind::Camera);
                         }
                         _ => {}
+                    },
+                    crate::dashboard::CardKind::MediaPlayer {
+                        instance: card_inst,
+                        entity: card_entity,
+                        show_cover,
+                        ..
+                    } if card_inst == instance && card_entity == entity && *show_cover => {
+                        return Some(ImageFetchKind::MediaPlayerThumbnail);
                     }
+                    _ => {}
                 }
             }
         }
@@ -5551,6 +5949,7 @@ impl App {
     }
 
     /// Re-fetch an image card if the updated entity is an image/camera source.
+    /// Not called for media_player entities — those use cache eviction on track change instead.
     fn refresh_image_card_if_needed(&mut self, instance: &Alias, entity: &EntityId) {
         if self.image_fetch_kind_for(instance, entity).is_some() {
             self.send_image_fetch(instance, entity);
@@ -6103,7 +6502,13 @@ fn build_typed_card(
             instance,
             entity,
             title,
+            show_cover: true,
+            show_volume: true,
+            show_progress: true,
         },
+        CardTypeStub::LocalMediaPlayer => {
+            unreachable!("LocalMediaPlayer is built directly, not via build_typed_card")
+        }
     }
 }
 
@@ -6159,11 +6564,15 @@ fn build_card_kind(kind: CardTypeStub, buf: &str, default_alias: Option<&str>) -
             instance,
             entity,
             title: None,
+            show_cover: true,
+            show_volume: true,
+            show_progress: true,
         },
         CardTypeStub::Text
         | CardTypeStub::EntityList
         | CardTypeStub::FilteredEntityList
         | CardTypeStub::Clock
+        | CardTypeStub::LocalMediaPlayer
         | CardTypeStub::Statistics
         | CardTypeStub::Image
         | CardTypeStub::Weather
@@ -6376,6 +6785,15 @@ pub async fn run(
     spawn_camera_timers(&app.dashboards, &tx);
     // Spawn 30-minute refresh timer for Weather cards.
     spawn_weather_timer(&app.dashboards, &tx);
+    // Spawn local media player polling task if any dashboard has a LocalMediaPlayer card.
+    if app
+        .dashboards
+        .iter()
+        .flat_map(|d| d.cards_iter())
+        .any(|c| matches!(c.kind, CardKind::LocalMediaPlayer { .. }))
+    {
+        app.local_media_tx = Some(crate::local_media::spawn(tx.clone()));
+    }
 
     let initial = terminal.size().unwrap_or_default();
     app.last_terminal_size = (initial.width, initial.height);
@@ -6398,15 +6816,21 @@ pub async fn run(
 
     let result: Result<()> = async {
         loop {
-            tokio::select! {
-                Some(Ok(ev)) = term_events.next() => app.handle_term(ev),
-                Some(ev) = rx.recv()              => app.handle_app(ev),
-                _ = tick.tick()                   => { app.ticker_offset = app.ticker_offset.wrapping_add(1); }
-            }
+            // Draw immediately for terminal events (keyboard/mouse) and tick so input
+            // feels responsive and animations advance. App events (HA state pushes, image
+            // bytes, local media updates) skip the immediate draw and are rendered on the
+            // next tick instead.
+            let should_draw = tokio::select! {
+                Some(Ok(ev)) = term_events.next() => { app.handle_term(ev); true }
+                Some(ev) = rx.recv()              => { app.handle_app(ev); false }
+                _ = tick.tick()                   => { app.ticker_offset = app.ticker_offset.wrapping_add(1); true }
+            };
             if app.should_quit {
                 break;
             }
-            terminal.draw(|f| ui::draw(f, &mut app))?;
+            if should_draw {
+                terminal.draw(|f| ui::draw(f, &mut app))?;
+            }
         }
         Ok(())
     }

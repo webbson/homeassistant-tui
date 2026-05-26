@@ -54,6 +54,18 @@ pub async fn fetch_camera_proxy(
     fetch(url, token).await
 }
 
+pub async fn fetch_media_player_thumbnail(
+    base_url: &str,
+    entity_id: &str,
+    token: &str,
+) -> Result<Vec<u8>, String> {
+    let base = https_base_from_ws(base_url)?;
+    let url = base
+        .join(&format!("api/media_player_proxy/{entity_id}"))
+        .map_err(|e| e.to_string())?;
+    fetch(url, token).await
+}
+
 async fn fetch(url: Url, token: &str) -> Result<Vec<u8>, String> {
     let resp = client()
         .get(url)

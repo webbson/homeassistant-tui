@@ -784,6 +784,10 @@ fn default_true() -> bool {
     true
 }
 
+fn is_true(b: &bool) -> bool {
+    *b
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Severity {
     pub green: f64,
@@ -985,6 +989,22 @@ pub enum CardKind {
         entity: EntityId,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         title: Option<String>,
+        #[serde(default = "default_true", skip_serializing_if = "is_true")]
+        show_cover: bool,
+        #[serde(default = "default_true", skip_serializing_if = "is_true")]
+        show_volume: bool,
+        #[serde(default = "default_true", skip_serializing_if = "is_true")]
+        show_progress: bool,
+    },
+    LocalMediaPlayer {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+        #[serde(default = "default_true", skip_serializing_if = "is_true")]
+        show_cover: bool,
+        #[serde(default = "default_true", skip_serializing_if = "is_true")]
+        show_volume: bool,
+        #[serde(default = "default_true", skip_serializing_if = "is_true")]
+        show_progress: bool,
     },
     Image {
         instance: Alias,
@@ -1058,6 +1078,7 @@ impl Card {
             CardKind::MediaPlayer { title, entity, .. } => {
                 title.as_deref().unwrap_or(entity.as_str())
             }
+            CardKind::LocalMediaPlayer { title, .. } => title.as_deref().unwrap_or("Local Media"),
             CardKind::Image { title, source, .. } => title.as_deref().unwrap_or(match source {
                 ImageSource::ImageEntity { entity } | ImageSource::Camera { entity } => {
                     entity.as_str()
@@ -1118,12 +1139,13 @@ impl Card {
             CardKind::Text { .. }
             | CardKind::EntityList { .. }
             | CardKind::FilteredEntityList { .. }
-            | CardKind::Clock { .. } => None,
+            | CardKind::Clock { .. }
+            | CardKind::LocalMediaPlayer { .. } => None,
         }
     }
 
     /// Return a mutable reference to the instance alias for card kinds that
-    /// have one (all except Text and Clock).
+    /// have one (all except Text, Clock, and LocalMediaPlayer).
     pub fn instance_mut(&mut self) -> Option<&mut Alias> {
         match &mut self.kind {
             CardKind::Entity { instance, .. }
@@ -1137,7 +1159,9 @@ impl Card {
             | CardKind::Image { instance, .. }
             | CardKind::Weather { instance, .. }
             | CardKind::AttributeList { instance, .. } => Some(instance),
-            CardKind::Text { .. } | CardKind::Clock { .. } => None,
+            CardKind::Text { .. } | CardKind::Clock { .. } | CardKind::LocalMediaPlayer { .. } => {
+                None
+            }
         }
     }
 
@@ -1155,7 +1179,9 @@ impl Card {
             | CardKind::Image { instance, .. }
             | CardKind::Weather { instance, .. }
             | CardKind::AttributeList { instance, .. } => Some(instance),
-            CardKind::Text { .. } | CardKind::Clock { .. } => None,
+            CardKind::Text { .. } | CardKind::Clock { .. } | CardKind::LocalMediaPlayer { .. } => {
+                None
+            }
         }
     }
 
@@ -1200,7 +1226,14 @@ impl Card {
             CardKind::Gauge { .. } => 5,
             CardKind::Clock { .. } => 3,
             CardKind::Statistics { .. } => 4,
-            CardKind::MediaPlayer { .. } => 6,
+            CardKind::MediaPlayer { show_cover, .. }
+            | CardKind::LocalMediaPlayer { show_cover, .. } => {
+                if *show_cover {
+                    12
+                } else {
+                    6
+                }
+            }
             CardKind::Weather { show_forecast, .. } => {
                 if *show_forecast {
                     12
@@ -1238,7 +1271,9 @@ impl Card {
         match self.size {
             CardSize::Large => base.max(LARGE_MIN),
             CardSize::Small => match &self.kind {
-                CardKind::Weather { .. } | CardKind::MediaPlayer { .. } => 3,
+                CardKind::Weather { .. }
+                | CardKind::MediaPlayer { .. }
+                | CardKind::LocalMediaPlayer { .. } => 3,
                 _ => base,
             },
             CardSize::Normal => base,
@@ -2008,6 +2043,102 @@ pos: { col: 0, row: 0, w: 4, h: 4 }
             !back.contains("overrides:"),
             "empty overrides should be omitted: {back}"
         );
+    }
+
+    #[test]
+    fn media_player_defaults_round_trip() {
+        let yaml = r#"
+type: media_player
+instance: home
+entity: media_player.spotify
+pos: { col: 0, row: 0, w: 4, h: 12 }
+"#;
+        let card: Card = serde_yaml::from_str(yaml).unwrap();
+        let CardKind::MediaPlayer {
+            show_cover,
+            show_volume,
+            show_progress,
+            ..
+        } = &card.kind
+        else {
+            panic!("expected MediaPlayer");
+        };
+        assert!(*show_cover);
+        assert!(*show_volume);
+        assert!(*show_progress);
+        // Defaults should be omitted on serialization.
+        let back = serde_yaml::to_string(&card).unwrap();
+        assert!(
+            !back.contains("show_cover"),
+            "default show_cover should be omitted: {back}"
+        );
+        assert!(
+            !back.contains("show_volume"),
+            "default show_volume should be omitted: {back}"
+        );
+        assert!(
+            !back.contains("show_progress"),
+            "default show_progress should be omitted: {back}"
+        );
+    }
+
+    #[test]
+    fn media_player_explicit_false_round_trips() {
+        let yaml = r#"
+type: media_player
+instance: home
+entity: media_player.spotify
+show_cover: false
+show_volume: false
+show_progress: false
+pos: { col: 0, row: 0, w: 4, h: 6 }
+"#;
+        let card: Card = serde_yaml::from_str(yaml).unwrap();
+        let CardKind::MediaPlayer {
+            show_cover,
+            show_volume,
+            show_progress,
+            ..
+        } = &card.kind
+        else {
+            panic!("expected MediaPlayer");
+        };
+        assert!(!*show_cover);
+        assert!(!*show_volume);
+        assert!(!*show_progress);
+        let back = serde_yaml::to_string(&card).unwrap();
+        assert!(
+            back.contains("show_cover: false"),
+            "show_cover false must survive: {back}"
+        );
+    }
+
+    #[test]
+    fn local_media_player_round_trips() {
+        let yaml = r#"
+type: local_media_player
+pos: { col: 0, row: 0, w: 4, h: 12 }
+"#;
+        let card: Card = serde_yaml::from_str(yaml).unwrap();
+        let CardKind::LocalMediaPlayer {
+            show_cover,
+            show_volume,
+            show_progress,
+            title,
+        } = &card.kind
+        else {
+            panic!("expected LocalMediaPlayer");
+        };
+        assert!(*show_cover);
+        assert!(*show_volume);
+        assert!(*show_progress);
+        assert!(title.is_none());
+        let back = serde_yaml::to_string(&card).unwrap();
+        assert!(
+            back.contains("type: local_media_player"),
+            "type preserved: {back}"
+        );
+        assert!(!back.contains("show_cover"), "defaults omitted: {back}");
     }
 
     #[test]

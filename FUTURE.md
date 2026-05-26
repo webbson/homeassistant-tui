@@ -12,3 +12,4 @@ Might be implemented if possible
 - media card 
 - - local player 
 - - play/pause next/prev status
+- instance manager in app

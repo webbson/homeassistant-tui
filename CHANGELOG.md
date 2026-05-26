@@ -9,10 +9,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 ### Added
 - Update checker now re-checks every 6 hours (was once at startup only)
 - Help overlay (`?`) shows the upgrade command (`brew upgrade ha-tui`, `cargo install ha-tui`, or releases URL) when a newer version is available
+- Redesigned `media_player` card with optional cover art, artist/album row, prev/play-pause/next controls, progress bar, and vertical volume bar
+- New `local_media_player` card type — polls the local machine (macOS Music/Spotify via AppleScript; Linux via MPRIS) with the same rich layout and key controls (space/n/p/+/−)
+- `show_cover`, `show_volume`, `show_progress` toggle fields on both `media_player` and `local_media_player` cards (all default `true`)
 
 ### Changed
 
 ### Fixed
+- Cover art no longer flickers on HA state updates — the image protocol is now reused when the cached `media_content_id` already matches the current track; a new `StatefulProtocol` (which forces a full image retransmit) is only created on genuine track changes. Failed fetches insert a sentinel to stop infinite render-time retries.
+- App events (HA state pushes, image bytes, local media updates) no longer trigger immediate redraws; they are rendered on the next 250 ms tick, preventing iTerm2/sixel protocols from retransmitting cover art on every Spotify position-update event.
+- Spotify progress bar duration is now correct — AppleScript `duration of track` returns milliseconds for Spotify (seconds for Music.app); the `/1000` conversion is now applied to Spotify duration only. `player position` and `sound volume` wrapped in `try` blocks so unsupported properties don't abort the whole script.
+- Cover art is now centered in a square sub-rect so it doesn't appear at top-left in landscape card areas
+- Mouse left-click on ⏮/⏵/⏭ controls dispatches the correct media command; click zones are centered on the 7-cell control block rather than splitting the full card width into thirds
 
 ### Removed
 

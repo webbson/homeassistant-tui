@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use chrono::Utc;
+
 use ratatui::layout::Rect;
 #[allow(unused_imports)]
 use ratatui::style::{Color, Style, Stylize};
@@ -22,6 +24,8 @@ pub fn draw(
     sub_index: Option<usize>,
 ) {
     let in_editor = app.editor.is_some();
+    // Reset hit-test map for this render pass.
+    app.last_card_areas.clear();
     // Clone the dashboard so we can mutably borrow `app` inside `render_card`.
     let Some(dash) = app.dashboards.get(idx).cloned() else {
         f.render_widget(
@@ -44,6 +48,7 @@ pub fn draw(
                 }
                 let sel = i == selected_card;
                 let sub = if sel { sub_index } else { None };
+                app.last_card_areas.push((i, rect));
                 render_card(f, rect, card, app, sel, sub, in_editor);
             }
         }
@@ -146,6 +151,7 @@ pub fn draw(
                 }
                 let sel = slot.flat_idx == selected_card;
                 let sub = if sel { sub_index } else { None };
+                app.last_card_areas.push((slot.flat_idx, slot.rect));
                 render_card(f, slot.rect, card, app, sel, sub, in_editor);
             }
         }
@@ -437,19 +443,138 @@ fn render_card(
             );
         }
         CardKind::MediaPlayer {
-            instance, entity, ..
+            instance,
+            entity,
+            show_cover,
+            show_volume,
+            show_progress,
+            ..
         } => {
             let s = app
                 .instances
                 .runtimes
                 .get(instance)
                 .and_then(|rt| rt.states.get(entity));
+            let attrs = s.map(|st| &st.attributes);
+            let mut view = widgets::card_media_player::MediaPlayerView {
+                player_state: s
+                    .map(|st| st.state.clone())
+                    .unwrap_or_else(|| "unavailable".to_string()),
+                media_title: attrs
+                    .and_then(|a| a.get("media_title"))
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                artist: attrs
+                    .and_then(|a| a.get("media_artist"))
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                album: attrs
+                    .and_then(|a| a.get("media_album_name"))
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                position_secs: {
+                    let raw_pos = attrs
+                        .and_then(|a| a.get("media_position"))
+                        .and_then(|v| v.as_f64());
+                    let state_str = s.map(|st| st.state.as_str()).unwrap_or("");
+                    if state_str == "playing" {
+                        // Extrapolate position forward using media_position_updated_at so the
+                        // progress bar advances smoothly between HA state pushes.
+                        let updated_at = attrs
+                            .and_then(|a| a.get("media_position_updated_at"))
+                            .and_then(|v| v.as_str())
+                            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok());
+                        match (raw_pos, updated_at) {
+                            (Some(pos), Some(ts)) => {
+                                let elapsed = (Utc::now() - ts.with_timezone(&Utc))
+                                    .num_milliseconds()
+                                    .max(0) as f64
+                                    / 1000.0;
+                                Some(pos + elapsed)
+                            }
+                            _ => raw_pos,
+                        }
+                    } else {
+                        raw_pos
+                    }
+                },
+                duration_secs: attrs
+                    .and_then(|a| a.get("media_duration"))
+                    .and_then(|v| v.as_f64()),
+                volume_0_1: attrs
+                    .and_then(|a| a.get("volume_level"))
+                    .and_then(|v| v.as_f64()),
+                is_muted: attrs
+                    .and_then(|a| a.get("is_volume_muted"))
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false),
+                show_cover: *show_cover,
+                show_volume: *show_volume,
+                show_progress: *show_progress,
+            };
+            // Kick off a thumbnail fetch on first render if cover is enabled.
+            let key = (instance.clone(), entity.clone());
+            if *show_cover && !app.image_cache.contains_key(&key) {
+                let inst = instance.clone();
+                let ent = entity.clone();
+                app.send_image_fetch(&inst, &ent);
+            }
+            let cover = if *show_cover {
+                app.image_cache
+                    .get_mut(&key)
+                    .and_then(|e| e.protocol.as_mut())
+            } else {
+                None
+            };
             widgets::card_media_player::render(
                 f,
                 rect,
                 &title,
                 instance,
-                s,
+                &mut view,
+                cover,
+                card.color.as_deref(),
+                card.size,
+                &app.theme,
+                selected,
+            );
+        }
+        CardKind::LocalMediaPlayer {
+            show_cover,
+            show_volume,
+            show_progress,
+            ..
+        } => {
+            let snap = app.local_media.as_ref();
+            let mut view = widgets::card_media_player::MediaPlayerView {
+                player_state: if snap.map(|s| s.is_playing).unwrap_or(false) {
+                    "playing".to_string()
+                } else {
+                    "paused".to_string()
+                },
+                media_title: snap.and_then(|s| s.title.clone()),
+                artist: snap.and_then(|s| s.artist.clone()),
+                album: snap.and_then(|s| s.album.clone()),
+                position_secs: snap.and_then(|s| s.position_secs),
+                duration_secs: snap.and_then(|s| s.duration_secs),
+                volume_0_1: snap.and_then(|s| s.volume_0_1),
+                is_muted: snap.map(|s| s.is_muted).unwrap_or(false),
+                show_cover: *show_cover,
+                show_volume: *show_volume,
+                show_progress: *show_progress,
+            };
+            let cover = if *show_cover {
+                app.local_art_cache.as_mut().map(|(_, p)| p)
+            } else {
+                None
+            };
+            widgets::card_media_player::render(
+                f,
+                rect,
+                &title,
+                "local",
+                &mut view,
+                cover,
                 card.color.as_deref(),
                 card.size,
                 &app.theme,
@@ -477,7 +602,10 @@ fn render_card(
                 .get(&key)
                 .and_then(|e| e.error.as_deref())
                 .map(str::to_string);
-            let protocol = app.image_cache.get_mut(&key).map(|e| &mut e.protocol);
+            let protocol = app
+                .image_cache
+                .get_mut(&key)
+                .and_then(|e| e.protocol.as_mut());
             widgets::card_image::render(
                 f,
                 rect,
