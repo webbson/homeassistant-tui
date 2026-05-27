@@ -278,7 +278,7 @@ impl App {
                             let alias = row.instance.clone();
                             let entity_id = row.state.entity_id.clone();
                             self.overlay = None;
-                            self.dispatch_default(&alias, &entity_id);
+                            self.dispatch_default(&alias, &entity_id, false);
                         }
                     }
                     _ => {}
@@ -4756,8 +4756,9 @@ impl App {
         }
     }
 
-    /// Handle left-click in dashboard view: fires prev/play/next when the click lands on
-    /// the controls row of a media player card; ignores all other clicks.
+    /// Handle left-click in live dashboard: dispatches default actions for Entity, Toggle,
+    /// Gauge, EntityList, and FilteredEntityList cards; routes media player clicks to
+    /// the appropriate region controls.
     fn handle_mouse_dashboard(&mut self, dash_idx: usize, mx: u16, my: u16) {
         use ratatui::layout::Position;
         let pos = Position { x: mx, y: my };
@@ -4772,6 +4773,51 @@ impl App {
             return;
         };
 
+        // Entity / Toggle / Gauge: run default_action on the bound entity.
+        match &card.kind {
+            CardKind::Entity { .. } | CardKind::Toggle { .. } | CardKind::Gauge { .. } => {
+                let Some((alias, entity)) = card.entity_ref() else {
+                    return;
+                };
+                let alias = alias.clone();
+                let entity = entity.clone();
+                self.dispatch_default(&alias, &entity, true);
+                return;
+            }
+            CardKind::EntityList { .. } | CardKind::FilteredEntityList { .. } => {
+                let inner_x = card_rect.x + 1;
+                let inner_y = card_rect.y + 1;
+                let inner_w = card_rect.width.saturating_sub(2) as usize;
+                let inner_h = card_rect.height.saturating_sub(2) as usize;
+                if mx < inner_x
+                    || (mx - inner_x) as usize >= inner_w
+                    || my < inner_y
+                    || (my - inner_y) as usize >= inner_h
+                {
+                    return;
+                }
+                let visible_row = (my - inner_y) as usize;
+                let current_sub = match &self.screen {
+                    Screen::Dashboard { sub_index, .. } => *sub_index,
+                    _ => 0,
+                };
+                // Mirror ratatui List scroll offset: window slides to keep sub_index visible.
+                let offset = current_sub.saturating_sub(inner_h.saturating_sub(1));
+                let Some((alias, entities)) = list_entities(card, &self.instances) else {
+                    return;
+                };
+                if entities.is_empty() {
+                    return;
+                }
+                let entity_idx = (offset + visible_row).min(entities.len() - 1);
+                let entity = entities[entity_idx].clone();
+                self.dispatch_default(&alias, &entity, true);
+                return;
+            }
+            _ => {}
+        }
+
+        // Media player cards: route clicks to region controls.
         enum MediaKind {
             Ha(String, String),
             Local,
@@ -4981,7 +5027,7 @@ impl App {
             let Some(eid) = entities.get(*sub_index).cloned() else {
                 return;
             };
-            self.dispatch_default(&alias, &eid);
+            self.dispatch_default(&alias, &eid, false);
             return;
         }
         let Some((alias, entity)) = card.entity_ref() else {
@@ -4989,10 +5035,10 @@ impl App {
         };
         let alias = alias.clone();
         let entity = entity.clone();
-        self.dispatch_default(&alias, &entity);
+        self.dispatch_default(&alias, &entity, false);
     }
 
-    fn dispatch_default(&mut self, alias: &Alias, entity_id: &EntityId) {
+    fn dispatch_default(&mut self, alias: &Alias, entity_id: &EntityId, details_on_miss: bool) {
         // input_* domains open an interactive modal instead of firing a direct service call.
         let domain = entity_id.split_once('.').map(|(d, _)| d);
         if matches!(
@@ -5049,7 +5095,15 @@ impl App {
                 }
             }
             None => {
-                self.last_error = Some(format!("no default action for {entity_id}"));
+                if details_on_miss {
+                    self.overlay = Some(crate::screens::Overlay::EntityDetails {
+                        alias: alias.clone(),
+                        entity_id: entity_id.clone(),
+                        scroll: 0,
+                    });
+                } else {
+                    self.last_error = Some(format!("no default action for {entity_id}"));
+                }
             }
         }
     }

@@ -7,6 +7,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 ## [Unreleased]
 
 ### Added
+- Live dashboard: left-clicking an Entity, Toggle, or Gauge card now triggers the default action (toggle/press/lock/input overlay), matching the Enter key
+- Live dashboard: left-clicking a row in an EntityList or FilteredEntityList card toggles that specific entity and moves keyboard focus to it
 
 ### Changed
 
