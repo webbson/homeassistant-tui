@@ -15,3 +15,5 @@ config/dashboards.yaml
 .idea/
 .vscode/
 *.bak
+
+docs/superpowers/
