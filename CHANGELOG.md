@@ -7,6 +7,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Fixed
+
+### Removed
+
+## [0.7.4] – 2026-05-27
+
+### Added
 - Live dashboard: left-clicking an Entity, Toggle, or Gauge card now triggers the default action (toggle/press/lock/input overlay), matching the Enter key
 - Live dashboard: left-clicking a row in an EntityList or FilteredEntityList card toggles that specific entity and moves keyboard focus to it
 
@@ -218,7 +228,8 @@ First tagged release. The initial milestones (M0–M5 + partial M6).
 - rustls 0.23 requires an explicit `CryptoProvider` — installed at process start so the first TLS handshake doesn't panic.
 - crossterm bumped to 0.29 to match ratatui 0.30.
 
-[Unreleased]: https://github.com/webbson/homeassistant-tui/compare/v0.7.3...HEAD
+[Unreleased]: https://github.com/webbson/homeassistant-tui/compare/v0.7.4...HEAD
+[0.7.4]: https://github.com/webbson/homeassistant-tui/compare/v0.7.3...v0.7.4
 [0.7.3]: https://github.com/webbson/homeassistant-tui/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/webbson/homeassistant-tui/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/webbson/homeassistant-tui/compare/v0.7.0...v0.7.1

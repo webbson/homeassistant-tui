@@ -1,6 +1,6 @@
 [package]
 name = "ha-tui"
-version = "0.7.3"
+version = "0.7.4"
 edition = "2021"
 description = "Terminal UI for Home Assistant — multi-instance dashboards with mouse + keyboard"
 license = "MIT"
