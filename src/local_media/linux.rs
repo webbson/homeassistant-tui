@@ -1,17 +1,26 @@
+use std::hash::{DefaultHasher, Hash, Hasher};
+use std::path::PathBuf;
+
 use super::{LocalCommand, LocalMediaSnapshot};
 
 pub async fn fetch_snapshot() -> LocalMediaSnapshot {
-    tokio::task::spawn_blocking(fetch_blocking)
+    let (mut snapshot, art_url) = tokio::task::spawn_blocking(fetch_blocking)
         .await
-        .unwrap_or_default()
+        .unwrap_or_default();
+    if let Some(raw) = art_url {
+        snapshot.art_path = resolve_art_url(&raw).await;
+    }
+    snapshot
 }
 
-fn fetch_blocking() -> LocalMediaSnapshot {
+/// Returns the snapshot (art_path = None) and the raw artUrl separately so the
+/// async resolver can run outside spawn_blocking.
+fn fetch_blocking() -> (LocalMediaSnapshot, Option<String>) {
     let Ok(finder) = mpris::PlayerFinder::new() else {
-        return LocalMediaSnapshot::default();
+        return (LocalMediaSnapshot::default(), None);
     };
     let Ok(player) = finder.find_active() else {
-        return LocalMediaSnapshot::default();
+        return (LocalMediaSnapshot::default(), None);
     };
 
     let is_playing = player
@@ -28,11 +37,7 @@ fn fetch_blocking() -> LocalMediaSnapshot {
     let album = meta
         .as_ref()
         .and_then(|m| m.album_name().map(str::to_string));
-
-    let art_path = meta.as_ref().and_then(|m| {
-        let url = m.art_url()?;
-        url.strip_prefix("file://").map(std::path::PathBuf::from)
-    });
+    let art_url = meta.as_ref().and_then(|m| m.art_url().map(str::to_string));
 
     let position_secs = player.get_position().ok().map(|d| d.as_secs_f64());
 
@@ -44,7 +49,7 @@ fn fetch_blocking() -> LocalMediaSnapshot {
 
     let player_name = player.identity().to_string();
 
-    LocalMediaSnapshot {
+    let snapshot = LocalMediaSnapshot {
         player_name,
         title,
         artist,
@@ -54,8 +59,69 @@ fn fetch_blocking() -> LocalMediaSnapshot {
         volume_0_1,
         is_muted: false,
         is_playing,
-        art_path,
+        art_path: None,
+    };
+    (snapshot, art_url)
+}
+
+/// Resolve a raw MPRIS artUrl to a local PathBuf suitable for `tokio::fs::read`.
+///
+/// `file://` paths are percent-decoded via the `url` crate. `http(s)://` URLs
+/// are downloaded to $TMPDIR with a sidecar cache file to skip re-downloads on
+/// repeated polls for the same URL.
+async fn resolve_art_url(raw: &str) -> Option<PathBuf> {
+    use url::Url;
+
+    let parsed = match Url::parse(raw) {
+        Ok(u) => u,
+        Err(_) => {
+            tracing::warn!(raw, "mpris artUrl is not a valid URL, skipping cover art");
+            return None;
+        }
+    };
+
+    match parsed.scheme() {
+        "file" => parsed.to_file_path().ok().or_else(|| {
+            tracing::warn!(raw, "mpris artUrl file:// path could not be decoded");
+            None
+        }),
+        "http" | "https" => download_remote_art(raw).await,
+        scheme => {
+            tracing::warn!(
+                scheme,
+                raw,
+                "mpris artUrl scheme unsupported, skipping cover art"
+            );
+            None
+        }
     }
+}
+
+async fn download_remote_art(url: &str) -> Option<PathBuf> {
+    let mut hasher = DefaultHasher::new();
+    url.hash(&mut hasher);
+    let hash = hasher.finish();
+
+    let path = std::env::temp_dir().join(format!("ha-tui-mpris-art-{hash:016x}.img"));
+    let url_cache = std::env::temp_dir().join(format!("ha-tui-mpris-art-{hash:016x}.url"));
+
+    if let Ok(cached_url) = std::fs::read_to_string(&url_cache) {
+        if cached_url.trim() == url && path.exists() {
+            return Some(path);
+        }
+    }
+
+    let bytes = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        let resp = reqwest::get(url).await.ok()?;
+        resp.bytes().await.ok().map(|b| b.to_vec())
+    })
+    .await
+    .ok()
+    .flatten()?;
+
+    tokio::fs::write(&path, &bytes).await.ok()?;
+    let _ = std::fs::write(&url_cache, url);
+    Some(path)
 }
 
 pub async fn send_command(cmd: LocalCommand) {

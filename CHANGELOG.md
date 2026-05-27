@@ -11,6 +11,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 ### Changed
 
 ### Fixed
+- Local media player: cover art now renders on Linux for streaming players (Spotify, YouTube Music, etc.) whose MPRIS `mpris:artUrl` is an `http(s)://` CDN URL; the image is downloaded to `$TMPDIR` and cached per URL to avoid redundant requests
+- Local media player: `file://` art URLs with percent-encoded characters (spaces, special chars) now decode correctly on Linux
 
 ### Removed
 

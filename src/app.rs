@@ -5813,8 +5813,13 @@ impl App {
                             let path2 = path.clone();
                             let tx2 = self.tx.clone();
                             tokio::spawn(async move {
-                                if let Ok(bytes) = tokio::fs::read(&path2).await {
-                                    let _ = tx2.send(AppEvent::LocalArtLoaded { path, bytes });
+                                match tokio::fs::read(&path2).await {
+                                    Ok(bytes) => {
+                                        let _ = tx2.send(AppEvent::LocalArtLoaded { path, bytes });
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!(path = %path2.display(), error = %e, "local art read failed");
+                                    }
                                 }
                             });
                         }
@@ -5826,9 +5831,14 @@ impl App {
             }
             AppEvent::LocalArtLoaded { path, bytes } => {
                 if let Some(picker) = &self.image_picker {
-                    if let Ok(img) = image::load_from_memory(&bytes) {
-                        let protocol = picker.new_resize_protocol(img);
-                        self.local_art_cache = Some((path, protocol));
+                    match image::load_from_memory(&bytes) {
+                        Ok(img) => {
+                            let protocol = picker.new_resize_protocol(img);
+                            self.local_art_cache = Some((path, protocol));
+                        }
+                        Err(e) => {
+                            tracing::warn!(path = %path.display(), error = %e, "local art decode failed");
+                        }
                     }
                 }
             }
