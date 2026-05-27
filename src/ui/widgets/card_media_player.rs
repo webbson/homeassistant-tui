@@ -51,7 +51,7 @@ pub fn render(
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    if matches!(size, CardSize::Small) {
+    if inner.height < 4 {
         render_small(f, inner, view, color);
         return;
     }
@@ -67,7 +67,7 @@ pub fn render(
     ])
     .areas(inner);
 
-    render_content(f, content_area, view, cover, color, selected);
+    render_content(f, content_area, view, cover, color, selected, size);
 
     if view.show_volume && vol_area.width > 0 {
         render_volume_bar(f, vol_area, view.volume_0_1, view.is_muted, color);
@@ -100,6 +100,7 @@ fn render_content(
     cover: Option<&mut StatefulProtocol>,
     color: ratatui::style::Color,
     selected: bool,
+    size: CardSize,
 ) {
     // Reserve rows for the fixed-height info section
     let info_rows: u16 = 1  // track title
@@ -129,12 +130,23 @@ fn render_content(
 
     if cover_rows > 0 {
         if let Some(protocol) = cover {
-            let art_h = cover_area.height;
-            let art_w = (art_h.saturating_mul(2)).min(cover_area.width).max(1);
+            // size controls what fraction of card width the cover occupies:
+            //   Large = 100%, Normal = 50%, Small = 25%
+            let frac_num: u16 = match size {
+                CardSize::Large => 4,
+                CardSize::Normal => 2,
+                CardSize::Small => 1,
+            };
+            let max_cover_w = (cover_area.width.saturating_mul(frac_num) / 4).max(1);
+            // cap height to aspect ratio so we don't get a tall narrow strip
+            let art_h = (max_cover_w / 2).min(cover_area.height).max(1);
+            let art_w = (art_h.saturating_mul(2)).min(max_cover_w).max(1);
+            // centre within cover_area
             let cx = cover_area.x + (cover_area.width.saturating_sub(art_w)) / 2;
+            let cy = cover_area.y + (cover_area.height.saturating_sub(art_h)) / 2;
             let art_area = Rect {
                 x: cx,
-                y: cover_area.y,
+                y: cy,
                 width: art_w,
                 height: art_h,
             };

@@ -60,6 +60,19 @@ fn main() -> Result<()> {
     let picker = match ratatui_image::picker::Picker::from_query_stdio() {
         Ok(mut p) => {
             use ratatui_image::picker::ProtocolType;
+            // Warp doesn't support Kitty or Sixel; force halfblocks so cover art
+            // renders as Unicode half-block characters instead of escape garbage.
+            if std::env::var("TERM_PROGRAM")
+                .map(|v| v == "WarpTerminal")
+                .unwrap_or(false)
+                && p.protocol_type() != ProtocolType::Halfblocks
+            {
+                tracing::info!(
+                    "TERM_PROGRAM=WarpTerminal detected — overriding {:?} → Halfblocks",
+                    p.protocol_type()
+                );
+                p.set_protocol_type(ProtocolType::Halfblocks);
+            }
             // iTerm2 advertises partial Kitty support but its native protocol
             // renders correctly while Kitty does not. Auto-prefer iterm2 when
             // running inside iTerm2.app.

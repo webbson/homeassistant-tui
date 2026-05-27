@@ -1226,10 +1226,24 @@ impl Card {
             CardKind::Gauge { .. } => 5,
             CardKind::Clock { .. } => 3,
             CardKind::Statistics { .. } => 4,
-            CardKind::MediaPlayer { show_cover, .. }
-            | CardKind::LocalMediaPlayer { show_cover, .. } => {
+            CardKind::MediaPlayer {
+                show_cover,
+                show_progress,
+                ..
+            }
+            | CardKind::LocalMediaPlayer {
+                show_cover,
+                show_progress,
+                ..
+            } => {
                 if *show_cover {
-                    12
+                    let info_rows = 3u16 + *show_progress as u16;
+                    let cover_h = match self.size {
+                        CardSize::Large => (inner_w as u16) / 2,
+                        CardSize::Normal => (inner_w as u16) / 4,
+                        CardSize::Small => (inner_w as u16) / 8,
+                    };
+                    (cover_h.max(1) + info_rows + 2).max(6)
                 } else {
                     6
                 }
@@ -1271,9 +1285,7 @@ impl Card {
         match self.size {
             CardSize::Large => base.max(LARGE_MIN),
             CardSize::Small => match &self.kind {
-                CardKind::Weather { .. }
-                | CardKind::MediaPlayer { .. }
-                | CardKind::LocalMediaPlayer { .. } => 3,
+                CardKind::Weather { .. } => 3,
                 _ => base,
             },
             CardSize::Normal => base,
@@ -1334,6 +1346,34 @@ pos: { col: 0, row: 0, w: 4, h: 2 }
         let back = serde_yaml::to_string(&card).unwrap();
         assert!(!back.contains("size:"));
         assert!(!back.contains("color:"));
+    }
+
+    #[test]
+    fn media_player_preferred_height_varies_by_size() {
+        let make = |size: CardSize| Card {
+            id: CardId(0),
+            kind: CardKind::MediaPlayer {
+                instance: "home".to_string(),
+                entity: "media_player.test".to_string(),
+                title: None,
+                show_cover: true,
+                show_volume: true,
+                show_progress: false,
+            },
+            pos: None,
+            height: None,
+            color: None,
+            size,
+        };
+        let inner_w = 20u16;
+        let h_large = make(CardSize::Large).preferred_height(inner_w + 2, None, false);
+        let h_normal = make(CardSize::Normal).preferred_height(inner_w + 2, None, false);
+        let h_small = make(CardSize::Small).preferred_height(inner_w + 2, None, false);
+        // Large cover is taller than Normal, Normal taller than Small
+        assert!(h_large > h_normal, "large {h_large} > normal {h_normal}");
+        assert!(h_normal > h_small, "normal {h_normal} > small {h_small}");
+        // All three must fit at least info rows + border (floor = 6)
+        assert!(h_small >= 6, "small height {h_small} must be >= 6");
     }
 
     #[test]
