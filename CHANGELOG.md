@@ -11,6 +11,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - Live dashboard: left-clicking a row in an EntityList or FilteredEntityList card toggles that specific entity and moves keyboard focus to it
 
 ### Changed
+- README slimmed to a quickstart; YAML reference moved to `docs/configuration.md` and `docs/dashboard-yaml.md`
 - Media-player card `size` now controls cover-art width: `large` = 100%, `normal` = 50%, `small` = 25% of card width. Cover height is aspect-ratio capped. `small` no longer omits the cover.
 - Warp terminal (`TERM_PROGRAM=WarpTerminal`) is now auto-detected and forces halfblock image rendering so cover art displays correctly instead of showing escape-sequence garbage.
 
